@@ -31,6 +31,14 @@ components:
   edgeagent_data:    { in: internal/edgeagent/data/** }
   edgeagent_model:   { in: internal/edgeagent/model/** }
 
+  # cmdb BC — fourth BC, self-contained. No cmdb_service component on purpose:
+  # CMDB has no endpoint that composes two biz usecases, so it follows the
+  # manager/server/device -> manager/biz/device shape (server -> biz directly).
+  cmdb_server: { in: internal/cmdb/server/** }
+  cmdb_biz:    { in: internal/cmdb/biz/** }
+  cmdb_data:   { in: internal/cmdb/data/** }
+  cmdb_model:  { in: internal/cmdb/model/** }
+
   shared_pkg: { in: internal/pkg/** }
   api:        { in: api/** }
   cmd:        { in: cmd/** }
@@ -72,6 +80,18 @@ deps:
   edgeagent_model:
     mayDependOn: [shared_pkg]
 
+  # ---------------- cmdb BC ----------------
+  # 与 manager 同形。cmdb_server 不得直接依赖 cmdb_data；
+  # cmdb_biz 不得依赖任何其它 BC（跨域协作走消费方声明接口 + cmd 装配注入）。
+  cmdb_server:
+    mayDependOn: [cmdb_biz, cmdb_model, shared_pkg, api]
+  cmdb_biz:
+    mayDependOn: [cmdb_model, shared_pkg]
+  cmdb_data:
+    mayDependOn: [cmdb_biz, cmdb_model, shared_pkg]
+  cmdb_model:
+    mayDependOn: [shared_pkg]
+
   # ---------------- 共享 ----------------
   shared_pkg:
     # 不得依赖任何 BC（业务无关）
@@ -99,6 +119,10 @@ deps:
       - edgeagent_biz
       - edgeagent_data
       - edgeagent_model
+      - cmdb_server
+      - cmdb_biz
+      - cmdb_data
+      - cmdb_model
       - shared_pkg
       - api
 

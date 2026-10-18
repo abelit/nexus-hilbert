@@ -41,6 +41,7 @@ import { Avatar } from './Avatar';
 import { OngridLogo } from './OngridLogo';
 import { Button } from './ui';
 import { useI18n } from '@/i18n/locale';
+import { cmdbNavSection } from '@/cmdb';
 import { useThemeMode } from '@/store/mode';
 import { Sun, Moon, Monitor, Languages } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -412,6 +413,8 @@ export function Sidebar() {
             { key: 'alerts', to: '/alerts', icon: Siren, label: tr('告警', 'Alerts'), badge: incidentOpen },
           ]}
         />
+
+        <CollapsibleSection {...cmdbNavSection(tr)} />
 
         <CollapsibleSection
           storageKey="operations"

@@ -151,6 +151,26 @@ import (
 	mcpclient "github.com/ongridio/ongrid/internal/pkg/mcpclient"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 
+	// CMDB bounded context (fourth BC). Self-contained: the only coupling to
+	// the rest of the manager is the assembly in this file. Keep this block
+	// contiguous so an upstream rebase of the manager imports cannot clobber it.
+	cmdbcibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
+	cmdbcitypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
+	cmdbdiscoverybiz "github.com/ongridio/ongrid/internal/cmdb/biz/discovery"
+	cmdbmetabiz "github.com/ongridio/ongrid/internal/cmdb/biz/meta"
+	cmdbrelationtypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/relationtype"
+	cmdbdata "github.com/ongridio/ongrid/internal/cmdb/data"
+	cmdbcistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
+	cmdbcitypedata "github.com/ongridio/ongrid/internal/cmdb/data/citype/store"
+	cmdbdiscoverydata "github.com/ongridio/ongrid/internal/cmdb/data/discovery/store"
+	cmdbmetastore "github.com/ongridio/ongrid/internal/cmdb/data/meta/store"
+	cmdbrelationtypedata "github.com/ongridio/ongrid/internal/cmdb/data/relationtype/store"
+	cmdbciserver "github.com/ongridio/ongrid/internal/cmdb/server/ci"
+	cmdbcitypeserver "github.com/ongridio/ongrid/internal/cmdb/server/citype"
+	cmdbdiscoveryserver "github.com/ongridio/ongrid/internal/cmdb/server/discovery"
+	cmdbservermeta "github.com/ongridio/ongrid/internal/cmdb/server/meta"
+	cmdbserverrelationtype "github.com/ongridio/ongrid/internal/cmdb/server/relationtype"
+
 	managerbizaudit "github.com/ongridio/ongrid/internal/manager/biz/audit"
 	managerbizflow "github.com/ongridio/ongrid/internal/manager/biz/flow"
 	managerbizreport "github.com/ongridio/ongrid/internal/manager/biz/report"
@@ -317,6 +337,9 @@ func main() {
 		managerreportdata.Migrate,
 		managerflowdata.Migrate,
 		managerpacketcapturedata.Migrate,
+		// CMDB (fourth BC). Single entry point that composes the CMDB
+		// sub-domain migrators and records the schema lineage.
+		cmdbdata.Migrate,
 	); err != nil {
 		log.Error("run migrations", slog.Any("err", err))
 		os.Exit(1)
@@ -1992,6 +2015,43 @@ func main() {
 	}
 	reportHandler := managerserverreport.NewHandler(reportUC)
 
+	// CMDB BC wiring. Manual construction, matching the rest of this file.
+	// CMDB imports no other BC, so there are no cross-BC adapters to inject
+	// yet; when a CMDB subsystem needs manager/edgeagent capability, declare a
+	// narrow interface in internal/cmdb/biz and adapt it here.
+	cmdbMetaHandler := cmdbservermeta.NewHandler(
+		cmdbmetabiz.NewUsecase(cmdbmetastore.NewRepo(db), log),
+	)
+	cmdbRelationTypeHandler := cmdbserverrelationtype.NewHandler(
+		cmdbrelationtypebiz.NewUsecase(cmdbrelationtypedata.NewRepo(db), log),
+	)
+	cmdbCITypeUsecase := cmdbcitypebiz.NewUsecase(cmdbcitypedata.NewRepo(db), log)
+	cmdbCITypeHandler := cmdbcitypeserver.NewHandler(cmdbCITypeUsecase)
+	// The instance side depends on the model side for its attribute
+	// definitions. The port is declared by the CONSUMER
+	// (internal/cmdb/biz/ci.TypeResolver) and adapted here, so neither
+	// business package imports the other and the derivation rule — an
+	// effective attribute set spans the model's whole inheritance chain —
+	// stays in exactly one place.
+	cmdbCIUsecase := cmdbcibiz.NewUsecase(
+		cmdbcistore.NewRepo(db),
+		cmdbcitypebiz.NewCIResolver(cmdbCITypeUsecase),
+		log,
+	)
+	cmdbInstanceHandler := cmdbciserver.NewHandler(cmdbCIUsecase)
+	// The discovery module owns no table either of the others does, and needs
+	// one question answered by each: the model side says which attribute of a
+	// model identifies an instance (so a target's mapping can say which instance
+	// a discovered row is about), and the instance side says where an agent runs
+	// and whether a query expression selects an instance (so a target bound to an
+	// expression reaches the right collectors). Both ports are declared by the
+	// CONSUMER, in internal/cmdb/biz/discovery, and adapted here.
+	cmdbDiscoveryHandler := cmdbdiscoveryserver.NewHandler(
+		cmdbdiscoverybiz.NewUsecase(cmdbdiscoverydata.NewRepo(db)).
+			WithModels(cmdbcitypebiz.NewDiscoveryResolver(cmdbCITypeUsecase)).
+			WithInstances(cmdbcibiz.NewDiscoveryQueries(cmdbCIUsecase)),
+	)
+
 	// Flow orchestration (HLD-016): user-authored workflow DAGs executed
 	// over the existing agent / tool / notify subsystems. Routes mount
 	// even when the LLM runtime is down — tool/notify/condition nodes
@@ -2757,6 +2817,12 @@ func main() {
 			reportHandler.Register(protected)
 			flowHandler.Register(protected)
 			packetCaptureHandler.Register(protected)
+			// CMDB BC. Mounts /v1/cmdb/*, inheriting the bearer auth of this group.
+			cmdbMetaHandler.Register(protected)
+			cmdbRelationTypeHandler.Register(protected)
+			cmdbDiscoveryHandler.Register(protected)
+			cmdbCITypeHandler.Register(protected)
+			cmdbInstanceHandler.Register(protected)
 		})
 	})
 

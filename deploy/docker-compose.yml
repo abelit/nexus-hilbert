@@ -44,6 +44,11 @@ services:
       dockerfile: deploy/Dockerfile.ongrid
       args:
         VERSION: ${VERSION:-dev}
+        # Go module proxy for the image build. Default mirrors the value
+        # in deploy/Dockerfile.ongrid (that file is authoritative) so a
+        # build host that can't reach proxy.golang.org still works; export
+        # GOPROXY to point at a different mirror / corporate Athens.
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}
     image: ongrid:${VERSION:-dev}
     container_name: ongrid
     restart: unless-stopped

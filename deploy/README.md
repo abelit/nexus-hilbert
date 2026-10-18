@@ -25,6 +25,19 @@ Schema is managed via GORM `AutoMigrate` at startup — every `ongrid` boot reco
 
 Images are built with `make docker` (wraps `docker build` with the correct context = repo root).
 
+The builder stage downloads Go modules, so the image build needs to reach a
+module proxy. `GOPROXY` in both Dockerfiles defaults to a mirror-first chain
+(`https://goproxy.cn,https://proxy.golang.org,direct`): Go does **not** fall
+through to the next entry on a dial timeout, so on a host that can't reach
+`proxy.golang.org` the `go mod download` step stalls on a ~60s timeout per
+module and looks hung. Point the build at your own mirror by exporting
+`GOPROXY` (compose forwards it as a build arg) or with `--build-arg`:
+
+```
+GOPROXY=https://<mirror>,direct make compose-up
+docker build --build-arg GOPROXY=https://<mirror>,direct -f deploy/Dockerfile.ongrid .
+```
+
 ## Prometheus
 
 Prometheus is part of the local dev stack by default. It:

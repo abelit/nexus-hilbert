@@ -1,0 +1,296 @@
+import { lazy, Suspense, type ReactNode } from 'react';
+import { Navigate } from 'react-router-dom';
+import { Boxes, Database, GitBranch, Layers3, ListTree, Network, Search, Server, Share2, Star } from 'lucide-react';
+
+import type { IconType } from '@/lib/icon';
+import { useI18n } from '@/i18n/locale';
+
+import './styles.css';
+import { ToastProvider } from './components/Toast';
+
+// The CMDB module's single export surface into the host application.
+//
+// THIS FILE IS THE ISOLATION BOUNDARY. App.tsx, Sidebar.tsx and lib/routes.ts
+// each learn about CMDB through one import here and nothing else, so adding a
+// page, renaming a path or growing a submenu never touches an ongrid file. That
+// is what keeps the CMDB rebaseable onto a newer upstream — the alternative is
+// every new page editing a 750-line sidebar.
+//
+// PAGES ARE LAZY AND SUSPENSE IS OURS. The host mounts `element` verbatim, so the
+// loading fallback for a CMDB page lives in the CMDB module rather than in the
+// application's route table.
+
+const RelationTypesPage = lazy(() => import('./pages/RelationTypes'));
+const ModelsPage = lazy(() => import('./pages/Models'));
+const ModelDetailPage = lazy(() => import('./pages/ModelDetail'));
+const ModelRelationsPage = lazy(() => import('./pages/ModelRelations'));
+const ServiceTreesPage = lazy(() => import('./pages/ServiceTrees'));
+const SubscriptionsPage = lazy(() => import('./pages/Subscriptions'));
+const InstancesPage = lazy(() => import('./pages/Instances'));
+const SearchPage = lazy(() => import('./pages/Search'));
+const HierarchyPage = lazy(() => import('./pages/Hierarchy'));
+const ServiceTreePage = lazy(() => import('./pages/ServiceTree'));
+const DCIMPage = lazy(() => import('./pages/DCIM'));
+const IPAMPage = lazy(() => import('./pages/IPAM'));
+
+/** The first page an operator lands on when they open the module. */
+export const CMDB_HOME = '/cmdb/models';
+
+function PageShell({ children }: { children: ReactNode }) {
+  const { tr } = useI18n();
+  return (
+    <ToastProvider>
+      <Suspense
+        fallback={
+          <div className="flex h-full items-center justify-center text-xs text-text-muted">
+            {tr('加载中…', 'Loading…')}
+          </div>
+        }
+      >
+        {children}
+      </Suspense>
+    </ToastProvider>
+  );
+}
+
+/** One route the host mounts. */
+export type CMDBRoute = { path: string; element: ReactNode };
+
+/**
+ * Every CMDB route, in the shape the host's `<Routes>` takes.
+ *
+ * `element` IS ALREADY WRAPPED — the suspense boundary and the toast provider
+ * travel with it, so a host that maps this array adds no CMDB-specific code.
+ */
+export const cmdbRoutes: CMDBRoute[] = [
+  // Bare `/cmdb` opens the first page rather than a blank module root.
+  { path: '/cmdb', element: <Navigate to={CMDB_HOME} replace /> },
+  {
+    path: '/cmdb/models',
+    element: (
+      <PageShell>
+        <ModelsPage />
+      </PageShell>
+    ),
+  },
+  {
+    // THE DETAIL ROUTE IS A CHILD PATH OF THE LIST, so a model's page keeps the
+    // list one click away and a bookmarked model survives a reload.
+    path: '/cmdb/models/:id',
+    element: (
+      <PageShell>
+        <ModelDetailPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/model-relations',
+    element: (
+      <PageShell>
+        <ModelRelationsPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/relation-types',
+    element: (
+      <PageShell>
+        <RelationTypesPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/service-trees',
+    element: (
+      <PageShell>
+        <ServiceTreesPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/subscriptions',
+    element: (
+      <PageShell>
+        <SubscriptionsPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/instances',
+    element: (
+      <PageShell>
+        <InstancesPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/search',
+    element: (
+      <PageShell>
+        <SearchPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/hierarchy',
+    element: (
+      <PageShell>
+        <HierarchyPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/service-tree',
+    element: (
+      <PageShell>
+        <ServiceTreePage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/dcim',
+    element: (
+      <PageShell>
+        <DCIMPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/ipam',
+    element: (
+      <PageShell>
+        <IPAMPage />
+      </PageShell>
+    ),
+  },
+];
+
+/** One sidebar entry. Structurally identical to the host's own nav item type. */
+export type CMDBNavItem = {
+  key: string;
+  to: string;
+  icon: IconType;
+  label: string;
+};
+
+/**
+ * The module's sidebar section.
+ *
+ * IT IS A FUNCTION OF `tr` RATHER THAN A CONSTANT because the host's sidebar
+ * resolves labels through the live locale; a module-level constant would freeze
+ * the language at import time.
+ */
+export function cmdbNavSection(tr: (zh: string, en: string) => string): {
+  storageKey: string;
+  title: string;
+  defaultOpen: boolean;
+  items: CMDBNavItem[];
+} {
+  return {
+    storageKey: 'cmdb',
+    title: 'CMDB',
+    // COLLAPSED BY DEFAULT, like the other secondary sections: an operator who
+    // works in CMDB every day opens it once and the choice persists.
+    defaultOpen: false,
+    items: [
+      { key: 'models', to: '/cmdb/models', icon: Boxes, label: tr('模型配置', 'Model configuration') },
+      { key: 'model-relations', to: '/cmdb/model-relations', icon: Share2, label: tr('模型关系', 'Model relations') },
+      { key: 'relation-types', to: '/cmdb/relation-types', icon: GitBranch, label: tr('关系类型', 'Relation types') },
+      { key: 'service-trees', to: '/cmdb/service-trees', icon: Layers3, label: tr('服务树定义', 'Tree definitions') },
+      { key: 'subscriptions', to: '/cmdb/subscriptions', icon: Star, label: tr('我的订阅', 'My subscriptions') },
+      { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources') },
+      { key: 'search', to: '/cmdb/search', icon: Search, label: tr('资源搜索', 'Resource search') },
+      { key: 'hierarchy', to: '/cmdb/hierarchy', icon: ListTree, label: tr('资源层级', 'Hierarchy') },
+      { key: 'service-tree', to: '/cmdb/service-tree', icon: Network, label: tr('服务树', 'Service tree') },
+      { key: 'dcim', to: '/cmdb/dcim', icon: Server, label: tr('数据中心', 'Data centre') },
+      { key: 'ipam', to: '/cmdb/ipam', icon: Network, label: tr('IPAM', 'IPAM') },
+    ],
+  };
+}
+
+/** Command-palette entries. Structurally identical to the host's route def. */
+export const cmdbPaletteRoutes: Array<{
+  path: string;
+  zh: string;
+  en: string;
+  keywords?: string[];
+  group: 'CMDB';
+}> = [
+  {
+    path: '/cmdb/models',
+    zh: 'CMDB / 模型配置',
+    en: 'CMDB / Model configuration',
+    keywords: ['cmdb', 'model', 'ci type', 'moxing', 'peizhi'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/model-relations',
+    zh: 'CMDB / 模型关系',
+    en: 'CMDB / Model relations',
+    keywords: ['cmdb', 'model relation', 'guanxi'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/relation-types',
+    zh: 'CMDB / 关系类型',
+    en: 'CMDB / Relation types',
+    keywords: ['cmdb', 'relation', 'type', 'guanxi', 'leixing'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/service-trees',
+    zh: 'CMDB / 服务树定义',
+    en: 'CMDB / Tree definitions',
+    keywords: ['cmdb', 'service tree', 'shu', 'dingyi'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/subscriptions',
+    zh: 'CMDB / 我的订阅',
+    en: 'CMDB / My subscriptions',
+    keywords: ['cmdb', 'subscription', 'columns', 'dingyue'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/instances',
+    zh: 'CMDB / 资源数据',
+    en: 'CMDB / Resources',
+    keywords: ['cmdb', 'instance', 'resource', 'ziyuan', 'shuju'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/search',
+    zh: 'CMDB / 资源搜索',
+    en: 'CMDB / Resource search',
+    keywords: ['cmdb', 'search', 'query', 'sousuo'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/hierarchy',
+    zh: 'CMDB / 资源层级',
+    en: 'CMDB / Hierarchy',
+    keywords: ['cmdb', 'hierarchy', 'tree', 'cengji'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/service-tree',
+    zh: 'CMDB / 服务树',
+    en: 'CMDB / Service tree',
+    keywords: ['cmdb', 'service tree', 'fuwushu'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/dcim',
+    zh: 'CMDB / 数据中心',
+    en: 'CMDB / Data centre',
+    keywords: ['cmdb', 'dcim', 'rack', '机柜', 'shujuzhongxin'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/ipam',
+    zh: 'CMDB / IPAM',
+    en: 'CMDB / IP address space',
+    keywords: ['cmdb', 'ipam', 'subnet', 'address', 'cidr', 'ip', 'wangduan'],
+    group: 'CMDB',
+  },
+];
