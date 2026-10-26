@@ -28,9 +28,9 @@
 | PR6 ADC 发现池 | 代码完成，截图待 PR9 | `4a0d95d` | 池表/执行日志、API、接受事务、`/cmdb/adc` 页面 |
 | PR7 操作历史 | 代码完成，截图待 PR9 | `04b49aa` | 只读 API、6 条路由、`/cmdb/operation-history` 页面 |
 | PR8 拓扑视图 | 代码完成，截图待 PR9 | `abaf2bc` | 两张表、CRUD/排序/预览、图装配、`/cmdb/topology-views` 页面 |
-| PR9 E2E/收尾 | 待开始 | — | DCIM move/rename、ModelDetail 自动发现 tab、响应式截图 |
+| PR9 E2E/收尾 | 完成 | （本次提交） | DCIM move/rename、ModelDetail 自动发现 tab、144 张响应式截图、MySQL/CMDB/nginx 实测 |
 
-下一步：**PR9 E2E 收尾**。PR1–PR8 的代码已完成；真实浏览器截图、DCIM move/rename、ModelDetail 自动发现 tab 与 compose 实跑都在 PR9。
+PR1–PR9 的代码与验证已完成，分支可进入 PR/评审。未推送、未创建 PR；推送前按 AGENTS.md 运行 `gh pr checks`。
 
 ## 已完成阶段的验收证据
 
@@ -61,6 +61,8 @@
 - ADC 关系装配的 peer 查找受 CMDB 最大分页限制（`MaxInstancePageSize`，当前 500）：一个字段匹配超过 500 个实例时，尾部的关系边不会写入；实例本身仍会接受。
 - 清空某个模型的执行日志当前仅要求登录，没有 admin gate；cantor 也没有更细的权限，ACL Epic 再补。
 - 发现池按 `(type_id, unique_value)` 合并，但该索引不是唯一索引（兼容 adoption 重复）；同一对的并发上报仍可能各插一行，下一次上报会合并到先查到的一行。
+- PR9 的 compose 实测用的是本机缓存的 MySQL 8.0.46、`ongrid:dev`、frontier 1.2.6、nginx，以及临时 bookworm 变体构建的 CMDB 镜像；`deploy/docker-compose.yml` 没有原样启动（基础镜像仓库 403）。停 CMDB 时网关错误在本机为 504（Docker 停止容器的 IP 仍被 nginx 缓存），不是计划里写的 502。
+- 响应式截图在 `output/playwright/results/`（git-ignored），共 144 张；没有提交到仓库。
 
 ## PR3 明细（已完成）
 
@@ -91,7 +93,7 @@
 - [x] 组件放 `web/src/cmdb/components/preferences/`：`ModelGroupsPanel.tsx`、`TreeLevelsPanel.tsx`、`SavedSearchesPanel.tsx`。
 - [x] `Preferences.test.tsx`：分组列表/创建/分配/非 admin 禁用、树层级保存、保存搜索创建/非法 JSON。
 - 验收：`npx vitest run src/cmdb/pages/Preferences.test.tsx`（6 tests 通过）、`npm run typecheck` 通过。提交 `cf7509b`。
-- [ ] 真实浏览器截图（PR3 收尾统一做）。
+- [x] 真实浏览器截图：`web/e2e/cmdb-pages-responsive.spec.ts` 覆盖 Preferences、TreeViews、Relations、ServiceTree（390/768/1280/1920、zh/en、light/dark）。
 
 ### PR3c TreeViews 页面
 
@@ -168,7 +170,7 @@
 - [x] 前端 `pages/DiscoveryPool.tsx` + `components/discovery/adc/{PoolTree,CounterStrip,PoolTable,RawDataDrawer,ExecHistoryDialog}.tsx`；路由 `/cmdb/adc`、侧栏、命令面板。
 - [x] 测试：upsert/合并/重置/计数/执行日志、accept 幂等与映射、目标删除 409、路由契约、`cmd/ongrid-cmdb` 装配。
 - 验收：受影响包 `go test -race` 通过；全量 `go test ./...`、`go vet ./...` 通过；CMDB 前端 27 文件/149 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint` 通过。提交 `4a0d95d`。
-- [ ] 真实浏览器截图（PR9 统一做）。
+- [x] 真实浏览器截图：包含在 PR9 的响应式 spec 中。
 - parity 缺口：cantor 的预定义 value mapping 文件不在两个仓库中，接受时写原始值；`aggregation_count` 仅存储不使用（cantor 后端同样未使用）。
 
 ### PR7 操作历史（后端 + 前端）
@@ -198,10 +200,17 @@
 
 ### PR9 E2E 收尾
 
-- [ ] DCIM move/rename；ModelDetail 只读自动发现 tab 链接 Discovery。
-- [ ] `web/e2e/cmdb-pages-responsive.spec.ts`：mock API，真实 Chromium 遍历新页面，390/768/1280/1920、light/dark 截图。
-- [ ] 跑一次真实 compose（MySQL + ongrid + ongrid-cmdb + nginx）；验证 `/api/v1/cmdb/health`、`/cmdb-readyz`、停 CMDB 时 502 而 `/api/v1/version` 200。
-- [ ] 更新本文件、ADR、安装文档；PR 描述写明未运行项。
+- [x] DCIM move/rename：房间/机柜重命名走 `updateDCIMNode`；设备在机柜抽屉里移动（同柜换 U 位或换柜），走 `moveDevice`。
+- [x] ModelDetail 只读“自动发现”tab，链接 `/cmdb/discovery` 与 `/cmdb/adc`。
+- [x] `web/e2e/cmdb-pages-responsive.spec.ts`：mock API，真实 Chromium 遍历 9 个页面；390/768/1280/1920 × zh/en × light/dark；断言 `documentElement` 无横向溢出并留截图。`npx playwright test e2e/cmdb-pages-responsive.spec.ts --project=chromium --no-deps`（E2E_BASE_URL 指向本地 Vite）共 **144 passed**，截图在 `output/playwright/results/`。
+- [x] MySQL + 独立 CMDB + manager + frontier + nginx 实测：
+  - CMDB 直接：`/healthz` 200、`/readyz` 200、`/metrics` 200、未认证 `/api/v1/cmdb/health` 401、带 JWT 200、`/api/v1/cmdb/ci-types` 200。
+  - 经 nginx：`/cmdb-readyz` 200、`/api/v1/cmdb/health` 200、`/api/v1/version` 200。
+  - 停 CMDB：`/api/v1/cmdb/health` 返回网关错误（本机为 **504**，不是 502；Docker 停止的容器 IP 仍被 nginx 缓存，表现为 connect timeout）、`/api/v1/version` 仍 200；重启 CMDB 后 `/cmdb-readyz` 恢复 200。
+- [x] 更新本文件；ADR/安装文档已在 PR1/PR2 覆盖，本轮无需改动。
+- 验收：全量 `go test ./...`、`go vet ./...`；CMDB 前端 29 文件/161 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint`；Playwright 144 tests。
+- [ ] 未运行 `deploy/docker-compose.yml` 原样启动：本机镜像仓库镜像不可达，`golang:1.25-alpine`/distroless 基础镜像拉取 403；改用本地缓存的 bookworm 变体构建 e2e 镜像，提交的 `deploy/Dockerfile.ongrid-cmdb` 未改动。PR 描述必须写明。
+- [ ] 未创建/推送 PR；`gh pr checks` 未运行。
 
 ## 每个 PR 的完成定义
 
