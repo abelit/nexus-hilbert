@@ -206,6 +206,8 @@ export type CMDBNavItem = {
   to: string;
   icon: IconType;
   label: string;
+  /** A localized subgroup heading rendered inside the CMDB section. */
+  group?: string;
 };
 
 /**
@@ -228,17 +230,17 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
     // works in CMDB every day opens it once and the choice persists.
     defaultOpen: false,
     items: [
-      { key: 'models', to: '/cmdb/models', icon: Boxes, label: tr('模型配置', 'Model configuration') },
-      { key: 'relations', to: '/cmdb/relations', icon: Share2, label: tr('关系', 'Relations') },
-      { key: 'relation-types', to: '/cmdb/relation-types', icon: GitBranch, label: tr('关系类型', 'Relation types') },
-      { key: 'service-trees', to: '/cmdb/service-trees', icon: Layers3, label: tr('服务树定义', 'Tree definitions') },
-      { key: 'preferences', to: '/cmdb/preferences', icon: Star, label: tr('偏好设置', 'Preferences') },
-      { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources') },
-      { key: 'search', to: '/cmdb/search', icon: Search, label: tr('资源搜索', 'Resource search') },
-      { key: 'tree-views', to: '/cmdb/tree-views', icon: ListTree, label: tr('资源层级', 'Hierarchy') },
-      { key: 'service-tree', to: '/cmdb/service-tree', icon: Network, label: tr('服务树', 'Service tree') },
-      { key: 'dcim', to: '/cmdb/dcim', icon: Server, label: tr('数据中心', 'Data centre') },
-      { key: 'ipam', to: '/cmdb/ipam', icon: Network, label: tr('IPAM', 'IPAM') },
+      { key: 'models', to: '/cmdb/models', icon: Boxes, label: tr('模型配置', 'Model configuration'), group: tr('模型管理', 'Models') },
+      { key: 'relations', to: '/cmdb/relations', icon: Share2, label: tr('关系', 'Relations'), group: tr('模型管理', 'Models') },
+      { key: 'relation-types', to: '/cmdb/relation-types', icon: GitBranch, label: tr('关系类型', 'Relation types'), group: tr('模型管理', 'Models') },
+      { key: 'service-trees', to: '/cmdb/service-trees', icon: Layers3, label: tr('服务树定义', 'Tree definitions'), group: tr('模型管理', 'Models') },
+      { key: 'preferences', to: '/cmdb/preferences', icon: Star, label: tr('偏好设置', 'Preferences'), group: tr('模型管理', 'Models') },
+      { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources'), group: tr('资源管理', 'Resources') },
+      { key: 'search', to: '/cmdb/search', icon: Search, label: tr('资源搜索', 'Resource search'), group: tr('资源管理', 'Resources') },
+      { key: 'tree-views', to: '/cmdb/tree-views', icon: ListTree, label: tr('资源层级', 'Hierarchy'), group: tr('资源管理', 'Resources') },
+      { key: 'relation-views', to: '/cmdb/service-tree', icon: Network, label: tr('关系视图', 'Relation views'), group: tr('资源管理', 'Resources') },
+      { key: 'dcim', to: '/cmdb/dcim', icon: Server, label: tr('数据中心', 'Data centre'), group: tr('资源管理', 'Resources') },
+      { key: 'ipam', to: '/cmdb/ipam', icon: Network, label: tr('IPAM', 'IPAM'), group: tr('资源管理', 'Resources') },
     ],
   };
 }
@@ -309,9 +311,9 @@ export const cmdbPaletteRoutes: Array<{
   },
   {
     path: '/cmdb/service-tree',
-    zh: 'CMDB / 服务树',
-    en: 'CMDB / Service tree',
-    keywords: ['cmdb', 'service tree', 'fuwushu'],
+    zh: 'CMDB / 关系视图',
+    en: 'CMDB / Relation views',
+    keywords: ['cmdb', 'service tree', 'relation view', 'guanxi', 'fuwushu'],
     group: 'CMDB',
   },
   {
