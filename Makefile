@@ -215,6 +215,9 @@ migrate-down: ## DB migrate down 1 步
 
 ONGRID_DOCKERFILE ?= deploy/Dockerfile.ongrid
 ONGRID_BUILD_CONTEXT ?= .
+# Override on build hosts without gcr.io access:
+#   make docker-ongrid-cmdb ONGRID_CMDB_RUNTIME_IMAGE=gcr.m.daocloud.io/distroless/base-debian12:nonroot
+ONGRID_CMDB_RUNTIME_IMAGE ?= gcr.io/distroless/base-debian12:nonroot
 
 .PHONY: docker docker-ongrid docker-ongrid-cmdb docker-ongrid-edge
 docker: docker-ongrid docker-ongrid-cmdb docker-ongrid-edge ## 构建全部镜像
@@ -223,7 +226,11 @@ docker-ongrid: ## 构建 ongrid 镜像
 	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f "$(ONGRID_DOCKERFILE)" "$(ONGRID_BUILD_CONTEXT)"
 
 docker-ongrid-cmdb: ## 构建 CMDB 独立服务镜像
-	docker build --build-arg VERSION=$(VERSION) -t ongrid-cmdb:$(VERSION) -f deploy/Dockerfile.ongrid-cmdb "$(ONGRID_BUILD_CONTEXT)"
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg RUNTIME_IMAGE=$(ONGRID_CMDB_RUNTIME_IMAGE) \
+		-t ongrid-cmdb:$(VERSION) \
+		-f deploy/Dockerfile.ongrid-cmdb "$(ONGRID_BUILD_CONTEXT)"
 
 docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 	docker build \
