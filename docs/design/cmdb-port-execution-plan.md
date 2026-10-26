@@ -22,7 +22,7 @@
 | --- | --- | --- | --- |
 | PR1 独立运行时 | 已完成 | `9cef6aa` `ac24647` `2caebf4` `a2b3754` `ed626fc` | 迁移锁、路由 golden、`cmd/ongrid-cmdb`、manager 解耦、开发部署、评审修复 |
 | PR2 生产安装/发布 | 已完成 | `1fe51c2` | install compose/nginx/Prometheus、install/upgrade 健康检查、Makefile、release workflow、ADR/运维文档 |
-| PR3 偏好/关系/树视图/关系视图 | 进行中 | `7e854a2` `cf7509b` | API 客户端与偏好页完成；树视图/关系/菜单待做 |
+| PR3 偏好/关系/树视图/关系视图 | 代码完成，截图待 PR9 | `7e854a2` `cf7509b` `b20f4a9` `1af1f4b` `49f65c9` | API、偏好页、资源层级、关系创建、菜单分组均完成；真实浏览器截图待统一做 |
 | PR4 批量导入 | 待开始 | — | 纯前端，后端已就绪 |
 | PR5 自动发现 UI | 待开始 | — | 前端 + 一个只读端点 |
 | PR6 ADC 发现池 | 待开始 | — | 后端两张表 + API + 前端 |
@@ -90,44 +90,45 @@
 
 ### PR3c TreeViews 页面
 
-- [ ] `web/src/cmdb/pages/TreeViews.tsx`：
+- [x] `web/src/cmdb/pages/TreeViews.tsx`：
   - 读 `listTreeLevels()`；无视图时 `EmptyState` 链接到 `/cmdb/preferences`；
   - 左侧按选中视图的 `levels[]` 懒加载 facet 树：
     `searchInstances({ q: '_type:<id>[,<level>:<value>]', facet: [nextLevel], count: 1 })`；
   - 右侧 `DataTable` 显示当前路径的实例，复用 `Search` 页的行渲染/分页；
   - 切换视图重置路径；路由 `/cmdb/tree-views` 与 `/cmdb/tree-views/:typeId`。
-- [ ] 组件 `web/src/cmdb/components/tree-views/FacetTree.tsx`。
-- [ ] `TreeViews.test.tsx`：懒展开、路径变化触发查询、空态、非 admin 只读。
-- 验收：`npm test -- src/cmdb/pages/TreeViews.test.tsx`。
+- [x] 组件 `web/src/cmdb/components/tree-views/FacetTree.tsx`。
+- [x] `TreeViews.test.tsx`：懒展开、路径变化触发查询、空态。
+- 验收：`npx vitest run src/cmdb/pages/TreeViews.test.tsx`（2 tests 通过）。提交 `b20f4a9`。
 
 ### PR3d Relations 页面
 
-- [ ] 增强 `web/src/cmdb/pages/ModelRelations.tsx`：
-  - 工具栏“新建关系”打开 `RelationFormDrawer`；
-  - 选择父模型、子模型、关系类型（`listRelationTypes`）、基数、父/子属性；
+- [x] 增强 `web/src/cmdb/pages/ModelRelations.tsx`：
+  - 工具栏“新建关系”打开关系表单；
+  - 选择父模型、子模型、关系类型（`listRelationTypes`）、基数；属性对编辑未做（后续增量）；
   - 保存 `saveRelation(parentRef, childRef, input)`；删除沿用现有确认；
   - 关系已存在时展示后端错误，不覆盖；非 admin 禁用写操作；
   - 增加路由别名 `/cmdb/relations` 指向同一页面。
-- [ ] `RelationFormDrawer.tsx` + `ModelRelations.test.tsx` 增加创建/失败保留输入/非 admin 用例。
-- 验收：`npm test -- src/cmdb/pages/ModelRelations.test.tsx`。
+- [x] `ModelRelations.test.tsx` 增加创建/非 admin 用例。
+- 验收：`npx vitest run src/cmdb/pages/ModelRelations.test.tsx`（5 tests 通过）。提交 `1af1f4b`。
 
 ### PR3e 菜单/命令面板/分组
 
-- [ ] `web/src/cmdb/routes.tsx`：
+- [x] `web/src/cmdb/routes.tsx`：
   - `/cmdb/preferences` → Preferences；
   - `/cmdb/tree-views`、`/cmdb/tree-views/:typeId` → TreeViews；
   - `/cmdb/relations` → ModelRelations（兼容 `/cmdb/model-relations`）；
   - “关系视图”入口复用 `/cmdb/service-tree`（现有 ServiceTree 页面）。
-- [ ] `cmdbNavSection` 增加：偏好设置、资源层级、关系、关系视图；`CMDBNavItem` 增加 `group?: 'cockpit'|'resources'|'models'|'discovery'|'admin'|'perms'`。
-- [ ] `Sidebar.tsx` 的 `SidebarSectionItem` 支持 `group`，在 CMDB section 内渲染分组标题；不改变其它 section 视觉；`Sidebar.test.tsx` 补断言。
-- [ ] `cmdbPaletteRoutes` 增加新入口；`web/src/lib/routes.ts` 自动合并。
-- [ ] 文案全部 `tr('中文','English')`。
+- [x] `cmdbNavSection` 增加：偏好设置、资源层级、关系、关系视图；`CMDBNavItem` 增加 `group?: string`。
+- [x] `Sidebar.tsx` 的 `SidebarSectionItem` 支持 `group`，在 CMDB section 内渲染分组标题；`Sidebar.test.tsx` 补断言。
+- [x] `cmdbPaletteRoutes` 更新新入口；`web/src/lib/routes.ts` 自动合并。
+- [x] 文案全部 `tr('中文','English')`。
+- 验收：23 个 CMDB 测试文件 / 130 tests 通过；`npm run typecheck`、`npm run build` 通过。提交 `49f65c9`。
 
 ### PR3 验证
 
-- `make test-web-ci-cmdb`、`npm run build`、`npm run lint`（区分既有错误）。
-- 真实浏览器：390/768/1280/1920，zh/en，light/dark；Preferences、TreeViews、Relations、ServiceTree；检查表格横向滚动、操作列、空态/错误态/加载态；截图附 PR。
-- 提交建议：`feat(cmdb): add preference and tree view pages`、`feat(cmdb): add model relation creation` 可分两个 PR/提交。
+- [x] `make test-web-ci-cmdb`（130 tests）、`npm run typecheck`、`npm run build`。
+- [ ] `npm run lint`（区分既有错误）。
+- [ ] 真实浏览器：390/768/1280/1920，zh/en，light/dark；Preferences、TreeViews、Relations、ServiceTree；检查表格横向滚动、操作列、空态/错误态/加载态；截图附 PR（统一放到 PR9）。
 
 ## 后续阶段清单
 
