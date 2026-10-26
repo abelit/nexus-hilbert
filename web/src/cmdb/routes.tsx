@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Boxes, Database, FileUp, GitBranch, Inbox, Layers3, ListTree, Network, Radar, Search, Server, Share2, Star } from 'lucide-react';
+import { Boxes, Database, FileUp, GitBranch, History, Inbox, Layers3, ListTree, Network, Radar, Search, Server, Share2, Star } from 'lucide-react';
 
 import type { IconType } from '@/lib/icon';
 import { useI18n } from '@/i18n/locale';
@@ -31,6 +31,7 @@ const InstancesPage = lazy(() => import('./pages/Instances'));
 const BatchImportPage = lazy(() => import('./pages/BatchImport'));
 const DiscoveryPage = lazy(() => import('./pages/Discovery'));
 const DiscoveryPoolPage = lazy(() => import('./pages/DiscoveryPool'));
+const OperationHistoryPage = lazy(() => import('./pages/OperationHistory'));
 const SearchPage = lazy(() => import('./pages/Search'));
 const HierarchyPage = lazy(() => import('./pages/Hierarchy'));
 const TreeViewsPage = lazy(() => import('./pages/TreeViews'));
@@ -178,6 +179,14 @@ export const cmdbRoutes: CMDBRoute[] = [
     ),
   },
   {
+    path: '/cmdb/operation-history',
+    element: (
+      <PageShell>
+        <OperationHistoryPage />
+      </PageShell>
+    ),
+  },
+  {
     path: '/cmdb/hierarchy',
     element: (
       <PageShell>
@@ -269,6 +278,7 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
       { key: 'relation-views', to: '/cmdb/service-tree', icon: Network, label: tr('关系视图', 'Relation views'), group: tr('资源管理', 'Resources') },
       { key: 'discovery', to: '/cmdb/discovery', icon: Radar, label: tr('自动发现', 'Auto discovery'), group: tr('资源管理', 'Resources') },
       { key: 'adc', to: '/cmdb/adc', icon: Inbox, label: tr('自动发现池', 'Discovery pool'), group: tr('资源管理', 'Resources') },
+      { key: 'operation-history', to: '/cmdb/operation-history', icon: History, label: tr('操作历史', 'Operation history'), group: tr('资源管理', 'Resources') },
       { key: 'dcim', to: '/cmdb/dcim', icon: Server, label: tr('数据中心', 'Data centre'), group: tr('资源管理', 'Resources') },
       { key: 'ipam', to: '/cmdb/ipam', icon: Network, label: tr('IPAM', 'IPAM'), group: tr('资源管理', 'Resources') },
     ],
@@ -365,6 +375,13 @@ export const cmdbPaletteRoutes: Array<{
     zh: 'CMDB / 自动发现池',
     en: 'CMDB / Discovery pool',
     keywords: ['cmdb', 'adc', 'discovery', 'pool', 'accept', 'faxianchi'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/operation-history',
+    zh: 'CMDB / 操作历史',
+    en: 'CMDB / Operation history',
+    keywords: ['cmdb', 'history', 'audit', 'change', 'caozuolishi'],
     group: 'CMDB',
   },
   {

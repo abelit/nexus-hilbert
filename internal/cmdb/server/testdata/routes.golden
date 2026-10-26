@@ -75,6 +75,12 @@ GET /v1/cmdb/discovery/targets/{id}
 GET /v1/cmdb/discovery/targets/{id}/sync-histories
 GET /v1/cmdb/discovery/templates/export
 GET /v1/cmdb/health
+GET /v1/cmdb/history/attributes
+GET /v1/cmdb/history/ci-triggers
+GET /v1/cmdb/history/ci-types
+GET /v1/cmdb/history/ci/{id}
+GET /v1/cmdb/history/ci/{id}/triggers
+GET /v1/cmdb/history/relations
 GET /v1/cmdb/instances/{id}
 GET /v1/cmdb/ipam/addresses
 GET /v1/cmdb/ipam/history/operations

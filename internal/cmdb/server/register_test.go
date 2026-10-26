@@ -14,6 +14,7 @@ import (
 	"github.com/ongridio/ongrid/internal/cmdb/server/ci"
 	"github.com/ongridio/ongrid/internal/cmdb/server/citype"
 	"github.com/ongridio/ongrid/internal/cmdb/server/discovery"
+	"github.com/ongridio/ongrid/internal/cmdb/server/history"
 	"github.com/ongridio/ongrid/internal/cmdb/server/meta"
 	"github.com/ongridio/ongrid/internal/cmdb/server/relationtype"
 )
@@ -23,6 +24,7 @@ func allHandlers() Handlers {
 		Meta:         meta.NewHandler(nil),
 		RelationType: relationtype.NewHandler(nil),
 		Discovery:    discovery.NewHandler(nil),
+		History:      history.NewHandler(nil),
 		CIType:       citype.NewHandler(nil),
 		CI:           ci.NewHandler(nil),
 	}
@@ -44,6 +46,7 @@ func TestRegisterAllMountsRepresentativeRoutes(t *testing.T) {
 		{http.MethodGet, "/v1/cmdb/ipam/tree-view"},
 		{http.MethodGet, "/v1/cmdb/dcim/tree-view"},
 		{http.MethodGet, "/v1/cmdb/discovery/rules"},
+		{http.MethodGet, "/v1/cmdb/history/attributes"},
 		{http.MethodGet, "/v1/cmdb/preferences/ci-types"},
 	} {
 		routeCtx := chi.NewRouteContext()

@@ -17,17 +17,20 @@ import (
 	cmdbcibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	cmdbcitypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	cmdbdiscoverybiz "github.com/ongridio/ongrid/internal/cmdb/biz/discovery"
+	cmdbhistorybiz "github.com/ongridio/ongrid/internal/cmdb/biz/history"
 	cmdbmetabiz "github.com/ongridio/ongrid/internal/cmdb/biz/meta"
 	cmdbrelationtypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/relationtype"
 	cmdbcistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
 	cmdbcitypedata "github.com/ongridio/ongrid/internal/cmdb/data/citype/store"
 	cmdbdiscoverydata "github.com/ongridio/ongrid/internal/cmdb/data/discovery/store"
+	cmdbhistorydata "github.com/ongridio/ongrid/internal/cmdb/data/history/store"
 	cmdbmetastore "github.com/ongridio/ongrid/internal/cmdb/data/meta/store"
 	cmdbrelationtypedata "github.com/ongridio/ongrid/internal/cmdb/data/relationtype/store"
 	cmdbserver "github.com/ongridio/ongrid/internal/cmdb/server"
 	cmdbciserver "github.com/ongridio/ongrid/internal/cmdb/server/ci"
 	cmdbcitypeserver "github.com/ongridio/ongrid/internal/cmdb/server/citype"
 	cmdbdiscoveryserver "github.com/ongridio/ongrid/internal/cmdb/server/discovery"
+	cmdbhistoryserver "github.com/ongridio/ongrid/internal/cmdb/server/history"
 	cmdbservermeta "github.com/ongridio/ongrid/internal/cmdb/server/meta"
 	cmdbserverrelationtype "github.com/ongridio/ongrid/internal/cmdb/server/relationtype"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
@@ -54,10 +57,16 @@ func buildHandlers(db *gorm.DB, log *slog.Logger) cmdbserver.Handlers {
 		WithWriter(cmdbcibiz.NewDiscoveryWriter(ciUC)).
 		WithAttributes(cmdbcitypebiz.NewDiscoveryAttributeResolver(citypeUC))
 
+	historyUC := cmdbhistorybiz.NewUsecase(cmdbhistorydata.NewRepo(db)).
+		WithTypeNames(cmdbcitypebiz.NewHistoryTypeNames(citypeUC)).
+		WithAttributes(cmdbcitypebiz.NewHistoryAttributes(citypeUC)).
+		WithCINames(cmdbcibiz.NewHistoryCINames(ciUC))
+
 	return cmdbserver.Handlers{
 		Meta:         cmdbservermeta.NewHandler(cmdbmetabiz.NewUsecase(cmdbmetastore.NewRepo(db), log)),
 		RelationType: cmdbserverrelationtype.NewHandler(cmdbrelationtypebiz.NewUsecase(cmdbrelationtypedata.NewRepo(db), log)),
 		Discovery:    cmdbdiscoveryserver.NewHandler(discoveryUC),
+		History:      cmdbhistoryserver.NewHandler(historyUC),
 		CIType:       cmdbcitypeserver.NewHandler(citypeUC),
 		CI:           cmdbciserver.NewHandler(ciUC),
 	}

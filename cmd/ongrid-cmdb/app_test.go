@@ -144,6 +144,27 @@ func TestDiscoveryPoolIsWired(t *testing.T) {
 	}
 }
 
+// The global history reads are admin-only; one instance's history is not.
+func TestHistoryAuthz(t *testing.T) {
+	app, signer := newTestApp(t)
+	user := tokenFor(t, signer, false)
+	admin := tokenFor(t, signer, true)
+
+	if rec := request(t, app, http.MethodGet, "/api/v1/cmdb/history/attributes", user, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin GET history = %d %s, want 403", rec.Code, rec.Body.String())
+	}
+	rec := request(t, app, http.MethodGet, "/api/v1/cmdb/history/attributes", admin, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin GET history = %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"items"`) {
+		t.Fatalf("history body = %s, want the list shape", rec.Body.String())
+	}
+	if rec := request(t, app, http.MethodGet, "/api/v1/cmdb/history/ci/100", user, ""); rec.Code != http.StatusOK {
+		t.Fatalf("user GET instance history = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminGateRejectsNonAdminWrite(t *testing.T) {
 	app, signer := newTestApp(t)
 	body := `{"name":"runs_on","color":"#1890ff"}`

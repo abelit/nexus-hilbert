@@ -7,6 +7,7 @@ import (
 	"github.com/ongridio/ongrid/internal/cmdb/server/ci"
 	"github.com/ongridio/ongrid/internal/cmdb/server/citype"
 	"github.com/ongridio/ongrid/internal/cmdb/server/discovery"
+	"github.com/ongridio/ongrid/internal/cmdb/server/history"
 	"github.com/ongridio/ongrid/internal/cmdb/server/meta"
 	"github.com/ongridio/ongrid/internal/cmdb/server/relationtype"
 )
@@ -16,6 +17,7 @@ type Handlers struct {
 	Meta         *meta.Handler
 	RelationType *relationtype.Handler
 	Discovery    *discovery.Handler
+	History      *history.Handler
 	CIType       *citype.Handler
 	CI           *ci.Handler
 }
@@ -34,12 +36,14 @@ func RegisterAll(r chi.Router, h Handlers) {
 	if r == nil {
 		panic("cmdb server: RegisterAll called with a nil router")
 	}
-	if h.Meta == nil || h.RelationType == nil || h.Discovery == nil || h.CIType == nil || h.CI == nil {
+	if h.Meta == nil || h.RelationType == nil || h.Discovery == nil || h.History == nil ||
+		h.CIType == nil || h.CI == nil {
 		panic("cmdb server: RegisterAll called with an incomplete Handlers set")
 	}
 	h.Meta.Register(r)
 	h.RelationType.Register(r)
 	h.Discovery.Register(r)
+	h.History.Register(r)
 	h.CIType.Register(r)
 	h.CI.Register(r)
 }
