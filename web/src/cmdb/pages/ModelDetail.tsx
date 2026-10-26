@@ -59,7 +59,7 @@ import { VALUE_TYPE_LABELS, isValueTypeCode, toWireValue } from '../lib/valuetyp
 // row cannot be unbound from here, because it is not bound here. The backend
 // marks them; the page disables the action and says where it comes from.
 
-type Tab = 'attributes' | 'groups' | 'relations' | 'constraints' | 'triggers';
+type Tab = 'attributes' | 'groups' | 'relations' | 'constraints' | 'triggers' | 'discovery';
 
 export default function ModelDetailPage() {
   const { tr } = useI18n();
@@ -225,6 +225,7 @@ export default function ModelDetailPage() {
             <TabsTrigger value="relations">{tr('模型关系', 'Relations')}</TabsTrigger>
             <TabsTrigger value="constraints">{tr('唯一约束', 'Uniqueness')}</TabsTrigger>
             <TabsTrigger value="triggers">{tr('触发器', 'Triggers')}</TabsTrigger>
+            <TabsTrigger value="discovery">{tr('自动发现', 'Auto discovery')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="attributes">
@@ -251,6 +252,34 @@ export default function ModelDetailPage() {
 
           <TabsContent value="constraints">
             <ConstraintsTab modelRef={ref} attributes={attributes} isAdmin={isAdmin} adminTip={adminTip} />
+          </TabsContent>
+
+          <TabsContent value="discovery" className="min-h-0 flex-1 overflow-y-auto p-6">
+            <Card>
+              <div className="flex flex-col gap-2 p-4">
+                <h2 className="text-sm font-medium text-text">{tr('自动发现', 'Auto discovery')}</h2>
+                <p className="text-xs text-text-muted">
+                  {tr(
+                    '规则、目标、账号和发现池都在「自动发现」与「自动发现池」页面维护。这里是模型的只读入口。',
+                    'Rules, targets, accounts and the pool are maintained on the Auto discovery and Discovery pool pages. This tab is the model’s read-only entry.',
+                  )}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    to="/cmdb/discovery"
+                    className="inline-flex items-center rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+                  >
+                    {tr('打开自动发现配置', 'Open discovery configuration')}
+                  </Link>
+                  <Link
+                    to="/cmdb/adc"
+                    className="inline-flex items-center rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+                  >
+                    {tr('打开发现池', 'Open the discovery pool')}
+                  </Link>
+                </div>
+              </div>
+            </Card>
           </TabsContent>
 
           <TabsContent value="triggers">

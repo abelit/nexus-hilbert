@@ -185,3 +185,65 @@ describe('mounting a device', () => {
     expect(await screen.findByText(/机柜剩余 24U/)).toBeInTheDocument();
   });
 });
+
+describe('renaming and moving', () => {
+  it('renames a room through the DCIM node endpoint', async () => {
+    const user = userEvent.setup();
+    handlers();
+    let updated: unknown;
+    server.use(
+      http.put('/api/v1/cmdb/dcim/server_room/3', async ({ request }) => {
+        updated = await request.json();
+        return HttpResponse.json({ ci_id: 3 });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByText('A 机房'));
+    await user.click(await screen.findByRole('button', { name: '重命名 A 机房' }));
+    const dialog = await screen.findByRole('dialog');
+    const name = within(dialog).getByLabelText('新名称');
+    await user.clear(name);
+    await user.type(name, 'B 机房');
+    await user.click(within(dialog).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(updated).toEqual({ name: 'B 机房' }));
+  });
+
+  it('moves a device within its rack', async () => {
+    const user = userEvent.setup();
+    handlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-relations/search', () =>
+        HttpResponse.json({
+          numfound: 1,
+          total: 1,
+          page: 1,
+          result: [{ _id: 55, _type: 5, ci_id: 55, ci_type: 'server', ci_type_alias: '服务器', name: 'srv-01', u_start: 2 }],
+        }),
+      ),
+    );
+    let moved: unknown;
+    server.use(
+      http.put('/api/v1/cmdb/dcim/server-rooms/3/racks/31/devices/55', async ({ request }) => {
+        moved = await request.json();
+        return HttpResponse.json({ rack_id: 31, ci_id: 55, u_count: 2, free_u_count: 30 });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByText('A 机房'));
+    await user.click(await screen.findByRole('button', { name: '打开机柜 R-A01' }));
+    const drawer = await screen.findByRole('dialog');
+    await user.click(await within(drawer).findByRole('button', { name: '移动 srv-01' }));
+
+    const dialogs = await screen.findAllByRole('dialog');
+    const modal = dialogs[dialogs.length - 1];
+    const start = within(modal).getByLabelText('目标起始 U 位');
+    await user.clear(start);
+    await user.type(start, '10');
+    await user.click(within(modal).getByRole('button', { name: '移动' }));
+
+    await waitFor(() => expect(moved).toEqual({ to_u_start: 10 }));
+  });
+});

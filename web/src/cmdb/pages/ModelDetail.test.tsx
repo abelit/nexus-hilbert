@@ -208,3 +208,14 @@ describe('the other tabs', () => {
     expect(await screen.findByText('1 个属性已不存在')).toBeInTheDocument();
   });
 });
+
+describe('the auto-discovery tab', () => {
+  it('links to the discovery configuration and the pool', async () => {
+    baseHandlers();
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('tab', { name: '自动发现' }));
+    expect(await screen.findByRole('link', { name: '打开自动发现配置' })).toHaveAttribute('href', '/cmdb/discovery');
+    expect(screen.getByRole('link', { name: '打开发现池' })).toHaveAttribute('href', '/cmdb/adc');
+  });
+});

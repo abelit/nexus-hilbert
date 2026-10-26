@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -20,10 +20,12 @@ import {
   deleteDCIMNode,
   getDCIMTree,
   mountDevice,
+  moveDevice,
   rackHistory,
   recalcRackUnits,
   roomRacks,
   unmountDevice,
+  updateDCIMNode,
   type DCIMNode,
   type DCIMType,
   type RackHistory,
@@ -63,7 +65,9 @@ export default function DCIMPage() {
     allIDs: string[];
     /** child id → parent id, so a rack can name the room the endpoint needs. */
     parentOf: Map<string, string>;
-  }>({ nodes: [], label: () => '', raw: new Map(), allIDs: [], parentOf: new Map() });
+    /** model id → the attribute the tree labels that model by. */
+    type2name: Record<string, string>;
+  }>({ nodes: [], label: () => '', raw: new Map(), allIDs: [], parentOf: new Map(), type2name: {} });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -74,6 +78,7 @@ export default function DCIMPage() {
   const [history, setHistory] = useState<RackHistory | null>(null);
   const [creating, setCreating] = useState<{ type: DCIMType; parent?: DCIMNode } | null>(null);
   const [openRack, setOpenRack] = useState<{ rack: DCIMNode; roomID: number } | null>(null);
+  const [renaming, setRenaming] = useState<{ type: DCIMType; node: DCIMNode; labelAttr: string } | null>(null);
 
   const load = useCallback(
     async (quiet = false) => {
@@ -112,7 +117,14 @@ export default function DCIMPage() {
         // THE WHOLE TREE OPENS BY DEFAULT. A data centre is a handful of regions
         // and rooms; collapsing it means every visit starts with clicks that
         // reveal nothing new.
-        setTree({ nodes: got.result.map(convert), label: labelOf, raw, allIDs: [...raw.keys()], parentOf });
+        setTree({
+          nodes: got.result.map(convert),
+          label: labelOf,
+          raw,
+          allIDs: [...raw.keys()],
+          parentOf,
+          type2name: got.type2name ?? {},
+        });
       } catch (error) {
         setErr(describeError(error, tr('无法读取数据中心', 'Could not load the data centre')));
       } finally {
@@ -343,6 +355,23 @@ export default function DCIMPage() {
                       {tr('新建机柜', 'New rack')}
                     </Button>
                     <Button
+                      variant="subtle"
+                      size="sm"
+                      type="button"
+                      onClick={() =>
+                        setRenaming({
+                          type: 'server_room',
+                          node: selection.node,
+                          labelAttr: tree.type2name[String(selection.node._type)] ?? 'name',
+                        })
+                      }
+                      aria-label={tr(`重命名 ${tree.label(selection.node)}`, `Rename ${tree.label(selection.node)}`)}
+                      className="inline-flex items-center gap-1"
+                    >
+                      <Pencil size={12} aria-hidden="true" />
+                      {tr('重命名', 'Rename')}
+                    </Button>
+                    <Button
                       variant="dangerGhost"
                       size="sm"
                       type="button"
@@ -421,10 +450,25 @@ export default function DCIMPage() {
         <RackDrawer
           rack={openRack.rack}
           roomID={openRack.roomID}
+          labelAttr={tree.type2name[String(openRack.rack._type)] ?? 'name'}
           onClose={() => setOpenRack(null)}
           onChanged={async () => {
             if (selection?.kind === 'room') await loadRacks(selection.node, rackQuery);
             await loadHistory(openRack.rack._id);
+          }}
+        />
+      )}
+
+      {renaming && (
+        <RenameNodeModal
+          type={renaming.type}
+          node={renaming.node}
+          labelAttr={renaming.labelAttr}
+          onClose={() => setRenaming(null)}
+          onSaved={async (message) => {
+            setRenaming(null);
+            toast.success(message);
+            await load(true);
           }}
         />
       )}
@@ -587,11 +631,13 @@ function CreateNodeModal({
 function RackDrawer({
   rack,
   roomID,
+  labelAttr,
   onClose,
   onChanged,
 }: {
   rack: DCIMNode;
   roomID: number;
+  labelAttr: string;
   onClose(): void;
   onChanged(): void | Promise<void>;
 }) {
@@ -603,6 +649,8 @@ function RackDrawer({
   const [loading, setLoading] = useState(true);
   const [models, setModels] = useState<CIType[]>([]);
   const [mountOpen, setMountOpen] = useState(false);
+  const [moving, setMoving] = useState<SearchRow | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -649,7 +697,17 @@ function RackDrawer({
       title={displayValue(rack.name ?? rack._id)}
       description={tr(`${devices.length} 台设备`, `${devices.length} devices`)}
       footer={
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            variant="subtle"
+            type="button"
+            onClick={() => setRenameOpen(true)}
+            aria-label={tr('重命名机柜', 'Rename the rack')}
+            className="inline-flex items-center gap-1.5"
+          >
+            <Pencil size={12} aria-hidden="true" />
+            {tr('重命名', 'Rename')}
+          </Button>
           <Button variant="outline" type="button" onClick={onClose}>
             {tr('关闭', 'Close')}
           </Button>
@@ -670,6 +728,15 @@ function RackDrawer({
             <li key={device._id} className="flex items-center gap-2 py-2 text-xs">
               <span className="min-w-0 flex-1 truncate">{displayValue(device.name ?? device.hostname ?? device._id)}</span>
               <Chip tone="info">{device.ci_type_alias || device.ci_type}</Chip>
+              <Button
+                variant="subtle"
+                size="sm"
+                type="button"
+                onClick={() => setMoving(device)}
+                aria-label={tr(`移动 ${displayValue(device.name ?? device._id)}`, `Move ${displayValue(device.name ?? device._id)}`)}
+              >
+                {tr('移动', 'Move')}
+              </Button>
               <Button
                 variant="dangerGhost"
                 size="sm"
@@ -699,8 +766,208 @@ function RackDrawer({
         />
       )}
 
+      {moving && (
+        <MoveDeviceModal
+          roomID={roomID}
+          rack={rack}
+          device={moving}
+          onClose={() => setMoving(null)}
+          onMoved={async (message) => {
+            setMoving(null);
+            toast.success(message);
+            await load();
+            await onChanged();
+          }}
+        />
+      )}
+
+      {renameOpen && (
+        <RenameNodeModal
+          type="rack"
+          node={rack}
+          labelAttr={labelAttr}
+          onClose={() => setRenameOpen(false)}
+          onSaved={async (message) => {
+            setRenameOpen(false);
+            toast.success(message);
+            await onChanged();
+            onClose();
+          }}
+        />
+      )}
+
       {dialog}
     </Drawer>
+  );
+}
+
+// --- rename a DCIM node ---
+
+function RenameNodeModal({
+  type,
+  node,
+  labelAttr,
+  onClose,
+  onSaved,
+}: {
+  type: DCIMType;
+  node: DCIMNode;
+  labelAttr: string;
+  onClose(): void;
+  onSaved(message: string): void | Promise<void>;
+}) {
+  const { tr } = useI18n();
+  const [name, setName] = useState(displayValue(node[labelAttr] ?? node.name ?? ''));
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!name.trim()) {
+      setErr(tr('名称不能为空', 'A name is required'));
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await updateDCIMNode(type, node._id, { [labelAttr]: name.trim() });
+      await onSaved(tr('已重命名', 'Renamed'));
+    } catch (error) {
+      setErr(describeError(error, tr('重命名失败', 'Could not rename it')));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={tr('重命名', 'Rename')}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
+            {tr('取消', 'Cancel')}
+          </Button>
+          <Button variant="primary" type="button" onClick={() => void submit()} disabled={submitting}>
+            {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+          </Button>
+        </div>
+      }
+    >
+      {err && (
+        <div role="alert" className="mb-2 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+          {err}
+        </div>
+      )}
+      <Label htmlFor="dcim-rename">{tr('新名称', 'New name')}</Label>
+      <Input id="dcim-rename" aria-label={tr('新名称', 'New name')} value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full" />
+    </Modal>
+  );
+}
+
+// --- move a device ---
+
+function MoveDeviceModal({
+  roomID,
+  rack,
+  device,
+  onClose,
+  onMoved,
+}: {
+  roomID: number;
+  rack: DCIMNode;
+  device: SearchRow;
+  onClose(): void;
+  onMoved(message: string): void | Promise<void>;
+}) {
+  const { tr } = useI18n();
+  const [racks, setRacks] = useState<SearchRow[]>([]);
+  const [target, setTarget] = useState(String(rack._id));
+  const startValue = Number(device.u_start);
+  const [start, setStart] = useState(Number.isFinite(startValue) && startValue > 0 ? String(startValue) : '');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    void roomRacks(roomID)
+      .then((got) => setRacks(got.result ?? []))
+      .catch(() => setRacks([]));
+  }, [roomID]);
+
+  const submit = async () => {
+    const startUnit = Number(start);
+    if (!Number.isInteger(startUnit) || startUnit <= 0) {
+      setErr(tr('目标起始 U 位必须是正整数', 'The target start unit must be a positive whole number'));
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await moveDevice(roomID, rack._id, device._id, {
+        to_u_start: startUnit,
+        ...(Number(target) !== rack._id ? { to_rack_id: Number(target) } : {}),
+      });
+      await onMoved(tr('已移动', 'Moved'));
+    } catch (error) {
+      setErr(describeError(error, tr('移动失败', 'Could not move it')));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const options = [
+    { value: String(rack._id), label: displayValue(rack.name ?? rack._id) },
+    ...racks
+      .filter((row) => row._id !== rack._id)
+      .map((row) => ({ value: String(row._id), label: displayValue(row.name ?? row._id) })),
+  ];
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={tr('移动设备', 'Move a device')}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
+            {tr('取消', 'Cancel')}
+          </Button>
+          <Button variant="primary" type="button" onClick={() => void submit()} disabled={submitting}>
+            {submitting ? tr('移动中…', 'Moving…') : tr('移动', 'Move')}
+          </Button>
+        </div>
+      }
+    >
+      {err && (
+        <div role="alert" className="mb-2 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+          {err}
+        </div>
+      )}
+      <div className="flex flex-col gap-3">
+        <div>
+          <Label htmlFor="dcim-move-rack">{tr('目标机柜', 'Target rack')}</Label>
+          <Select
+            id="dcim-move-rack"
+            label={tr('目标机柜', 'Target rack')}
+            value={target}
+            onValueChange={setTarget}
+            options={options}
+            className="mt-1 w-full"
+          />
+        </div>
+        <div>
+          <Label htmlFor="dcim-move-start">{tr('目标起始 U 位', 'Target start unit')}</Label>
+          <Input
+            id="dcim-move-start"
+            type="number"
+            min={1}
+            value={start}
+            onChange={(event) => setStart(event.target.value)}
+            className="mt-1 w-32"
+          />
+        </div>
+      </div>
+    </Modal>
   );
 }
 
