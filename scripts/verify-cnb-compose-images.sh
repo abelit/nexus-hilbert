@@ -48,6 +48,7 @@ docker.cnb.cool/ongridio/ongrid/qdrant:v1.11.3
 docker.cnb.cool/ongridio/ongrid/searxng:latest
 docker.cnb.cool/ongridio/ongrid/tempo:2.10.0
 grafana/pyroscope:1.21.1
+ongrid-cmdb:v9.9.9
 ongrid-web:v9.9.9
 ongrid:v9.9.9
 otel/opentelemetry-collector-contrib:0.157.0

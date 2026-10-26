@@ -88,12 +88,16 @@ help: ## 列出全部 target
 # build
 # ----------------------------------------------------------------------------
 
-.PHONY: build build-ongrid build-ongrid-edge
-build: build-ongrid build-ongrid-edge ## 构建 ongrid 与 ongrid-edge
+.PHONY: build build-ongrid build-ongrid-cmdb build-ongrid-edge
+build: build-ongrid build-ongrid-cmdb build-ongrid-edge ## 构建 ongrid、CMDB 与 ongrid-edge
 
 build-ongrid: ## 构建云端 ongrid
 	@mkdir -p $(BIN_DIR)
 	$(GO_BUILD) -o $(BIN_DIR)/ongrid ./cmd/ongrid
+
+build-ongrid-cmdb: ## 构建 CMDB 独立服务
+	@mkdir -p $(BIN_DIR)
+	$(GO_BUILD) -o $(BIN_DIR)/ongrid-cmdb ./cmd/ongrid-cmdb
 
 build-ongrid-edge: ## 构建边端 ongrid-edge
 	@mkdir -p $(BIN_DIR)
@@ -211,11 +215,14 @@ migrate-down: ## DB migrate down 1 步
 ONGRID_DOCKERFILE ?= deploy/Dockerfile.ongrid
 ONGRID_BUILD_CONTEXT ?= .
 
-.PHONY: docker docker-ongrid docker-ongrid-edge
-docker: docker-ongrid docker-ongrid-edge ## 构建全部镜像
+.PHONY: docker docker-ongrid docker-ongrid-cmdb docker-ongrid-edge
+docker: docker-ongrid docker-ongrid-cmdb docker-ongrid-edge ## 构建全部镜像
 
 docker-ongrid: ## 构建 ongrid 镜像
 	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f "$(ONGRID_DOCKERFILE)" "$(ONGRID_BUILD_CONTEXT)"
+
+docker-ongrid-cmdb: ## 构建 CMDB 独立服务镜像
+	docker build --build-arg VERSION=$(VERSION) -t ongrid-cmdb:$(VERSION) -f deploy/Dockerfile.ongrid-cmdb "$(ONGRID_BUILD_CONTEXT)"
 
 docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 	docker build \
@@ -252,9 +259,14 @@ compose-down: ## 本地 docker compose 停止
 # run
 # ----------------------------------------------------------------------------
 
-.PHONY: run-ongrid run-ongrid-edge
+.PHONY: run-ongrid run-ongrid-cmdb run-ongrid-edge
 run-ongrid: ## 本地直接跑 ongrid
 	go run ./cmd/ongrid
+
+run-ongrid-cmdb: ## 本地直接跑 CMDB 独立服务
+	ONGRID_HTTP_ADDR=$${ONGRID_HTTP_ADDR:-:8082} \
+	ONGRID_METRICS_ADDR=$${ONGRID_METRICS_ADDR:-:9102} \
+	go run ./cmd/ongrid-cmdb
 
 run-ongrid-edge: ## 本地直接跑 ongrid-edge
 	go run ./cmd/ongrid-edge
@@ -913,6 +925,10 @@ check-issue-templates: ## Validate GitHub Issue Forms and chooser metadata
 test-web-ci-apm: ## Run the serial APM frontend CI tests (requires npm ci in web)
 	cd web && npm test -- --run --no-file-parallelism \
 		src/api/apm.test.ts src/components/apm src/pages/Apm
+
+.PHONY: test-web-ci-cmdb
+test-web-ci-cmdb: ## Run the CMDB frontend CI tests (requires npm ci in web)
+	cd web && npm test -- --run src/cmdb
 
 .PHONY: test-web-ci-platform
 test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm ci in web)
