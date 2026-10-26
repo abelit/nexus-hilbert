@@ -122,10 +122,18 @@ export function HistoryFilters({
   );
 }
 
-/** Converts a `datetime-local` value to the API's timestamp format. */
+/**
+ * Converts a `datetime-local` value to an RFC 3339 instant.
+ *
+ * THE PICKER IS A WALL CLOCK WITH NO ZONE, and the server compares instants.
+ * `new Date('2026-10-26T00:00')` reads that wall clock in the browser's zone,
+ * and toISOString() states which instant that is; sending the bare wall clock
+ * made a UTC+8 operator filter the UTC day instead of their own.
+ */
 export function toAPITime(value: string): string | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  const normalized = trimmed.replace('T', ' ');
-  return normalized.length === 16 ? `${normalized}:00` : normalized;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString();
 }

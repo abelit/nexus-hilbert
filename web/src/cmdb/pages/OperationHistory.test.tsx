@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { fullDateTime } from '@/lib/format';
 import { server } from '@/test/msw-server';
 import { selectOption } from '@/test/select-option';
 import { useAuth } from '@/store/auth';
@@ -19,7 +20,7 @@ const attributeRecord = {
   type_name: 'host',
   type_alias: '主机',
   origin: 'ui',
-  created_at: '2026-10-26 11:00:00',
+  created_at: '2026-10-26T11:00:00Z',
   changes: [
     {
       id: 20,
@@ -34,7 +35,7 @@ const attributeRecord = {
       value_type: '2',
       old: 'web-00',
       new: 'web-01',
-      created_at: '2026-10-26 11:00:00',
+      created_at: '2026-10-26T11:00:00Z',
     },
   ],
 };
@@ -96,6 +97,7 @@ describe('the operation history page', () => {
     expect(screen.getByText('主机')).toBeInTheDocument();
     expect(screen.getByText('主机名')).toBeInTheDocument();
     expect(screen.getByText('web-00')).toBeInTheDocument();
+    expect(screen.getByText(fullDateTime(attributeRecord.created_at))).toBeInTheDocument();
     expect(screen.getByText('web-01')).toBeInTheDocument();
     expect(query).toContain('page=1');
     expect(query).toContain('page_size=20');
@@ -113,7 +115,7 @@ describe('the operation history page', () => {
               type_id: 1,
               type_name: 'host',
               type_alias: '主机',
-              created_at: '2026-10-26 12:00:00',
+              created_at: '2026-10-26T12:00:00Z',
               changes: [
                 {
                   id: 30,

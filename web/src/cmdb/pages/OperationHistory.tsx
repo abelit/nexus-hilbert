@@ -10,6 +10,7 @@ import { PaginationFooter } from '@/components/ui/PaginationFooter';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
+import { fullDateTime } from '@/lib/format';
 import { listUsers, type User } from '@/api/users';
 
 import { listCITypes, type CIType } from '../api/citype';
@@ -200,7 +201,7 @@ export default function OperationHistoryPage() {
   const attributeColumns: Column<AttributeRecord>[] = [
     {
       key: 'time', header: tr('时间', 'Time'),
-      cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{row.created_at || '—'}</code>,
+      cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{fullDateTime(row.created_at)}</code>,
     },
     { key: 'user', header: tr('用户', 'User'), cell: (row) => userLabel(row.uid) },
     { key: 'type', header: tr('模型', 'Model'), cell: (row) => row.type_alias || row.type_name || `#${row.type_id ?? ''}` },
@@ -241,7 +242,7 @@ export default function OperationHistoryPage() {
   const relationColumns: Column<RelationRecord>[] = [
     {
       key: 'time', header: tr('时间', 'Time'),
-      cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{row.created_at || '—'}</code>,
+      cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{fullDateTime(row.created_at)}</code>,
     },
     { key: 'user', header: tr('用户', 'User'), cell: (row) => userLabel(row.uid) },
     { key: 'type', header: tr('模型', 'Model'), cell: (row) => row.type_alias || row.type_name || `#${row.type_id ?? ''}` },
@@ -275,7 +276,7 @@ export default function OperationHistoryPage() {
   const typeColumns: Column<TypeHistoryItem>[] = [
     {
       key: 'time', header: tr('时间', 'Time'),
-      cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{row.created_at || '—'}</code>,
+      cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{fullDateTime(row.created_at)}</code>,
     },
     { key: 'user', header: tr('用户', 'User'), cell: (row) => userLabel(row.uid) },
     { key: 'type', header: tr('模型', 'Model'), cell: (row) => row.type_alias || row.type_name || `#${row.type_id}` },
@@ -306,7 +307,7 @@ export default function OperationHistoryPage() {
   const triggerColumns: Column<TriggerHistoryItem>[] = [
     {
       key: 'time', header: tr('时间', 'Time'),
-      cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{row.created_at || '—'}</code>,
+      cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{fullDateTime(row.created_at)}</code>,
     },
     { key: 'user', header: tr('用户', 'User'), cell: (row) => userLabel(row.uid) },
     { key: 'ci', header: tr('资源', 'Instance'), cell: (row) => row.ci_name || `#${row.ci_id}` },

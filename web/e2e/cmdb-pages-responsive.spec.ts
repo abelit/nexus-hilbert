@@ -24,11 +24,11 @@ const USER = {
 };
 const ATTRIBUTE_RECORD = {
   record_id: 2, uid: 7, type_id: 1, type_name: 'host', type_alias: '主机',
-  origin: 'ui', created_at: '2026-10-26 11:00:00',
+  origin: 'ui', created_at: '2026-10-26T11:00:00Z',
   changes: [{
     id: 20, record_id: 2, uid: 7, operate_type: '2', ci_id: 100, ci_name: 'web-01',
     attr_id: 10, attr_name: 'hostname', attr_alias: '主机名', value_type: '2',
-    old: 'web-00', new: 'web-01', created_at: '2026-10-26 11:00:00',
+    old: 'web-00', new: 'web-01', created_at: '2026-10-26T11:00:00Z',
   }],
 };
 const TOPOLOGY_VIEW = {

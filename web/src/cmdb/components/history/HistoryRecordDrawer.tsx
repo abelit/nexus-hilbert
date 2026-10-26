@@ -1,4 +1,5 @@
 import { useI18n } from '@/i18n/locale';
+import { fullDateTime } from '@/lib/format';
 
 import type {
   AttributeRecord,
@@ -52,7 +53,7 @@ export function HistoryRecordDrawer({
       {selection?.kind === 'attributes' && (
         <div className="flex flex-col gap-4">
           <dl className="grid grid-cols-2 gap-3">
-            <Meta label={tr('时间', 'Time')} value={selection.record.created_at ?? ''} />
+            <Meta label={tr('时间', 'Time')} value={fullDateTime(selection.record.created_at)} />
             <Meta label={tr('用户', 'User')} value={userLabel(selection.record.uid)} />
             <Meta label={tr('模型', 'Model')} value={selection.record.type_alias || selection.record.type_name || ''} />
             <Meta label={tr('来源', 'Origin')} value={selection.record.origin ?? ''} />
@@ -84,7 +85,7 @@ export function HistoryRecordDrawer({
       {selection?.kind === 'relations' && (
         <div className="flex flex-col gap-4">
           <dl className="grid grid-cols-2 gap-3">
-            <Meta label={tr('时间', 'Time')} value={selection.record.created_at ?? ''} />
+            <Meta label={tr('时间', 'Time')} value={fullDateTime(selection.record.created_at)} />
             <Meta label={tr('用户', 'User')} value={userLabel(selection.record.uid)} />
             <Meta label={tr('模型', 'Model')} value={selection.record.type_alias || selection.record.type_name || ''} />
             <Meta label={tr('来源', 'Origin')} value={selection.record.origin ?? ''} />
@@ -110,7 +111,7 @@ export function HistoryRecordDrawer({
       {selection?.kind === 'types' && (
         <div className="flex flex-col gap-4">
           <dl className="grid grid-cols-2 gap-3">
-            <Meta label={tr('时间', 'Time')} value={selection.item.created_at ?? ''} />
+            <Meta label={tr('时间', 'Time')} value={fullDateTime(selection.item.created_at)} />
             <Meta label={tr('用户', 'User')} value={userLabel(selection.item.uid)} />
             <Meta label={tr('模型', 'Model')} value={selection.item.type_alias || selection.item.type_name || ''} />
             <Meta label={tr('属性', 'Attribute')} value={selection.item.attr_alias || selection.item.attr_name || ''} />
@@ -127,7 +128,7 @@ export function HistoryRecordDrawer({
       {selection?.kind === 'triggers' && (
         <div className="flex flex-col gap-4">
           <dl className="grid grid-cols-2 gap-3">
-            <Meta label={tr('时间', 'Time')} value={selection.item.created_at ?? ''} />
+            <Meta label={tr('时间', 'Time')} value={fullDateTime(selection.item.created_at)} />
             <Meta label={tr('用户', 'User')} value={userLabel(selection.item.uid)} />
             <Meta label={tr('模型', 'Model')} value={selection.item.type_name ?? ''} />
             <Meta label={tr('资源', 'Instance')} value={selection.item.ci_name || `#${selection.item.ci_id}`} />
