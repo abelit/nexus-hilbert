@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { server } from '@/test/msw-server';
+import { selectOption } from '@/test/select-option';
 import { useAuth } from '@/store/auth';
 import ModelDetailPage from './ModelDetail';
 import { ToastProvider } from '../components/Toast';
@@ -20,6 +21,8 @@ const model = {
   unique_key: 'hostname',
   parent_ids: [],
 };
+
+const disk = { ...model, id: 2, name: 'disk', alias: '磁盘', unique_key: 'sn' };
 
 const ownAttribute = {
   id: 10,
@@ -162,13 +165,13 @@ describe('the other tabs', () => {
           items: [
             {
               id: 7,
-              parent: { ctr_id: 7, type: model, attributes: [], relation_type: { id: 1, name: '包含', color: '#6366f1' }, constraint: '1-N', parent_attr_ids: [], child_attr_ids: [] },
+              parent: { ctr_id: 7, type: model, attributes: [], relation_type: { id: 1, name: '包含', color: '#6366f1' }, constraint: '0', parent_attr_ids: [], child_attr_ids: [] },
               child: {
                 ctr_id: 7,
                 type: { ...model, id: 2, name: 'disk', alias: '磁盘' },
                 attributes: [],
                 relation_type: { id: 1, name: '包含', color: '#6366f1' },
-                constraint: '1-N',
+                constraint: '0',
                 parent_attr_ids: [],
                 child_attr_ids: [],
               },
@@ -186,6 +189,36 @@ describe('the other tabs', () => {
     expect(await screen.findByRole('link', { name: '磁盘' })).toBeInTheDocument();
     expect(screen.getByText('子模型')).toBeInTheDocument();
     expect(screen.getByText('1-N')).toBeInTheDocument();
+  });
+
+  it('creates a relation with the wire cardinality code', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    let posted: unknown;
+    let postedPath = '';
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [model, disk], total: 2 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/relation-types', () =>
+        HttpResponse.json({ items: [{ id: 5, name: '包含', color: '#6366f1' }], total: 1 }),
+      ),
+      http.post('/api/v1/cmdb/ci-types/:parent/relation-children/:child', async ({ request, params }) => {
+        posted = await request.json();
+        postedPath = `/api/v1/cmdb/ci-types/${params.parent}/relation-children/${params.child}`;
+        return HttpResponse.json({});
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '模型关系' }));
+    await user.click(await screen.findByRole('button', { name: '加子模型' }));
+    await selectOption(screen.getByLabelText('对端模型'), '磁盘');
+    await selectOption(screen.getByLabelText('基数'), '1-1');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(posted).toEqual({ relation_type_id: 5, constraint: '1' }));
+    expect(postedPath).toBe('/api/v1/cmdb/ci-types/1/relation-children/2');
   });
 
   it('marks a uniqueness rule that names a deleted attribute', async () => {

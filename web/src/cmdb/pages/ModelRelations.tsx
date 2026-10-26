@@ -15,6 +15,7 @@ import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
 import { cn } from '@/lib/cn';
+import { RELATION_CONSTRAINTS, relationConstraintLabel } from '../lib/relation';
 
 import { describeError } from '../api/http';
 import {
@@ -39,18 +40,6 @@ import { useToast } from '../components/Toast';
 // its one-sided "add child/parent" flow; this page is for an operator who is
 // thinking about the graph rather than one model.
 
-// cantor stores the cardinality as 0/1/2; the console shows the familiar
-// 1-N / 1-1 / N-N labels. The form must send the code, not the label — the
-// handler validates against model.Constraint and rejects "1-N".
-const CONSTRAINTS = [
-  { value: '0', label: '1-N' },
-  { value: '1', label: '1-1' },
-  { value: '2', label: 'N-N' },
-] as const;
-
-function constraintLabel(code: string): string {
-  return CONSTRAINTS.find((item) => item.value === code)?.label ?? code;
-}
 
 export default function ModelRelationsPage() {
   const { tr } = useI18n();
@@ -163,7 +152,7 @@ export default function ModelRelationsPage() {
     {
       key: 'constraint',
       header: tr('基数', 'Cardinality'),
-      cell: (row) => <Chip>{constraintLabel(row.child.constraint) || '—'}</Chip>,
+      cell: (row) => <Chip>{relationConstraintLabel(row.child.constraint) || '—'}</Chip>,
     },
   ];
 
@@ -380,7 +369,7 @@ function RelationFormModal({
             label={tr('基数', 'Cardinality')}
             value={constraint}
             onValueChange={setConstraint}
-            options={CONSTRAINTS.map((item) => ({ value: item.value, label: item.label }))}
+            options={RELATION_CONSTRAINTS.map((item) => ({ value: item.value, label: item.label }))}
             className="mt-1 w-full"
           />
         </div>

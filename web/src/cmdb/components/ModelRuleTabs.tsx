@@ -13,6 +13,7 @@ import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
+import { RELATION_CONSTRAINTS, relationConstraintLabel } from '../lib/relation';
 
 import { describeError } from '../api/http';
 import {
@@ -172,7 +173,9 @@ export function RelationsTab({
       header: tr('基数', 'Cardinality'),
       cell: (row) => (
         <code className="font-mono text-[11px] text-text-muted">
-          {row.direction === 'children' ? row.relation.child.constraint : row.relation.parent.constraint}
+          {relationConstraintLabel(
+            row.direction === 'children' ? row.relation.child.constraint : row.relation.parent.constraint,
+          )}
         </code>
       ),
     },
@@ -273,7 +276,7 @@ function RelationModal({
   const [types, setTypes] = useState<RelationType[]>([]);
   const [peer, setPeer] = useState('');
   const [relationTypeID, setRelationTypeID] = useState('');
-  const [constraint, setConstraint] = useState('1-N');
+  const [constraint, setConstraint] = useState('0');
   const [showKey, setShowKey] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -379,11 +382,7 @@ function RelationModal({
             label={tr('基数', 'Cardinality')}
             value={constraint}
             onValueChange={setConstraint}
-            options={[
-              { value: '1-1', label: '1-1' },
-              { value: '1-N', label: '1-N' },
-              { value: 'N-N', label: 'N-N' },
-            ]}
+            options={RELATION_CONSTRAINTS.map((item) => ({ value: item.value, label: item.label }))}
             className="mt-1 w-40"
           />
           <p className="mt-1 text-[11px] text-text-faint">
