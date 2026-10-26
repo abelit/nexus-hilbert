@@ -34,6 +34,27 @@ describe('sheet parsing', () => {
     expect(parsed.rows).toEqual([['web-01', 8]]);
   });
 
+  it('writes Excel dates as the wall clock the import parser accepts', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('hosts');
+    sheet.addRow(['hostname', 'installed_on', 'last_seen']);
+    sheet.addRow([
+      'web-01',
+      new Date(Date.UTC(2026, 9, 26)),
+      new Date(Date.UTC(2026, 9, 26, 13, 45, 30)),
+    ]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const file = new File([buffer], 'hosts.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    // A date attribute rejects the toISOString() form; the space-separated
+    // wall clock is what both the date and the datetime validators parse.
+    expect((await parseSheetFile(file)).rows).toEqual([
+      ['web-01', '2026-10-26 00:00:00', '2026-10-26 13:45:30'],
+    ]);
+  });
+
   it('refuses too many rows and unsupported extensions', async () => {
     const tooMany = ['hostname', ...Array.from({ length: 5001 }, (_, index) => `host-${index}`)].join('\n');
     await expect(parseSheetFile(csvFile(tooMany))).rejects.toBeInstanceOf(SheetError);

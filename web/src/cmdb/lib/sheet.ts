@@ -150,7 +150,7 @@ async function parseXLSX(file: File): Promise<unknown[][]> {
 
 function cellValue(value: ExcelJS.CellValue): unknown {
   if (value == null) return '';
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) return formatExcelDate(value);
   if (typeof value !== 'object') return value;
   if ('richText' in value) return value.richText.map((part) => part.text).join('');
   if ('result' in value) return value.result ?? '';
@@ -160,6 +160,25 @@ function cellValue(value: ExcelJS.CellValue): unknown {
     return link.text ?? link.hyperlink ?? '';
   }
   return String(value);
+}
+
+/**
+ * Formats an Excel date as the sheet's wall clock.
+ *
+ * EXCEL DATES ARE NOT INSTANTS. ExcelJS returns a date cell as a Date at the
+ * serial's UTC epoch, so the UTC fields are the day and time the sheet shows;
+ * formatting them keeps a UTC+8 operator's 2026-10-26 from becoming 10-25.
+ *
+ * THE SPACE-SEPARATED FORM is what the import validators parse: a date
+ * attribute rejects `2026-10-26T00:00:00.000Z`, while `2026-10-26 00:00:00`
+ * parses as both a date and a datetime.
+ */
+function formatExcelDate(value: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())} ` +
+    `${pad(value.getUTCHours())}:${pad(value.getUTCMinutes())}:${pad(value.getUTCSeconds())}`
+  );
 }
 
 /** Builds a one-row XLSX template with the model's attribute aliases. */
