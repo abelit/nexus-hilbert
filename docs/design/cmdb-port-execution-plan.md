@@ -31,8 +31,9 @@
 | PR9 E2E/收尾 | 已完成 | `38d34eb` `c12fa0e` | DCIM move/rename、ModelDetail 自动发现 tab、144 张响应式截图、MySQL/CMDB/nginx 实测 |
 | 最终全分支评审 | 已完成 | `f94d283`…`88a7713` | 1 critical + 8 important 修复 |
 | 评审 minor / 既有缺陷 | 已完成 | `97aa478`…`9063f79` | 7 minor、残余安全风险、3 个既有缺陷；镜像构建支持镜像源覆盖 |
+| 交付 | 已推送 + PR | `2c4e539` | [#553](https://github.com/ongridio/ongrid/pull/553)；合并 main，commit-policy 通过 |
 
-PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 critical、8 important、8 minor）已全部修复（`f94d283`…`ace7538`），另修复 3 个评审中发现的既有缺陷，残余安全风险已关闭。分支可进入 PR/评审。未推送、未创建 PR；推送前按 AGENTS.md 运行 `gh pr checks`。
+PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 critical、8 important、8 minor）已全部修复（`f94d283`…`ace7538`），另修复 3 个评审中发现的既有缺陷，残余安全风险已关闭。分支已合并 `origin/main`（`5eb7ab1`）并推送，PR：[#553](https://github.com/ongridio/ongrid/pull/553)。`commit-policy` 与 `validate commit messages` 通过；`mergeStateStatus=BLOCKED` 等待评审/分支保护要求。
 
 ## 已完成阶段的验收证据
 
@@ -95,13 +96,14 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 
 ### 本轮验证
 
-- Go：`go test ./...` 通过（168 个 ok 包，exit 0）；`make test-race`（`go test -race ./...`）通过（168 个 ok 包，exit 0，无 DATA RACE）；`go vet ./...` 通过。
+- Go：`go test ./...` 通过；`make test-race`（`go test -race ./...`）在合并 main 后通过（193 个 ok 包，exit 0，无 DATA RACE）；`go vet ./...` 通过。
 - `make test-integration`：通过（exit 0）。
 - `make test-e2e`：本环境未通过。首次失败是 Docker Hub 拉取 `mysql:8.0` 超时；用本地 `mysql:8.0.46` 打 `mysql:8.0` 标签重跑后，`tests/e2e/assistant_chat_test.go` 的 fake LLM/capture 用例失败，并在 O32 用例超时（10m）。该目录在本分支无改动，也不含 CMDB 引用，不是本分支回归；但 e2e 不能记为通过。
 - 前端：`make test-web-ci-cmdb` 31 文件 / **170 tests**；`npm run typecheck`、`npm run build` 通过；改动文件 `eslint` 0 错误（`FacetTree` 有 1 条既有的 exhaustive-deps warning）。
 - 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
 - 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
 - `bash scripts/test-compose-release-package.sh` 通过（含新增的 uninstall 镜像断言）；`docker compose -f deploy/docker-compose.yml config` 通过。
+- 合并 `origin/main` 后重新验证：`go test ./...`、`go vet ./...`、`make test-race`（193 包）、`make test-integration`、前端 170 tests、`typecheck`、`build`、Playwright 144、release-package 脚本、`docker compose config` 全部通过。
 - `git diff --check` 通过；人工 import 边界核对通过（`cmdb/biz`→`cmdb/data`/其它 BC、`cmdb/server`→`cmdb/data`、`pkg`→BC、`cmd/ongrid`→`cmdb` 均为空）。
 - `make arch-lint` 仍未运行：本机无工具，且 `scripts/agent-observability/README.md:107` 已记录该配置在 go-arch-lint 1.12.0 下校验失败，属既有问题；不能记为通过。
 
