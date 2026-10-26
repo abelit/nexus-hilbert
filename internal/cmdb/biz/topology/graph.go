@@ -112,7 +112,10 @@ func BuildGraph(ctx context.Context, q GraphQueries, in GraphInput) (*Graph, err
 	for _, root := range roots {
 		root.TypeID = in.CentralNodeType
 		nodes[root.ID] = root
-		visited[root.ID] = true
+		// NOT VISITED: a root may also be a child of another root when the
+		// central model relates to itself. cantor seeded only the node map and
+		// deduplicated at the end; marking roots visited drops the edge into
+		// them and leaves the roots as isolated dots.
 		frontier = append(frontier, root.ID)
 	}
 	// THE TWO DIRECTIONS EACH START AT THE ROOTS. levelsOf puts positive levels

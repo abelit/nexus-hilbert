@@ -201,7 +201,7 @@ func (r *Repo) CreateView(ctx context.Context, in topologybiz.ViewWrite) (*topol
 			Name: in.Name, GroupID: in.GroupID, Category: in.Category,
 			CentralNodeType:      idp(in.CentralNodeType),
 			CentralNodeInstances: in.CentralNodeInstances,
-			Path:                 in.Path, Order: max + 1, Option: in.Option,
+			Path:                 topologymodel.Path(in.Path), Order: max + 1, Option: in.Option,
 		}
 		return tx.Create(&row).Error
 	})

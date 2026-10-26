@@ -183,3 +183,33 @@ func TestBuildGraphRefusesTooManyNodes(t *testing.T) {
 		t.Fatalf("err = %v, want ErrGraphTooLarge", err)
 	}
 }
+
+// A SELF-REFERENCING CENTRAL MODEL CAN REACH A ROOT AS A CHILD. Roots are
+// seeded as nodes, but not as visited: marking them visited would drop every
+// edge into them and render the root set as isolated dots.
+func TestBuildGraphKeepsEdgesIntoRoots(t *testing.T) {
+	q := &stubGraph{
+		roots: []Node{
+			{ID: 100, TypeID: 1, Name: "web-01"},
+			{ID: 101, TypeID: 1, Name: "web-02"},
+		},
+		children: map[model.ID][]GraphEdge{
+			100: {{From: 100, To: 101, FromTypeID: 1, ToTypeID: 1}},
+		},
+		parents: map[model.ID][]GraphEdge{},
+		names:   map[model.ID]string{100: "web-01", 101: "web-02"},
+	}
+	got, err := BuildGraph(context.Background(), q, GraphInput{
+		CentralNodeType: 1,
+		Path:            map[string][]model.ID{"1": {1}},
+	})
+	if err != nil {
+		t.Fatalf("BuildGraph: %v", err)
+	}
+	if len(got.Links) != 1 || got.Links[0].From != 100 || got.Links[0].To != 101 {
+		t.Fatalf("links = %+v, want 100→101", got.Links)
+	}
+	if len(got.Nodes) != 2 {
+		t.Fatalf("nodes = %+v, want the two roots once each", got.Nodes)
+	}
+}

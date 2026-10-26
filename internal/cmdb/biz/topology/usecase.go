@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	topologymodel "github.com/ongridio/ongrid/internal/cmdb/model/topology"
@@ -211,9 +212,9 @@ func (u *Usecase) CreateGroup(ctx context.Context, name string) (*Group, error) 
 	if u.repo == nil {
 		return nil, errs.ErrNotWiredYet
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, fmt.Errorf("%w: name", errs.ErrInvalid)
+	name, err := validateGroupName(name)
+	if err != nil {
+		return nil, err
 	}
 	existing, err := u.repo.FindGroupByName(ctx, name)
 	if err != nil {
@@ -242,9 +243,9 @@ func (u *Usecase) UpdateGroup(ctx context.Context, id model.ID, in GroupInput) (
 		return nil, fmt.Errorf("%w: %d", ErrGroupNotFound, id)
 	}
 	if in.Name != nil {
-		name := strings.TrimSpace(*in.Name)
-		if name == "" {
-			return nil, fmt.Errorf("%w: name", errs.ErrInvalid)
+		name, err := validateGroupName(*in.Name)
+		if err != nil {
+			return nil, err
 		}
 		if name != existing.Name {
 			other, err := u.repo.FindGroupByName(ctx, name)
@@ -405,7 +406,7 @@ func (u *Usecase) Graph(ctx context.Context, id model.ID) (*Graph, error) {
 	}
 	return BuildGraph(ctx, u.graph, GraphInput{
 		CentralNodeType: view.CentralNodeType, CentralNodeInstances: view.CentralNodeInstances,
-		Path: view.Path,
+		Path: map[string][]model.ID(view.Path),
 	})
 }
 
@@ -428,10 +429,35 @@ func (u *Usecase) TypeRelations(ctx context.Context, ref string) (children, pare
 	return u.models.RelatedTypes(ctx, ref)
 }
 
+// The stored columns are varchar(64) for names and varchar(32) for a view's
+// category. Count RUNES, not bytes: MySQL counts characters, and a Chinese
+// name of 64 characters must fit.
+const (
+	maxNameRunes     = 64
+	maxCategoryRunes = 32
+)
+
+func validateGroupName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", fmt.Errorf("%w: name", errs.ErrInvalid)
+	}
+	if utf8.RuneCountInString(name) > maxNameRunes {
+		return "", fmt.Errorf("%w: name is longer than %d characters", errs.ErrInvalid, maxNameRunes)
+	}
+	return name, nil
+}
+
 func validateView(in ViewInput) (string, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return "", fmt.Errorf("%w: name", errs.ErrInvalid)
+	}
+	if utf8.RuneCountInString(name) > maxNameRunes {
+		return "", fmt.Errorf("%w: name is longer than %d characters", errs.ErrInvalid, maxNameRunes)
+	}
+	if utf8.RuneCountInString(in.Category) > maxCategoryRunes {
+		return "", fmt.Errorf("%w: category is longer than %d characters", errs.ErrInvalid, maxCategoryRunes)
 	}
 	if in.CentralNodeType <= 0 {
 		return "", fmt.Errorf("%w: central_node_type", errs.ErrInvalid)
@@ -447,7 +473,7 @@ func renderView(row topologymodel.View) View {
 		ID: row.ID, Name: row.Name, GroupID: row.GroupID,
 		Category: row.Category, CentralNodeType: derefID(row.CentralNodeType),
 		CentralNodeInstances: row.CentralNodeInstances,
-		Path:                 row.Path, Order: row.Order, Option: row.Option,
+		Path:                 map[string][]model.ID(row.Path), Order: row.Order, Option: row.Option,
 		CreatedAt: formatTime(row.CreatedAt), UpdatedAt: formatTime(row.UpdatedAt),
 	}
 	if got.Path == nil {

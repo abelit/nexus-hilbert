@@ -7,6 +7,11 @@
 package topology
 
 import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+
 	cmdbmodel "github.com/ongridio/ongrid/internal/cmdb/model"
 )
 
@@ -39,7 +44,7 @@ type View struct {
 
 	// Path maps a level to the model ids allowed at it. Positive levels walk
 	// down from the roots, negative levels walk up.
-	Path map[string][]cmdbmodel.ID `gorm:"column:path;serializer:json"`
+	Path Path `gorm:"column:path;serializer:json"`
 
 	Order int `gorm:"column:order;not null;default:0"`
 
@@ -48,3 +53,40 @@ type View struct {
 }
 
 func (View) TableName() string { return "c_topology_views" }
+
+// Path is the stored level map.
+//
+// CANTOR WROTE THE MODEL IDS AS STRINGS. An adopted row therefore contains
+// `{"1": ["2"]}`, which encoding/json refuses to put into []int32. Decoding
+// both forms keeps one legacy row from making every topology read fail.
+type Path map[string][]cmdbmodel.ID
+
+func (p *Path) UnmarshalJSON(data []byte) error {
+	var raw map[string][]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	out := make(Path, len(raw))
+	for level, items := range raw {
+		ids := make([]cmdbmodel.ID, 0, len(items))
+		for _, item := range items {
+			var id cmdbmodel.ID
+			if err := json.Unmarshal(item, &id); err == nil {
+				ids = append(ids, id)
+				continue
+			}
+			var text string
+			if err := json.Unmarshal(item, &text); err != nil {
+				return fmt.Errorf("topology path %q: %w", level, err)
+			}
+			n, err := strconv.ParseInt(strings.TrimSpace(text), 10, 32)
+			if err != nil {
+				return fmt.Errorf("topology path %q: %w", level, err)
+			}
+			ids = append(ids, cmdbmodel.ID(n))
+		}
+		out[level] = ids
+	}
+	*p = out
+	return nil
+}
