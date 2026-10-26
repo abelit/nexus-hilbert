@@ -25,6 +25,7 @@ const ModelsPage = lazy(() => import('./pages/Models'));
 const ModelDetailPage = lazy(() => import('./pages/ModelDetail'));
 const ModelRelationsPage = lazy(() => import('./pages/ModelRelations'));
 const ServiceTreesPage = lazy(() => import('./pages/ServiceTrees'));
+const PreferencesPage = lazy(() => import('./pages/Preferences'));
 const SubscriptionsPage = lazy(() => import('./pages/Subscriptions'));
 const InstancesPage = lazy(() => import('./pages/Instances'));
 const SearchPage = lazy(() => import('./pages/Search'));
@@ -107,6 +108,15 @@ export const cmdbRoutes: CMDBRoute[] = [
       </PageShell>
     ),
   },
+  {
+    path: '/cmdb/preferences',
+    element: (
+      <PageShell>
+        <PreferencesPage />
+      </PageShell>
+    ),
+  },
+  // Kept for bookmarks; the menu now opens /cmdb/preferences.
   {
     path: '/cmdb/subscriptions',
     element: (
@@ -197,7 +207,7 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
       { key: 'model-relations', to: '/cmdb/model-relations', icon: Share2, label: tr('模型关系', 'Model relations') },
       { key: 'relation-types', to: '/cmdb/relation-types', icon: GitBranch, label: tr('关系类型', 'Relation types') },
       { key: 'service-trees', to: '/cmdb/service-trees', icon: Layers3, label: tr('服务树定义', 'Tree definitions') },
-      { key: 'subscriptions', to: '/cmdb/subscriptions', icon: Star, label: tr('我的订阅', 'My subscriptions') },
+      { key: 'preferences', to: '/cmdb/preferences', icon: Star, label: tr('偏好设置', 'Preferences') },
       { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources') },
       { key: 'search', to: '/cmdb/search', icon: Search, label: tr('资源搜索', 'Resource search') },
       { key: 'hierarchy', to: '/cmdb/hierarchy', icon: ListTree, label: tr('资源层级', 'Hierarchy') },
@@ -245,10 +255,10 @@ export const cmdbPaletteRoutes: Array<{
     group: 'CMDB',
   },
   {
-    path: '/cmdb/subscriptions',
-    zh: 'CMDB / 我的订阅',
-    en: 'CMDB / My subscriptions',
-    keywords: ['cmdb', 'subscription', 'columns', 'dingyue'],
+    path: '/cmdb/preferences',
+    zh: 'CMDB / 偏好设置',
+    en: 'CMDB / Preferences',
+    keywords: ['cmdb', 'preference', 'subscription', 'columns', 'pianhao', 'dingyue'],
     group: 'CMDB',
   },
   {

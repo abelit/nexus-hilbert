@@ -44,7 +44,7 @@ import { useToast } from '../components/Toast';
 // apart, so the backend marks it `is_fixed` and this page refuses to unpin it
 // rather than letting an operator hide the one column that names the row.
 
-export default function SubscriptionsPage() {
+export default function SubscriptionsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { tr } = useI18n();
   const toast = useToast();
 
@@ -142,32 +142,34 @@ export default function SubscriptionsPage() {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-      <PageHeader
-        title={tr('我的订阅', 'My subscriptions')}
-        subtitle={tr(
-          '选择每个模型的列表里显示哪些列，以及侧栏里模型的顺序。',
-          'Choose which columns each model’s list shows, and the order of the models in the sidebar.',
-        )}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={() => void load(true)}
-              disabled={loading || refreshing}
-              className="inline-flex items-center gap-1.5"
-            >
-              <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
-              {tr('刷新', 'Refresh')}
-            </Button>
-            <Button variant="outline" size="sm" type="button" onClick={() => setAutoOpen(true)} className="inline-flex items-center gap-1.5">
-              {tr('自动订阅', 'Auto-subscribe')}
-              {autoSub?.enabled ? <Chip tone="success">{tr('开', 'On')}</Chip> : <Chip>{tr('关', 'Off')}</Chip>}
-            </Button>
-          </div>
-        }
-      />
+      {!embedded && (
+        <PageHeader
+          title={tr('我的订阅', 'My subscriptions')}
+          subtitle={tr(
+            '选择每个模型的列表里显示哪些列，以及侧栏里模型的顺序。',
+            'Choose which columns each model’s list shows, and the order of the models in the sidebar.',
+          )}
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => void load(true)}
+                disabled={loading || refreshing}
+                className="inline-flex items-center gap-1.5"
+              >
+                <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
+                {tr('刷新', 'Refresh')}
+              </Button>
+              <Button variant="outline" size="sm" type="button" onClick={() => setAutoOpen(true)} className="inline-flex items-center gap-1.5">
+                {tr('自动订阅', 'Auto-subscribe')}
+                {autoSub?.enabled ? <Chip tone="success">{tr('开', 'On')}</Chip> : <Chip>{tr('关', 'Off')}</Chip>}
+              </Button>
+            </div>
+          }
+        />
+      )}
 
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
         {err && (
