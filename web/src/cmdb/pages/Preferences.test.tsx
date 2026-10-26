@@ -81,6 +81,16 @@ beforeEach(() => {
 });
 
 describe('the preferences page', () => {
+  it('keeps auto-subscribe reachable inside the embedded models tab', async () => {
+    baseHandlers();
+    renderPage();
+
+    const button = await screen.findByRole('button', { name: /自动订阅/ });
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
   it('shows the model groups tab with the groups from the server', async () => {
     baseHandlers();
     renderPage();
