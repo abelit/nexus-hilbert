@@ -130,6 +130,12 @@ func TestAttributeHistoryGroupsChangesUnderTheirRecord(t *testing.T) {
 	if first.RecordID != 2 || first.UID != 7 || first.TypeName != "host" || first.Origin != "ui" {
 		t.Fatalf("first record = %+v", first)
 	}
+	// A timestamp carries its zone. The console sends RFC 3339 ranges and
+	// renders the result in the browser's zone, so a naive server-local string
+	// would shift both the filter and the display for every non-UTC operator.
+	if _, err := time.Parse(time.RFC3339, first.CreatedAt); err != nil {
+		t.Fatalf("created_at = %q, want RFC3339: %v", first.CreatedAt, err)
+	}
 	if len(first.Changes) != 2 {
 		t.Fatalf("first record changes = %+v, want 2", first.Changes)
 	}
@@ -140,7 +146,7 @@ func TestAttributeHistoryGroupsChangesUnderTheirRecord(t *testing.T) {
 	if first.Changes[0].Old != "web-00" || first.Changes[0].New != "web-01" {
 		t.Fatalf("old/new = %q/%q", first.Changes[0].Old, first.Changes[0].New)
 	}
-	if first.CreatedAt != "2026-10-26 11:00:00" {
+	if first.CreatedAt != "2026-10-26T11:00:00Z" {
 		t.Fatalf("created_at = %q", first.CreatedAt)
 	}
 }
@@ -229,5 +235,59 @@ func TestPerCIHistoryPagesAndNamesTheAttribute(t *testing.T) {
 	}
 	if len(got.Items) != 1 || got.Items[0].AttrName != "hostname" || got.Items[0].CIName != "web-01" {
 		t.Fatalf("ci history = %+v", got.Items)
+	}
+}
+
+// A password attribute's stored old/new values never reach a history response,
+// on either the global page or the per-instance page. The attribute's name may
+// still be shown: what changed is useful, the value is not.
+func TestHistoryMasksSensitiveAttributeValues(t *testing.T) {
+	const masked = "******"
+	repo := &stubRepo{attributes: []AttributeRow{
+		{
+			Record: Record{ID: 3, UID: 7, TypeID: 1, Origin: "ui", CreatedAt: timeAt(11)},
+			ID:     30, OperateType: "u", CIID: 100, AttrID: 12,
+			Old: ptr("hunter2"), New: ptr("correct-horse"),
+		},
+		{
+			Record: Record{ID: 3, UID: 7, TypeID: 1, Origin: "ui", CreatedAt: timeAt(11)},
+			ID:     31, OperateType: "u", CIID: 100, AttrID: 13,
+			New: ptr("plain"),
+		},
+	}}
+	uc := NewUsecase(repo).
+		WithTypeNames(stubTypeNames{1: "host"}).
+		WithAttributes(stubAttributes{1: []AttributeRef{
+			{ID: 12, Name: "password", Alias: "密码", ValueType: "2", Sensitive: true},
+			{ID: 13, Name: "note", Alias: "备注", ValueType: "2"},
+		}}).
+		WithCINames(stubCINames{100: "web-01"})
+
+	page, err := uc.ListAttributes(context.Background(), AttributeFilter{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListAttributes: %v", err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].Changes) != 2 {
+		t.Fatalf("page = %+v", page.Items)
+	}
+	secret, note := page.Items[0].Changes[0], page.Items[0].Changes[1]
+	if secret.Old != masked || secret.New != masked {
+		t.Fatalf("password values = %q → %q, want masked", secret.Old, secret.New)
+	}
+	if secret.AttrName != "password" || secret.AttrAlias != "密码" {
+		t.Fatalf("password label = %+v, want the name kept", secret)
+	}
+	if note.Old != "" || note.New != "plain" {
+		t.Fatalf("note values = %q → %q, want untouched", note.Old, note.New)
+	}
+
+	perCI, err := uc.ListCIAttributes(context.Background(), 100, 1, 20)
+	if err != nil {
+		t.Fatalf("ListCIAttributes: %v", err)
+	}
+	for _, change := range perCI.Items {
+		if change.AttrID == 12 && (change.Old != masked || change.New != masked) {
+			t.Fatalf("per-CI password values = %q → %q, want masked", change.Old, change.New)
+		}
 	}
 }

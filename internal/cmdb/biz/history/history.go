@@ -188,6 +188,10 @@ type AttributeRef struct {
 	Name      string   `json:"name"`
 	Alias     string   `json:"alias"`
 	ValueType string   `json:"value_type"`
+
+	// Sensitive marks a password, link or file attribute. Histories keep the
+	// name of what changed — that is the audit trail — but never its value.
+	Sensitive bool `json:"-"`
 }
 
 // AttributeResolver lists a model's attributes.
@@ -676,8 +680,22 @@ func attributeChange(row AttributeRow, attrs map[model.ID]map[model.ID]Attribute
 	}
 	if ref, ok := attrs[row.Record.TypeID][row.AttrID]; ok {
 		change.AttrName, change.AttrAlias, change.ValueType = ref.Name, ref.Alias, ref.ValueType
+		if ref.Sensitive {
+			change.Old = maskSensitive(change.Old)
+			change.New = maskSensitive(change.New)
+		}
 	}
 	return change
+}
+
+// maskSensitive replaces a sensitive value with the placeholder cantor wrote
+// into its own history. An empty side stays empty: "was unset" is itself part
+// of the audit record and must not be confused with "changed to a secret".
+func maskSensitive(value string) string {
+	if value == "" {
+		return ""
+	}
+	return "******"
 }
 
 type typeName struct{ name, alias string }
@@ -753,11 +771,14 @@ func clampPage(page, size int) (int, int) {
 	return page, size
 }
 
+// formatTime carries the zone. The console sends RFC 3339 ranges and renders
+// the result in the browser's zone; a naive server-local string would shift
+// both the filter and the display for an operator outside the server's zone.
 func formatTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Format("2006-01-02 15:04:05")
+	return t.Format(time.RFC3339)
 }
 
 func deref(s string) string { return s }

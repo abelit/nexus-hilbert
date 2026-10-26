@@ -39,8 +39,8 @@ type attributeJoin struct {
 	RecordCreatedAt time.Time `gorm:"column:record_created_at"`
 }
 
-func (r *Repo) attributeBase(f historybiz.AttributeFilter) *gorm.DB {
-	q := r.db.Table("c_attribute_histories AS h").
+func (r *Repo) attributeBase(ctx context.Context, f historybiz.AttributeFilter) *gorm.DB {
+	q := r.db.WithContext(ctx).Table("c_attribute_histories AS h").
 		Joins("JOIN c_records AS r ON r.id = h.record_id").
 		Where("h.delete_marker = 0")
 	if !f.Start.IsZero() {
@@ -71,11 +71,11 @@ func (r *Repo) attributeBase(f historybiz.AttributeFilter) *gorm.DB {
 func (r *Repo) ListAttributeRecords(ctx context.Context, f historybiz.AttributeFilter) ([]historybiz.AttributeRow, int64, error) {
 	page, size := pageOf(f.Page, f.PageSize)
 	var total int64
-	if err := r.attributeBase(f).Count(&total).Error; err != nil {
+	if err := r.attributeBase(ctx, f).Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("cmdb history: count attribute records: %w", err)
 	}
 	var rows []attributeJoin
-	if err := r.attributeBase(f).
+	if err := r.attributeBase(ctx, f).
 		Select("h.*, r.uid AS uid, r.origin AS origin, r.ticket_id AS ticket_id, " +
 			"r.reason AS reason, r.type_id AS type_id, r.created_at AS record_created_at").
 		Order("h.id DESC").Limit(size).Offset((page - 1) * size).Scan(&rows).Error; err != nil {
@@ -114,8 +114,8 @@ type relationJoin struct {
 	RecordCreatedAt time.Time `gorm:"column:record_created_at"`
 }
 
-func (r *Repo) relationBase(f historybiz.RelationFilter) *gorm.DB {
-	q := r.db.Table("c_relation_histories AS h").
+func (r *Repo) relationBase(ctx context.Context, f historybiz.RelationFilter) *gorm.DB {
+	q := r.db.WithContext(ctx).Table("c_relation_histories AS h").
 		Joins("JOIN c_records AS r ON r.id = h.record_id").
 		Where("h.delete_marker = 0")
 	if !f.Start.IsZero() {
@@ -146,11 +146,11 @@ func (r *Repo) relationBase(f historybiz.RelationFilter) *gorm.DB {
 func (r *Repo) ListRelationRecords(ctx context.Context, f historybiz.RelationFilter) ([]historybiz.RelationRow, int64, error) {
 	page, size := pageOf(f.Page, f.PageSize)
 	var total int64
-	if err := r.relationBase(f).Count(&total).Error; err != nil {
+	if err := r.relationBase(ctx, f).Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("cmdb history: count relation records: %w", err)
 	}
 	var rows []relationJoin
-	if err := r.relationBase(f).
+	if err := r.relationBase(ctx, f).
 		Select("h.*, r.uid AS uid, r.origin AS origin, r.ticket_id AS ticket_id, " +
 			"r.reason AS reason, r.type_id AS type_id, r.created_at AS record_created_at").
 		Order("h.id DESC").Limit(size).Offset((page - 1) * size).Scan(&rows).Error; err != nil {
@@ -175,8 +175,8 @@ func (r *Repo) ListRelationRecords(ctx context.Context, f historybiz.RelationFil
 
 // --- model-configuration history ---
 
-func (r *Repo) typeBase(f historybiz.TypeFilter) *gorm.DB {
-	q := r.db.Table("c_ci_type_histories").Where("delete_marker = 0")
+func (r *Repo) typeBase(ctx context.Context, f historybiz.TypeFilter) *gorm.DB {
+	q := r.db.WithContext(ctx).Table("c_ci_type_histories").Where("delete_marker = 0")
 	if !f.Start.IsZero() {
 		q = q.Where("created_at >= ?", f.Start)
 	}
@@ -199,11 +199,11 @@ func (r *Repo) typeBase(f historybiz.TypeFilter) *gorm.DB {
 func (r *Repo) ListTypeRecords(ctx context.Context, f historybiz.TypeFilter) ([]historybiz.TypeRow, int64, error) {
 	page, size := pageOf(f.Page, f.PageSize)
 	var total int64
-	if err := r.typeBase(f).Count(&total).Error; err != nil {
+	if err := r.typeBase(ctx, f).Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("cmdb history: count type records: %w", err)
 	}
 	var rows []cimodel.TypeHistory
-	if err := r.typeBase(f).Order("id DESC").
+	if err := r.typeBase(ctx, f).Order("id DESC").
 		Limit(size).Offset((page - 1) * size).Find(&rows).Error; err != nil {
 		return nil, 0, fmt.Errorf("cmdb history: list type records: %w", err)
 	}
@@ -228,8 +228,8 @@ type triggerJoin struct {
 	TypeID *model.ID `gorm:"column:type_id"`
 }
 
-func (r *Repo) triggerBase(f historybiz.TriggerFilter) *gorm.DB {
-	q := r.db.Table("c_ci_trigger_histories AS h").
+func (r *Repo) triggerBase(ctx context.Context, f historybiz.TriggerFilter) *gorm.DB {
+	q := r.db.WithContext(ctx).Table("c_ci_trigger_histories AS h").
 		Joins("LEFT JOIN c_records AS r ON r.id = h.record_id").
 		Where("h.delete_marker = 0")
 	if !f.Start.IsZero() {
@@ -260,11 +260,11 @@ func (r *Repo) triggerBase(f historybiz.TriggerFilter) *gorm.DB {
 func (r *Repo) ListTriggerRecords(ctx context.Context, f historybiz.TriggerFilter) ([]historybiz.TriggerRow, int64, error) {
 	page, size := pageOf(f.Page, f.PageSize)
 	var total int64
-	if err := r.triggerBase(f).Count(&total).Error; err != nil {
+	if err := r.triggerBase(ctx, f).Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("cmdb history: count trigger records: %w", err)
 	}
 	var rows []triggerJoin
-	if err := r.triggerBase(f).
+	if err := r.triggerBase(ctx, f).
 		Select("h.*, r.uid AS uid, r.type_id AS type_id").
 		Order("h.id DESC").Limit(size).Offset((page - 1) * size).Scan(&rows).Error; err != nil {
 		return nil, 0, fmt.Errorf("cmdb history: list trigger records: %w", err)

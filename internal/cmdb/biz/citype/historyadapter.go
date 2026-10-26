@@ -60,6 +60,7 @@ func (r *HistoryAttributes) ResolveAttributes(ctx context.Context, typeID model.
 	for _, item := range effective.Attributes {
 		out = append(out, historybiz.AttributeRef{
 			ID: item.ID, Name: item.Name, Alias: item.Alias, ValueType: item.ValueType,
+			Sensitive: item.IsPassword || item.IsLink || item.IsFile,
 		})
 	}
 	return out, nil

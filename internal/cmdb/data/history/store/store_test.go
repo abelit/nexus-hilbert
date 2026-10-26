@@ -247,3 +247,43 @@ func TestPerCIQueriesFilterAndPage(t *testing.T) {
 		t.Fatalf("ci triggers = %+v of %d", triggers, total)
 	}
 }
+
+// A canceled request must stop its query. AGENTS.md requires new IO paths to
+// carry the caller's context; a store that ignores it keeps a pooled
+// connection busy for a response nobody will read.
+func TestHistoryQueriesHonourContext(t *testing.T) {
+	db := newTestDB(t)
+	seed(t, db)
+	repo := NewRepo(db)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	calls := []struct {
+		name string
+		call func() error
+	}{
+		{"attributes", func() error {
+			_, _, err := repo.ListAttributeRecords(ctx, historybiz.AttributeFilter{Page: 1, PageSize: 20})
+			return err
+		}},
+		{"relations", func() error {
+			_, _, err := repo.ListRelationRecords(ctx, historybiz.RelationFilter{Page: 1, PageSize: 20})
+			return err
+		}},
+		{"types", func() error {
+			_, _, err := repo.ListTypeRecords(ctx, historybiz.TypeFilter{Page: 1, PageSize: 20})
+			return err
+		}},
+		{"triggers", func() error {
+			_, _, err := repo.ListTriggerRecords(ctx, historybiz.TriggerFilter{Page: 1, PageSize: 20})
+			return err
+		}},
+	}
+	for _, tc := range calls {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); err == nil {
+				t.Fatal("a canceled context did not stop the query")
+			}
+		})
+	}
+}

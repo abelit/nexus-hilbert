@@ -28,6 +28,23 @@ func NewHistoryCINames(uc *Usecase) *HistoryCINames { return &HistoryCINames{uc:
 
 var _ historybiz.CINameResolver = (*HistoryCINames)(nil)
 
+// historyNameAttribute picks the attribute that titles an instance in history.
+//
+// THE NORMAL READ PATH HIDES PASSWORDS, LINKS AND FILES — see
+// renderInstance — and history is readable by any authenticated caller, so a
+// model that marks its show attribute as a password must fall back to the
+// unique attribute. When both are sensitive the caller gets no name and the
+// console prints the id, which is ugly but safe.
+func historyNameAttribute(show, unique AttributeSpec) AttributeSpec {
+	if show.ID != 0 && show.Modifiers().IsPasswordSafe() {
+		return show
+	}
+	if unique.ID != 0 && unique.Modifiers().IsPasswordSafe() {
+		return unique
+	}
+	return AttributeSpec{}
+}
+
 // ResolveCINames returns the display name of each instance it can find.
 func (r *HistoryCINames) ResolveCINames(ctx context.Context, ids []model.ID) (map[model.ID]string, error) {
 	out := map[model.ID]string{}
@@ -57,10 +74,7 @@ func (r *HistoryCINames) ResolveCINames(ctx context.Context, ids []model.ID) (ma
 		if set == nil {
 			continue
 		}
-		attr := set.ShowAttr
-		if attr.ID == 0 {
-			attr = set.UniqueAttr
-		}
+		attr := historyNameAttribute(set.ShowAttr, set.UniqueAttr)
 		if attr.ID == 0 {
 			continue
 		}
