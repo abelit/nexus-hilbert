@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { server } from '@/test/msw-server';
+import { selectOption } from '@/test/select-option';
 import { useAuth } from '@/store/auth';
 import ModelRelationsPage from './ModelRelations';
 import { ToastProvider } from '../components/Toast';
@@ -73,13 +74,45 @@ describe('the flat relation list', () => {
     expect(screen.queryByRole('link', { name: '磁盘' })).not.toBeInTheDocument();
   });
 
-  it('says adding happens on a model page, and disables deleting for a non-administrator', async () => {
+  it('disables relation writes for a non-administrator', async () => {
     useAuth.setState({ token: null, role: 'user' });
     server.use(http.get('/api/v1/cmdb/ci-type-relations', () => HttpResponse.json({ items: relations, total: relations.length })));
     renderPage();
 
-    expect(await screen.findByText(/新增关系在模型详情页里做/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '新建关系' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '删除 host → disk' })).toBeDisabled();
+  });
+
+  it('creates a parent → child relation', async () => {
+    let posted: unknown;
+    let postedPath = '';
+    server.use(
+      http.get('/api/v1/cmdb/ci-type-relations', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/relation-types', () =>
+        HttpResponse.json({ items: [{ id: 5, name: '连接', color: '#6366f1' }], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/ci-types', () =>
+        HttpResponse.json({ items: [host, disk], total: 2 }),
+      ),
+      http.post(
+        '/api/v1/cmdb/ci-types/:parent/relation-children/:child',
+        async ({ request, params }) => {
+          postedPath = `/api/v1/cmdb/ci-types/${params.parent}/relation-children/${params.child}`;
+          posted = await request.json();
+          return HttpResponse.json(relations[0]);
+        },
+      ),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: '新建关系' }));
+    await selectOption(screen.getByLabelText('父模型'), '主机');
+    await selectOption(screen.getByLabelText('子模型'), '磁盘');
+    await selectOption(screen.getByLabelText('关系类型'), '连接');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(posted).toEqual({ relation_type_id: 5, constraint: '1-N' }));
+    expect(postedPath).toBe('/api/v1/cmdb/ci-types/1/relation-children/2');
   });
 
   it('asks before deleting and does nothing on cancel', async () => {

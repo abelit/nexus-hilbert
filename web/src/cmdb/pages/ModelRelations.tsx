@@ -1,34 +1,43 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { Hint } from '@/components/ui/Tooltip';
 import { Input } from '@/components/ui/Input';
+import { Label } from '@/components/ui/Label';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { Select } from '@/components/ui/Select';
+import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
 import { cn } from '@/lib/cn';
 
 import { describeError } from '../api/http';
-import { deleteRelationById, listRelations, type ModelRelation } from '../api/citype';
+import {
+  deleteRelationById,
+  listCITypes,
+  listRelations,
+  saveRelation,
+  type CIType,
+  type ModelRelation,
+} from '../api/citype';
+import { listRelationTypes, type RelationType } from '../api/relationtype';
 import { DataTable, type Column } from '../components/DataTable';
 import { useToast } from '../components/Toast';
 
 // 模型关系 — every parent → child pair in the estate, in one table.
 //
-// IT IS A READ-ONLY VIEW PLUS DELETE, and the reason is deliberate: a relation's
-// DIRECTION is what a create needs, and on this page the operator would have to
-// say "which of these two is the parent" twice. Creating belongs on a model's
-// own page, where one side is fixed. This page is for the question the flat view
-// answers — "what is wired to what" — and for removing an edge you can see.
-//
 // THE PAIR IS THE ROW. A relation is one edge, so the parent and the child are
 // both columns rather than a nested tree: a tree would hide the fact that some
 // models have many parents and others have none.
+//
+// CREATION IS ALSO HERE, with both sides explicit. The model detail page keeps
+// its one-sided "add child/parent" flow; this page is for an operator who is
+// thinking about the graph rather than one model.
 
 export default function ModelRelationsPage() {
   const { tr } = useI18n();
@@ -41,6 +50,10 @@ export default function ModelRelationsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [models, setModels] = useState<CIType[]>([]);
+  const [relationTypes, setRelationTypes] = useState<RelationType[]>([]);
+  const [formLoading, setFormLoading] = useState(false);
 
   const load = useCallback(
     async (quiet = false) => {
@@ -94,6 +107,20 @@ export default function ModelRelationsPage() {
     }
   };
 
+  const openCreate = async () => {
+    setFormLoading(true);
+    try {
+      const [gotModels, gotTypes] = await Promise.all([listCITypes(), listRelationTypes()]);
+      setModels(gotModels);
+      setRelationTypes(gotTypes);
+      setCreating(true);
+    } catch (error) {
+      toast.error(describeError(error, tr('无法打开新建关系', 'Could not open the relation form')));
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
   const modelLink = (model: ModelRelation['parent']['type']) => (
     <Link
       to={`/cmdb/models/${model.id}`}
@@ -137,6 +164,19 @@ export default function ModelRelationsPage() {
         )}
         actions={
           <div className="flex items-center gap-2">
+            <Hint content={adminTip}>
+              <Button
+                variant="primary"
+                size="sm"
+                type="button"
+                onClick={() => void openCreate()}
+                disabled={!isAdmin || formLoading}
+                className="inline-flex items-center gap-1.5"
+              >
+                <Plus size={12} aria-hidden="true" />
+                {tr('新建关系', 'New relation')}
+              </Button>
+            </Hint>
             <Button
               variant="outline"
               size="sm"
@@ -161,7 +201,7 @@ export default function ModelRelationsPage() {
               className="w-64"
             />
             <p className="text-[11px] text-text-faint">
-              {tr('新增关系在模型详情页里做——那里的方向是明确的。', 'Add a relation from a model’s page, where the direction is unambiguous.')}
+              {tr('父模型与子模型在这里直接选择。', 'Choose the parent and child directly here.')}
             </p>
           </div>
         }
@@ -179,7 +219,7 @@ export default function ModelRelationsPage() {
             storageKey="model-relations-all"
             empty={
               rows.length === 0
-                ? tr('还没有模型关系。先在某个模型上挂一个子模型。', 'No model relations yet. Add a child from a model’s page.')
+                ? tr('还没有模型关系。新建一条开始。', 'No model relations yet. Create one to start.')
                 : tr('没有匹配的关系', 'No relation matches that')
             }
             actions={(row) => (
@@ -202,7 +242,140 @@ export default function ModelRelationsPage() {
         </Card>
       </div>
 
+      {creating && (
+        <RelationFormModal
+          models={models}
+          relationTypes={relationTypes}
+          onClose={() => setCreating(false)}
+          onSaved={async (message) => {
+            setCreating(false);
+            toast.success(message);
+            await load(true);
+          }}
+        />
+      )}
+
       {dialog}
     </div>
+  );
+}
+
+function RelationFormModal({
+  models,
+  relationTypes,
+  onClose,
+  onSaved,
+}: {
+  models: CIType[];
+  relationTypes: RelationType[];
+  onClose(): void;
+  onSaved(message: string): void | Promise<void>;
+}) {
+  const { tr } = useI18n();
+  const [parentID, setParentID] = useState('');
+  const [childID, setChildID] = useState('');
+  const [typeID, setTypeID] = useState('');
+  const [constraint, setConstraint] = useState('1-N');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!parentID || !childID || !typeID) {
+      setErr(tr('请选择父模型、子模型和关系类型', 'Choose the parent, the child and the relation type'));
+      return;
+    }
+    if (parentID === childID) {
+      setErr(tr('父模型和子模型不能相同', 'The parent and child must be different'));
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await saveRelation(parentID, childID, {
+        relation_type_id: Number(typeID),
+        constraint,
+      });
+      await onSaved(tr('已创建模型关系', 'Relation created'));
+    } catch (error) {
+      setErr(describeError(error, tr('创建失败', 'Could not create it')));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const options = models.map((model) => ({ value: String(model.id), label: model.alias || model.name }));
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={tr('新建模型关系', 'New model relation')}
+      footer={
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
+            {tr('取消', 'Cancel')}
+          </Button>
+          <Button variant="primary" type="button" onClick={() => void submit()} disabled={submitting}>
+            {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+          </Button>
+        </div>
+      }
+    >
+      {err && (
+        <div role="alert" className="mb-2 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+          {err}
+        </div>
+      )}
+      <div className="flex flex-col gap-3">
+        <div>
+          <Label htmlFor="cmdb-relation-parent">{tr('父模型', 'Parent model')}</Label>
+          <Select
+            id="cmdb-relation-parent"
+            label={tr('父模型', 'Parent model')}
+            value={parentID}
+            onValueChange={setParentID}
+            options={options}
+            className="mt-1 w-full"
+          />
+        </div>
+        <div>
+          <Label htmlFor="cmdb-relation-child">{tr('子模型', 'Child model')}</Label>
+          <Select
+            id="cmdb-relation-child"
+            label={tr('子模型', 'Child model')}
+            value={childID}
+            onValueChange={setChildID}
+            options={options}
+            className="mt-1 w-full"
+          />
+        </div>
+        <div>
+          <Label htmlFor="cmdb-relation-type">{tr('关系类型', 'Relation type')}</Label>
+          <Select
+            id="cmdb-relation-type"
+            label={tr('关系类型', 'Relation type')}
+            value={typeID}
+            onValueChange={setTypeID}
+            options={relationTypes.map((type) => ({ value: String(type.id), label: type.name }))}
+            className="mt-1 w-full"
+          />
+        </div>
+        <div>
+          <Label htmlFor="cmdb-relation-constraint">{tr('基数', 'Cardinality')}</Label>
+          <Select
+            id="cmdb-relation-constraint"
+            label={tr('基数', 'Cardinality')}
+            value={constraint}
+            onValueChange={setConstraint}
+            options={[
+              { value: '1-N', label: '1-N' },
+              { value: '1-1', label: '1-1' },
+              { value: 'N-N', label: 'N-N' },
+            ]}
+            className="mt-1 w-full"
+          />
+        </div>
+      </div>
+    </Modal>
   );
 }

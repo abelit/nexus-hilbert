@@ -94,6 +94,14 @@ export const cmdbRoutes: CMDBRoute[] = [
     ),
   },
   {
+    path: '/cmdb/relations',
+    element: (
+      <PageShell>
+        <ModelRelationsPage />
+      </PageShell>
+    ),
+  },
+  {
     path: '/cmdb/relation-types',
     element: (
       <PageShell>
@@ -221,7 +229,7 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
     defaultOpen: false,
     items: [
       { key: 'models', to: '/cmdb/models', icon: Boxes, label: tr('模型配置', 'Model configuration') },
-      { key: 'model-relations', to: '/cmdb/model-relations', icon: Share2, label: tr('模型关系', 'Model relations') },
+      { key: 'relations', to: '/cmdb/relations', icon: Share2, label: tr('关系', 'Relations') },
       { key: 'relation-types', to: '/cmdb/relation-types', icon: GitBranch, label: tr('关系类型', 'Relation types') },
       { key: 'service-trees', to: '/cmdb/service-trees', icon: Layers3, label: tr('服务树定义', 'Tree definitions') },
       { key: 'preferences', to: '/cmdb/preferences', icon: Star, label: tr('偏好设置', 'Preferences') },
@@ -251,9 +259,9 @@ export const cmdbPaletteRoutes: Array<{
     group: 'CMDB',
   },
   {
-    path: '/cmdb/model-relations',
-    zh: 'CMDB / 模型关系',
-    en: 'CMDB / Model relations',
+    path: '/cmdb/relations',
+    zh: 'CMDB / 关系',
+    en: 'CMDB / Relations',
     keywords: ['cmdb', 'model relation', 'guanxi'],
     group: 'CMDB',
   },
