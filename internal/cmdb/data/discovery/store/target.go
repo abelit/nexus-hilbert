@@ -199,11 +199,13 @@ func bindingChanged(row discoverymodel.Target, in discoverybiz.TargetWrite) bool
 func (r *Repo) DeleteTarget(ctx context.Context, id model.ID) (*discoverybiz.TargetDeleteResult, error) {
 	out := &discoverybiz.TargetDeleteResult{}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var row discoverymodel.Target
-		if err := tx.First(&row, id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("%w: %d", discoverybiz.ErrTargetNotFound, id)
-			}
+		// TAKE THE TARGET ROW'S LOCK BEFORE COUNTING. A report path locks the
+		// same row in UpsertPool, so a report cannot insert its pool row after
+		// this count and before the delete; the two operations are serialised
+		// on MySQL. SQLite ignores the clause — its write transaction already
+		// holds the database.
+		row, err := lockTargetRow(tx, id)
+		if err != nil {
 			return err
 		}
 		// A TARGET WITH SIGHTINGS IS NOT REMOVED. The pool rows name it as their
@@ -385,6 +387,23 @@ func (r *Repo) RecordSyncHistories(ctx context.Context, in []discoverybiz.SyncHi
 }
 
 // --- the shared helpers ---
+
+// lockTargetRow takes the target row's lock, which serialises a delete against
+// a concurrent report's pool insert.
+func lockTargetRow(tx *gorm.DB, id model.ID) (*discoverymodel.Target, error) {
+	var target discoverymodel.Target
+	q := tx.Model(&discoverymodel.Target{}).Where("id = ?", id)
+	if tx.Dialector.Name() != "sqlite" {
+		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := q.First(&target).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %d", discoverybiz.ErrTargetNotFound, id)
+		}
+		return nil, err
+	}
+	return &target, nil
+}
 
 // lockRuleRow takes the rule row's lock, which is what serialises a target's
 // creation against its rule's deletion.

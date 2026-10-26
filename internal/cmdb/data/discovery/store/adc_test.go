@@ -18,8 +18,22 @@ import (
 // only when the report changed, count the rows, and refuse to delete a target
 // that still has sightings.
 
+// seedPoolTarget gives UpsertPool the row it locks. In production the usecase
+// loads the target first; these store tests exercise the pool alone.
+func seedPoolTarget(t *testing.T, repo *Repo, id, typeID model.ID) {
+	t.Helper()
+	row := discoverymodel.Target{Enabled: true}
+	row.ID = id
+	row.TypeID = idp(typeID)
+	row.AdrID = idp(1)
+	if err := repo.db.Create(&row).Error; err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+}
+
 func TestPoolUpsertMergesByThePairAndResetsAcceptance(t *testing.T) {
 	repo := newRepo(t)
+	seedPoolTarget(t, repo, 5, 7)
 	ctx := context.Background()
 
 	first, err := repo.UpsertPool(ctx, discoverybiz.PoolWrite{
@@ -81,6 +95,8 @@ func TestPoolUpsertMergesByThePairAndResetsAcceptance(t *testing.T) {
 
 func TestPoolListFiltersAndPages(t *testing.T) {
 	repo := newRepo(t)
+	seedPoolTarget(t, repo, 5, 7)
+	seedPoolTarget(t, repo, 6, 8)
 	ctx := context.Background()
 	for _, unique := range []string{"i-1", "i-2", "i-3"} {
 		if _, err := repo.UpsertPool(ctx, discoverybiz.PoolWrite{
@@ -138,6 +154,7 @@ func TestPoolCountersCountTheRows(t *testing.T) {
 
 	// Two targets on the model, one of them on a second rule: the counter
 	// counts TARGETS and DISTINCT RULES, not rows in the target table.
+	targetIDs := make([]model.ID, 0, 2)
 	for _, adr := range []model.ID{1, 2} {
 		row := discoverymodel.Target{Enabled: true}
 		row.TypeID = idp(7)
@@ -145,6 +162,7 @@ func TestPoolCountersCountTheRows(t *testing.T) {
 		if err := repo.db.Create(&row).Error; err != nil {
 			t.Fatal(err)
 		}
+		targetIDs = append(targetIDs, row.ID)
 	}
 	foreign := discoverymodel.Target{Enabled: true}
 	foreign.TypeID = idp(8)
@@ -157,7 +175,7 @@ func TestPoolCountersCountTheRows(t *testing.T) {
 	for i, at := range created {
 		unique := []string{"i-1", "i-2", "i-3"}[i]
 		got, err := repo.UpsertPool(ctx, discoverybiz.PoolWrite{
-			TypeID: 7, AdtID: 5, UniqueValue: unique,
+			TypeID: 7, AdtID: targetIDs[0], UniqueValue: unique,
 			Instance: map[string]any{"instance_id": unique},
 		})
 		if err != nil {

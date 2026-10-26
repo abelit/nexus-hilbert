@@ -83,6 +83,12 @@ func (r *Repo) LoadPool(ctx context.Context, id model.ID) (*discoverymodel.PoolE
 func (r *Repo) UpsertPool(ctx context.Context, in discoverybiz.PoolWrite) (*discoverybiz.PoolUpsertResult, error) {
 	var out discoverybiz.PoolUpsertResult
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// THE TARGET ROW IS THE SERIALISATION POINT for a report and a target
+		// delete. Without this lock the delete's count can miss a report that
+		// commits its pool row after the count, leaving a dangling adt_id.
+		if _, err := lockTargetRow(tx, in.AdtID); err != nil {
+			return err
+		}
 		var existing discoverymodel.PoolEntry
 		err := tx.Where("type_id = ? AND unique_value = ?", in.TypeID, in.UniqueValue).
 			Order("id").First(&existing).Error
