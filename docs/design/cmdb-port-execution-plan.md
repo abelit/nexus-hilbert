@@ -89,6 +89,8 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
 ### 本轮验证
 
 - Go：`go test ./...` 通过（168 个 ok 包，exit 0）；`make test-race`（`go test -race ./...`）通过（168 个 ok 包，exit 0，无 DATA RACE）；`go vet ./...` 通过。
+- `make test-integration`：通过（exit 0）。
+- `make test-e2e`：本环境未通过。首次失败是 Docker Hub 拉取 `mysql:8.0` 超时；用本地 `mysql:8.0.46` 打 `mysql:8.0` 标签重跑后，`tests/e2e/assistant_chat_test.go` 的 fake LLM/capture 用例失败，并在 O32 用例超时（10m）。该目录在本分支无改动，也不含 CMDB 引用，不是本分支回归；但 e2e 不能记为通过。
 - 前端：`make test-web-ci-cmdb` 30 文件 / **168 tests**；`npm run typecheck`、`npm run build` 通过；改动文件 `eslint` 0 错误。
 - 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
 - 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
@@ -99,6 +101,7 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
 
 - `make arch-lint` 未运行：本机缺少 `go-arch-lint`，且 Makefile 的 skip 分支仍会执行下一行。`scripts/agent-observability/README.md:107` 记录该配置在 go-arch-lint 1.12.0 下本身校验失败（缺 `internal/edgeagent/data/**`、空依赖项），属既有问题。PR 描述必须写“未运行”，不能写通过。
 - 历史密码脱敏只覆盖当前有效属性集；软删除属性的历史值仍可能泄露，见“最终全分支评审 / 仍未覆盖的风险”。
+- `make test-e2e` 在当前环境无法全绿：失败集中在未改动的 `tests/e2e/assistant_chat_test.go`（fake LLM/capture），且套件会超时；验收时按“未运行/未通过”记录。
 - `make test-release-workflow` 未运行：本机缺少 Ruby，Docker Hub 拉取 ruby 镜像超时；已用 Python 解析 `release.yml` 核对 job/needs/condition。
 - `npm run lint` 有 9 个既有错误，位于未触及文件；本次改动未新增 lint 错误。
 - 未做真实 MySQL 容器级 compose 启动；SQLite 端到端和 MySQL gated 锁测试已覆盖核心路径。PR9 前补一次 compose 启动验收。
