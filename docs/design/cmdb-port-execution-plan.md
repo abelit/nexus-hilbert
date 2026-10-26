@@ -26,11 +26,11 @@
 | PR4 批量导入 | 代码完成，截图待 PR9 | `192eac2` | CSV/XLSX 解析、预览、提交、模板、Instances 入口 |
 | PR5 自动发现 UI | 代码完成，截图待 PR9 | `5239783` `a583d52` | `target-types` 端点，规则/账号/目标/目录/模板页面 |
 | PR6 ADC 发现池 | 代码完成，截图待 PR9 | `4a0d95d` | 池表/执行日志、API、接受事务、`/cmdb/adc` 页面 |
-| PR7 操作历史 | 待开始 | — | 后端只读 API + 前端 |
+| PR7 操作历史 | 代码完成，截图待 PR9 | `04b49aa` | 只读 API、6 条路由、`/cmdb/operation-history` 页面 |
 | PR8 拓扑视图 | 待开始 | — | 后端两张表 + 图装配 + 前端 |
 | PR9 E2E/收尾 | 待开始 | — | DCIM move/rename、ModelDetail 自动发现 tab、响应式截图 |
 
-下一步：**PR7 操作历史**。PR1–PR6 的代码已完成，剩下的真实浏览器截图统一在 PR9 做。
+下一步：**PR8 拓扑视图**。PR1–PR7 的代码已完成，剩下的真实浏览器截图统一在 PR9 做。
 
 ## 已完成阶段的验收证据
 
@@ -173,11 +173,15 @@
 
 ### PR7 操作历史（后端 + 前端）
 
-- [ ] `internal/cmdb/biz/history`、`data/history/store`、`server/history`；读 `c_records` + 四张历史表；补查询索引。
-- [ ] API：`/v1/cmdb/history/attributes|relations|ci-types|ci-triggers`、`/history/ci/{id}`、`/history/ci/{id}/triggers`；`{items,total}`，page_size ≤ 200。
-- [ ] 全局历史 admin-only；单 CI 历史 any authed；显示名用 `CINameResolver`/`AttributeResolver`；用户名由前端 `/api/v1/users` 映射。
-- [ ] 前端 `pages/OperationHistory.tsx` 四 tab + 过滤/分页/抽屉；路由 `/cmdb/operation-history`。
-- [ ] 测试：过滤/分页/时间范围/空结果/权限。
+- [x] `internal/cmdb/biz/history`、`data/history/store`、`server/history`；读 `c_records` + 四张历史表。
+- [x] API：`/v1/cmdb/history/attributes|relations|ci-types|ci-triggers`、`/history/ci/{id}`、`/history/ci/{id}/triggers`；`{items,total}`，page_size ≤ 200，按历史 id 倒序。
+- [x] 全局历史 admin-only；单 CI 历史 any authed；显示名用 `CINameResolver`/`AttributeResolver`/`TypeNameResolver`；用户名由前端 `/api/v1/users` 映射，失败显示 `#uid`。
+- [x] 前端 `pages/OperationHistory.tsx` + `components/history/{HistoryFilters,HistoryRecordDrawer}.tsx` 四 tab + 过滤/分页/抽屉；路由 `/cmdb/operation-history`。
+- [x] 测试：过滤/分页/时间范围/空结果/权限、路由契约、`cmd/ongrid-cmdb` 装配。
+- 验收：受影响包 `go test -race` 通过；全量 `go test ./...`、`go vet ./...` 通过；CMDB 前端 28 文件/154 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint` 通过。提交 `04b49aa`。
+- [ ] 真实浏览器截图（PR9 统一做）。
+- 已知限制：`c_records.created_at`、`uid`、`type_id`、`ci_id`、`attr_id`、`record_id`、`trigger_id` 已有索引；`c_ci_type_histories.created_at` 与 `c_ci_trigger_histories.created_at` 没有新增索引，按时间过滤这两张表在大数据量下会扫描。
+- 已知限制：模型变更表没有 `record_id`（cantor 自己的 `uid/change`），所以“用户”列取该表的 `uid`，不能关联到一次写入的来源/工单。
 
 ### PR8 拓扑视图（后端 + 前端）
 
