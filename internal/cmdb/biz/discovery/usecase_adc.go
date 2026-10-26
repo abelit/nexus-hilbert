@@ -64,6 +64,12 @@ type PoolUpsertResult struct {
 // InstanceWriter is the accept path's one write.
 type InstanceWriter interface {
 	WriteDiscovered(ctx context.Context, in DiscoveredInstance) (*DiscoveredResult, error)
+
+	// CIExists says whether an accepted row's instance is still there. An
+	// instance can be deleted through the normal CI endpoints, which do not
+	// touch the pool; without this check the accepted row would point at a
+	// ghost and never be written again.
+	CIExists(ctx context.Context, id model.ID) (bool, error)
 }
 
 // DiscoveredInstance is everything an accept writes.
@@ -382,10 +388,15 @@ func (u *Usecase) UpsertPool(ctx context.Context, in PoolUpsertInput, actor Acto
 			return nil, err
 		}
 	}
-	if result.Changed && target.AutoAccept {
+	if target.AutoAccept && (result.Changed || result.Row.IsAccept) {
 		// AN AUTO-ACCEPT HAS NO PERSON BEHIND IT, so the operation record names
 		// the target's owner — the person who configured the target is the
 		// closest thing to an author the write has.
+		//
+		// AN UNCHANGED REPORT ON AN ACCEPTED ROW STILL CALLS accept, because
+		// the instance may have been deleted since: accept checks and rewrites
+		// it. When the instance is there, the call is the same read a second
+		// click performs and writes nothing.
 		actorID := model.ID(0)
 		if target.UID != nil {
 			actorID = *target.UID
@@ -454,7 +465,18 @@ func (u *Usecase) accept(ctx context.Context, id model.ID, acceptBy string, acto
 		return nil, fmt.Errorf("%w: %d", ErrPoolNotFound, id)
 	}
 	if row.IsAccept && row.CIID != nil {
-		return u.renderPoolOne(ctx, *row)
+		if u.writer == nil {
+			return u.renderPoolOne(ctx, *row)
+		}
+		exists, err := u.writer.CIExists(ctx, *row.CIID)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			return u.renderPoolOne(ctx, *row)
+		}
+		// THE INSTANCE WAS DELETED outside the pool. Fall through and write it
+		// again; MarkPoolAccepted replaces the dangling ci_id.
 	}
 	if row.AdtID == nil {
 		return nil, fmt.Errorf("%w: pool entry %d names no target", ErrTargetNotFound, id)

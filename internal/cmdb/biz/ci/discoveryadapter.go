@@ -133,6 +133,18 @@ func NewDiscoveryWriter(uc *Usecase) *DiscoveryWriter { return &DiscoveryWriter{
 
 var _ discoverybiz.InstanceWriter = (*DiscoveryWriter)(nil)
 
+// CIExists reports whether an accepted sighting's instance still exists.
+func (w *DiscoveryWriter) CIExists(ctx context.Context, id model.ID) (bool, error) {
+	if id <= 0 {
+		return false, nil
+	}
+	ci, err := w.uc.repo.LoadCI(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("cmdb ci: check discovered instance %d: %w", id, err)
+	}
+	return ci != nil, nil
+}
+
 // WriteDiscovered writes one accepted sighting.
 //
 // THE INSTANCE AND ITS EDGES ARE ONE CALL. The edges are resolved here, not in

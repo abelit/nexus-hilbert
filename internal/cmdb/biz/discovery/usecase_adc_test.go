@@ -151,9 +151,10 @@ func (s *stubPoolRepo) DeleteExecHistories(_ context.Context, typeID model.ID) e
 }
 
 type stubWriter struct {
-	calls  []DiscoveredInstance
-	result DiscoveredResult
-	err    error
+	calls   []DiscoveredInstance
+	result  DiscoveredResult
+	err     error
+	missing map[model.ID]bool
 }
 
 func (s *stubWriter) WriteDiscovered(_ context.Context, in DiscoveredInstance) (*DiscoveredResult, error) {
@@ -163,6 +164,10 @@ func (s *stubWriter) WriteDiscovered(_ context.Context, in DiscoveredInstance) (
 	}
 	out := s.result
 	return &out, nil
+}
+
+func (s *stubWriter) CIExists(_ context.Context, id model.ID) (bool, error) {
+	return !s.missing[id], nil
 }
 
 type stubAttributes struct{ attrs []AttributeRef }
@@ -429,5 +434,44 @@ func TestAcceptUnknownPoolEntry(t *testing.T) {
 	}
 	if !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("err = %v, want a not-found", err)
+	}
+}
+
+// A DELETED INSTANCE MUST NOT LEAVE ITS SIGHTING PERMANENTLY ACCEPTED. The
+// instance can be deleted through the normal CI endpoints, which do not touch
+// the pool; the next unchanged report must notice the dangling ci_id and write
+// the instance again, or an auto-accept target would never recreate it.
+func TestAutoAcceptRecreatesADeletedInstanceFromAnUnchangedReport(t *testing.T) {
+	uc, _, _, writer := poolFixture(t, true)
+	ctx := context.Background()
+	report := PoolUpsertInput{
+		TypeID: 7, AdtID: 5, UniqueValue: "i-1",
+		Instance:   map[string]any{"instance_id": "i-1", "cpu_num": 2, "vpc_id": "vpc-1"},
+		OneagentID: "agent-1", OneagentName: "agent one",
+	}
+
+	created, err := uc.UpsertPool(ctx, report, Actor{UserID: 42, Email: "ops@example.test"})
+	if err != nil {
+		t.Fatalf("UpsertPool: %v", err)
+	}
+	if !created.IsAccept || created.CIID == nil || *created.CIID != 77 {
+		t.Fatalf("first accept = %+v", created)
+	}
+
+	// The instance was deleted after the accept; the pool row still points at
+	// 77. The agent reports the same values, so the row itself does not change.
+	writer.missing = map[model.ID]bool{77: true}
+	writer.result = DiscoveredResult{CIID: 88, Created: true}
+	writer.calls = nil
+
+	got, err := uc.UpsertPool(ctx, report, Actor{UserID: 42})
+	if err != nil {
+		t.Fatalf("UpsertPool (unchanged, deleted instance): %v", err)
+	}
+	if len(writer.calls) != 1 {
+		t.Fatalf("writer calls = %d, want the instance recreated", len(writer.calls))
+	}
+	if got.CIID == nil || *got.CIID != 88 || !got.IsAccept {
+		t.Fatalf("recreated pool row = %+v, want ci 88 accepted", got)
 	}
 }
