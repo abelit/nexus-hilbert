@@ -1,6 +1,6 @@
 # CMDB 移植与独立服务实施计划
 
-- 状态：进行中
+- 状态：代码与最终评审修复完成，待推送/PR
 - 分支：`feat/cmdb-standalone-service`
 - 基线：`main` @ `fe0a108`
 - 关联：[ADR-035](../../docs/adr/ADR-035-cmdb-standalone-service.md)、[CMDB 服务部署说明](../install/cmdb-service.md)
@@ -30,7 +30,7 @@
 | PR8 拓扑视图 | 代码完成，截图待 PR9 | `abaf2bc` | 两张表、CRUD/排序/预览、图装配、`/cmdb/topology-views` 页面 |
 | PR9 E2E/收尾 | 完成 | （本次提交） | DCIM move/rename、ModelDetail 自动发现 tab、144 张响应式截图、MySQL/CMDB/nginx 实测 |
 
-PR1–PR9 的代码与验证已完成，分支可进入 PR/评审。未推送、未创建 PR；推送前按 AGENTS.md 运行 `gh pr checks`。
+PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical、8 个 important 已全部修复（`f94d283`…`cdd051d`），7 个 minor 与 1 条残余风险记录在下文。分支可进入 PR/评审。未推送、未创建 PR；推送前按 AGENTS.md 运行 `gh pr checks`。
 
 ## 已完成阶段的验收证据
 
@@ -51,9 +51,53 @@ PR1–PR9 的代码与验证已完成，分支可进入 PR/评审。未推送、
 - `Makefile`/`release.yml`：`docker-push-cloud-cmdb`、`cmdb-image` job、manifest 校验。
 - `docs/adr/ADR-035-cmdb-standalone-service.md`、`docs/install/cmdb-service.md`。
 
+## 最终全分支评审（2026-10-26）
+
+范围：`fe0a108...c12fa0e` 的全部 141 个文件。方法：5 个独立维度（发现/ADC、历史/拓扑、安全与 API 契约、前端、运行时/部署），每个维度先由独立评审员检查，再由独立验证员逐条尝试反驳；只接受能构造出具体失败场景的结论。共 17 条 CONFIRMED（1 critical、8 important、8 minor），2 条 REFUTED（历史 RFC 3339 小数秒、升级后 Prometheus 不重载）。
+
+### 已修复（critical / important）
+
+| 严重度 | 位置 | 问题 | 提交 |
+| --- | --- | --- | --- |
+| critical | `biz/history`、`biz/ci`、`biz/citype` | 操作历史按原值返回 password/link/file 属性，任何登录用户可通过 `GET /v1/cmdb/history/ci/{id}` 读到密码；历史实例名也可能取到 password 的 show/unique 属性 | `f94d283` |
+| important | `biz/topology/graph.go` | 正层走完后负层从最深层子节点向上，混合方向视图画的是子节点的祖父而不是根节点的父节点 | `715d88e` |
+| important | `biz/discovery/usecase_adc.go` | 已接受行的实例被删除后，未变化的后续上报仍被当作“已接受”直接返回，auto-accept 目标永远不会重建实例 | `dcf6a45` |
+| important | `biz/history` + `web/.../history` | 服务端按 `time.Local` 解析无时区时间、容器为 UTC，前端发送浏览器本地墙钟；UTC+8 运维筛选和看到的时间整体偏移 8 小时 | `f94d283` `52f74dc` |
+| important | `web/.../ModelRelations.tsx` | 新建关系发送 `1-N`/`1-1`/`N-N` 显示标签，后端只接受 `0`/`1`/`2`，新增关系主操作必然 400 | `c92e165` |
+| important | `web/.../Subscriptions.tsx` | `Preferences` 内嵌订阅页隐藏了含“自动订阅”按钮的页头，侧栏又已改指偏好页，自动订阅在 UI 不可达 | `1359521` |
+| important | `web/.../sheet.ts` | Excel 日期单元格输出 `toISOString()`，date 属性校验拒绝该格式，含真实日期列的 XLSX 无法导入 | `cdd051d` |
+| important | `web/.../TopologyViews.tsx` | 切换视图失败时保留上一张图；快速切换时晚到响应覆盖当前视图，图会挂在另一个视图标题下 | `458e823` |
+| important | `web/.../DiscoveryPool.tsx` | 切换模型时旧请求晚到会覆盖新模型的行/列/计数，接受/删除可能作用在另一个模型的发现记录上 | `b462299` |
+
+另外修复一条 minor：`data/history/store` 未把 `ctx` 传给 GORM，违反 AGENTS.md 对新增 IO 路径的要求，随 `f94d283` 提交。
+
+### 记录但本阶段不修（7 条 minor）
+
+- 发现目标删除与上报并发：`DeleteTarget` 的计数与删除不在同一把目标行锁下，可能留下指向已删除目标的池行；窗口窄、可手动删除，见 `data/discovery/store/target.go`。
+- 拓扑图把根节点预置为 visited，自引用中心模型的根→子边会被丢弃；触发面窄，修图遍历时可一并处理。
+- `HistoryCINames` 逐实例 `LoadCI`，拓扑最多 2000 节点时为 N+1；后续可改用批量读取。
+- `TopologyView.Path` 为 `map[string][]int32`，接管 cantor 的字符串 id 行会导致 500；本轮计划不接管 cantor 数据。
+- 拓扑分组/视图名称/category 未按 varchar(64)/(32) 校验，超长在 MySQL strict 下返回 500 而不是 400；接口 admin-only。
+- `FacetTree` 把层级值直接拼进搜索表达式，值含逗号时查询被拆错；可复用 `dsl.ts` 的 `escapeValue`。
+- `uninstall.sh --purge` 未删除新增的 `ongrid-cmdb` 镜像，升级/卸载后会残留磁盘。
+
+### 仍未覆盖的风险
+
+- 历史密码脱敏依赖当前模型的有效属性集。属性被软删除后，历史行仍保留原值，而 resolver 已看不到它的 password 标记；任何登录用户仍可通过单 CI 历史读到这些旧值。后续应让历史解析包含软删除属性元数据，或在属性删除时清理/脱敏历史。
+
+### 本轮验证
+
+- Go：`go test ./...` 通过（168 个 ok 包，exit 0）；`go vet ./...` 通过。
+- 前端：`make test-web-ci-cmdb` 30 文件 / **168 tests**；`npm run typecheck`、`npm run build` 通过；改动文件 `eslint` 0 错误。
+- 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
+- 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
+- `git diff --check` 通过；人工 import 边界核对通过（`cmdb/biz`→`cmdb/data`/其它 BC、`cmdb/server`→`cmdb/data`、`pkg`→BC、`cmd/ongrid`→`cmdb` 均为空）。
+- `make arch-lint` 仍未运行：本机无工具，且 `scripts/agent-observability/README.md:107` 已记录该配置在 go-arch-lint 1.12.0 下校验失败，属既有问题；不能记为通过。
+
 ## 已知限制（不要误判为已通过）
 
-- `make arch-lint` 未运行：本机缺少 `go-arch-lint`，且 Makefile 的 skip 分支仍会执行下一行。PR 描述必须写“未运行”，不能写通过。
+- `make arch-lint` 未运行：本机缺少 `go-arch-lint`，且 Makefile 的 skip 分支仍会执行下一行。`scripts/agent-observability/README.md:107` 记录该配置在 go-arch-lint 1.12.0 下本身校验失败（缺 `internal/edgeagent/data/**`、空依赖项），属既有问题。PR 描述必须写“未运行”，不能写通过。
+- 历史密码脱敏只覆盖当前有效属性集；软删除属性的历史值仍可能泄露，见“最终全分支评审 / 仍未覆盖的风险”。
 - `make test-release-workflow` 未运行：本机缺少 Ruby，Docker Hub 拉取 ruby 镜像超时；已用 Python 解析 `release.yml` 核对 job/needs/condition。
 - `npm run lint` 有 9 个既有错误，位于未触及文件；本次改动未新增 lint 错误。
 - 未做真实 MySQL 容器级 compose 启动；SQLite 端到端和 MySQL gated 锁测试已覆盖核心路径。PR9 前补一次 compose 启动验收。
@@ -63,6 +107,7 @@ PR1–PR9 的代码与验证已完成，分支可进入 PR/评审。未推送、
 - 发现池按 `(type_id, unique_value)` 合并，但该索引不是唯一索引（兼容 adoption 重复）；同一对的并发上报仍可能各插一行，下一次上报会合并到先查到的一行。
 - PR9 的 compose 实测用的是本机缓存的 MySQL 8.0.46、`ongrid:dev`、frontier 1.2.6、nginx，以及临时 bookworm 变体构建的 CMDB 镜像；`deploy/docker-compose.yml` 没有原样启动（基础镜像仓库 403）。停 CMDB 时网关错误在本机为 504（Docker 停止容器的 IP 仍被 nginx 缓存），不是计划里写的 502。
 - 响应式截图在 `output/playwright/results/`（git-ignored），共 144 张；没有提交到仓库。
+- Playwright 默认 `baseURL` 是 `https://localhost:8443`（nginx 栈）。栈未运行时用本地 Vite dev server 加 `E2E_BASE_URL=http://127.0.0.1:5173`，并用 `--no-deps` 跳过依赖真实后端的 auth setup；用例本身 mock `/api/v1/**`。
 
 ## PR3 明细（已完成）
 
