@@ -37,11 +37,19 @@ type attributeJoin struct {
 	Reason          *string   `gorm:"column:reason"`
 	TypeID          *model.ID `gorm:"column:type_id"`
 	RecordCreatedAt time.Time `gorm:"column:record_created_at"`
+
+	// The dictionary's flags, read through a LEFT JOIN that deliberately does
+	// not filter delete_marker: a soft-deleted password attribute still has
+	// history rows, and those values must stay masked.
+	AttrIsPassword *bool `gorm:"column:attr_is_password"`
+	AttrIsLink     *bool `gorm:"column:attr_is_link"`
+	AttrIsFile     *bool `gorm:"column:attr_is_file"`
 }
 
 func (r *Repo) attributeBase(ctx context.Context, f historybiz.AttributeFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Table("c_attribute_histories AS h").
 		Joins("JOIN c_records AS r ON r.id = h.record_id").
+		Joins("LEFT JOIN c_attributes AS a ON a.id = h.attr_id").
 		Where("h.delete_marker = 0")
 	if !f.Start.IsZero() {
 		q = q.Where("r.created_at >= ?", f.Start)
@@ -77,7 +85,8 @@ func (r *Repo) ListAttributeRecords(ctx context.Context, f historybiz.AttributeF
 	var rows []attributeJoin
 	if err := r.attributeBase(ctx, f).
 		Select("h.*, r.uid AS uid, r.origin AS origin, r.ticket_id AS ticket_id, " +
-			"r.reason AS reason, r.type_id AS type_id, r.created_at AS record_created_at").
+			"r.reason AS reason, r.type_id AS type_id, r.created_at AS record_created_at, " +
+			"a.is_password AS attr_is_password, a.is_link AS attr_is_link, a.is_file AS attr_is_file").
 		Order("h.id DESC").Limit(size).Offset((page - 1) * size).Scan(&rows).Error; err != nil {
 		return nil, 0, fmt.Errorf("cmdb history: list attribute records: %w", err)
 	}
@@ -98,6 +107,7 @@ func attributeRow(row attributeJoin) historybiz.AttributeRow {
 		},
 		ID: row.ID, OperateType: derefText(row.OperateType),
 		CIID: row.CIID, AttrID: derefID(row.AttrID), Old: row.Old, New: row.New,
+		Sensitive: derefBool(row.AttrIsPassword) || derefBool(row.AttrIsLink) || derefBool(row.AttrIsFile),
 	}
 }
 
@@ -312,6 +322,8 @@ func pageOf(page, size int) (int, int) {
 	}
 	return page, size
 }
+
+func derefBool(v *bool) bool { return v != nil && *v }
 
 func derefText(s *string) string {
 	if s == nil {

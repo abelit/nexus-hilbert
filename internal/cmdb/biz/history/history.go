@@ -54,6 +54,12 @@ type AttributeRow struct {
 	AttrID      model.ID
 	Old         *string
 	New         *string
+
+	// Sensitive comes from the attribute dictionary itself, not from the
+	// model's current attribute set. A soft-deleted password attribute is no
+	// longer resolvable as a label, but its history values must still be
+	// masked.
+	Sensitive bool
 }
 
 // RelationRow is one relation change with its record.
@@ -678,12 +684,14 @@ func attributeChange(row AttributeRow, attrs map[model.ID]map[model.ID]Attribute
 		AttrID: row.AttrID, Old: derefPtr(row.Old), New: derefPtr(row.New),
 		CreatedAt: formatTime(row.Record.CreatedAt), TicketID: row.Record.TicketID,
 	}
+	sensitive := row.Sensitive
 	if ref, ok := attrs[row.Record.TypeID][row.AttrID]; ok {
 		change.AttrName, change.AttrAlias, change.ValueType = ref.Name, ref.Alias, ref.ValueType
-		if ref.Sensitive {
-			change.Old = maskSensitive(change.Old)
-			change.New = maskSensitive(change.New)
-		}
+		sensitive = sensitive || ref.Sensitive
+	}
+	if sensitive {
+		change.Old = maskSensitive(change.Old)
+		change.New = maskSensitive(change.New)
 	}
 	return change
 }

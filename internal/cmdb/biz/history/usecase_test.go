@@ -291,3 +291,30 @@ func TestHistoryMasksSensitiveAttributeValues(t *testing.T) {
 		}
 	}
 }
+
+// A SENSITIVE ATTRIBUTE MAY BE GONE FROM THE MODEL'S CURRENT SET. The history
+// row still names it, and a soft-deleted password attribute must not leak its
+// old/new values just because the attribute resolver can no longer see the
+// password flag. The store carries the flag on the row itself for this case.
+func TestHistoryMasksDeletedSensitiveAttributeValues(t *testing.T) {
+	repo := &stubRepo{attributes: []AttributeRow{{
+		Record: Record{ID: 5, UID: 7, TypeID: 1, CreatedAt: timeAt(12)},
+		ID:     40, OperateType: "u", CIID: 100, AttrID: 99,
+		Old: ptr("legacy-secret"), New: ptr("new-secret"), Sensitive: true,
+	}}}
+	uc := NewUsecase(repo).
+		WithTypeNames(stubTypeNames{1: "host"}).
+		WithAttributes(stubAttributes{1: nil}).
+		WithCINames(stubCINames{100: "web-01"})
+
+	page, err := uc.ListAttributes(context.Background(), AttributeFilter{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListAttributes: %v", err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].Changes) != 1 {
+		t.Fatalf("page = %+v", page.Items)
+	}
+	if got := page.Items[0].Changes[0]; got.Old != "******" || got.New != "******" {
+		t.Fatalf("deleted password values = %q → %q, want masked", got.Old, got.New)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	historybiz "github.com/ongridio/ongrid/internal/cmdb/biz/history"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
+	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 )
 
 // The history reads against a database: the join that turns a change row into
@@ -29,6 +30,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&cimodel.OperationRecord{}, &cimodel.AttributeHistory{},
 		&cimodel.RelationHistory{}, &cimodel.TypeHistory{}, &cimodel.TriggerHistory{},
+		&citypemodel.Attribute{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -97,6 +99,24 @@ func seed(t *testing.T, db *gorm.DB) {
 	trigger.ID = 50
 	if err := db.Create(&trigger).Error; err != nil {
 		t.Fatalf("seed trigger history: %v", err)
+	}
+
+	// Attribute 10 is a password that was later soft-deleted; 11 is ordinary.
+	// The history join must still see 10's flags after deletion.
+	attributes := []citypemodel.Attribute{
+		{Name: "password", Alias: "密码", ValueType: "2", IsPassword: true},
+		{Name: "cpu", Alias: "CPU", ValueType: "3"},
+	}
+	attributes[0].ID = 10
+	attributes[1].ID = 11
+	for i := range attributes {
+		if err := db.Create(&attributes[i]).Error; err != nil {
+			t.Fatalf("seed attribute: %v", err)
+		}
+	}
+	if err := db.Unscoped().Model(&citypemodel.Attribute{}).
+		Where("id = ?", 10).UpdateColumn("delete_marker", 1).Error; err != nil {
+		t.Fatalf("soft-delete password attribute: %v", err)
 	}
 }
 
@@ -285,5 +305,31 @@ func TestHistoryQueriesHonourContext(t *testing.T) {
 				t.Fatal("a canceled context did not stop the query")
 			}
 		})
+	}
+}
+
+// The sensitivity flag travels with the history row, so a password attribute
+// that has since been soft-deleted is still masked.
+func TestListAttributeRecordsCarriesSensitivityFromTheDictionary(t *testing.T) {
+	db := newTestDB(t)
+	seed(t, db)
+	rows, _, err := NewRepo(db).ListAttributeRecords(context.Background(), historybiz.AttributeFilter{
+		Page: 1, PageSize: 20,
+	})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	byID := map[model.ID]historybiz.AttributeRow{}
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	if !byID[1].Sensitive {
+		t.Fatalf("row 1 (soft-deleted password) not sensitive: %+v", byID[1])
+	}
+	if !byID[3].Sensitive {
+		t.Fatalf("row 3 (soft-deleted password) not sensitive: %+v", byID[3])
+	}
+	if byID[2].Sensitive {
+		t.Fatalf("row 2 (cpu) marked sensitive: %+v", byID[2])
 	}
 }
