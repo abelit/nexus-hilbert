@@ -88,7 +88,7 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
 
 ### 本轮验证
 
-- Go：`go test ./...` 通过（168 个 ok 包，exit 0）；`go vet ./...` 通过。
+- Go：`go test ./...` 通过（168 个 ok 包，exit 0）；`make test-race`（`go test -race ./...`）通过（168 个 ok 包，exit 0，无 DATA RACE）；`go vet ./...` 通过。
 - 前端：`make test-web-ci-cmdb` 30 文件 / **168 tests**；`npm run typecheck`、`npm run build` 通过；改动文件 `eslint` 0 错误。
 - 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
 - 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
