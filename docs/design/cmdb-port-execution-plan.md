@@ -27,10 +27,10 @@
 | PR5 自动发现 UI | 代码完成，截图待 PR9 | `5239783` `a583d52` | `target-types` 端点，规则/账号/目标/目录/模板页面 |
 | PR6 ADC 发现池 | 代码完成，截图待 PR9 | `4a0d95d` | 池表/执行日志、API、接受事务、`/cmdb/adc` 页面 |
 | PR7 操作历史 | 代码完成，截图待 PR9 | `04b49aa` | 只读 API、6 条路由、`/cmdb/operation-history` 页面 |
-| PR8 拓扑视图 | 待开始 | — | 后端两张表 + 图装配 + 前端 |
+| PR8 拓扑视图 | 代码完成，截图待 PR9 | `abaf2bc` | 两张表、CRUD/排序/预览、图装配、`/cmdb/topology-views` 页面 |
 | PR9 E2E/收尾 | 待开始 | — | DCIM move/rename、ModelDetail 自动发现 tab、响应式截图 |
 
-下一步：**PR8 拓扑视图**。PR1–PR7 的代码已完成，剩下的真实浏览器截图统一在 PR9 做。
+下一步：**PR9 E2E 收尾**。PR1–PR8 的代码已完成；真实浏览器截图、DCIM move/rename、ModelDetail 自动发现 tab 与 compose 实跑都在 PR9。
 
 ## 已完成阶段的验收证据
 
@@ -185,11 +185,16 @@
 
 ### PR8 拓扑视图（后端 + 前端）
 
-- [ ] 模型 `c_topology_view_groups`、`c_topology_views`；store/migrate；`data.Migrate` 注册。
-- [ ] biz：CRUD/排序/预览/图装配；`GraphQueries` 由 `biz/ci` 适配；自环去重、正/负层、根 200/节点 2000/深度 5 上限。
-- [ ] server：`/v1/cmdb/topology-views*`；分组删除 409；无 grant。
-- [ ] 前端 `api/topology.ts`、`pages/TopologyViews.tsx`、`components/topology/{TopoGraph,TopoSidebar,TopoViewDrawer,PathPicker,InstancePicker}.tsx`；复用 `@xyflow/react` + dagre；路由 `/cmdb/topology-views`。
-- [ ] 测试：图去重/自环/上下层/上限、CRUD/排序/守卫；真实浏览器截图。
+- [x] 模型 `internal/cmdb/model/topology/topology.go` 的 `c_topology_view_groups`、`c_topology_views`；store/migrate；`data.Migrate` 注册。
+- [x] biz：CRUD/排序/预览/图装配；`GraphQueries` 由 `biz/ci` 适配；自环去重、正/负层、根 200/节点 2000/深度 5 上限（超限 400）。
+- [x] server `internal/cmdb/server/topology/http.go`：14 条 `/v1/cmdb/topology-views*` 路由；分组删除 409；无 grant。
+- [x] 前端 `api/topology.ts`、`pages/TopologyViews.tsx`、`components/topology/{TopoGraph,TopologySidebar,TopologyViewDrawer}.tsx`；复用共享 `TopologyGraph`（`@xyflow/react` + dagre）；路由 `/cmdb/topology-views`。
+- [x] 测试：图去重/自环/上下层/上限、store CRUD/排序/分组守卫、路由契约、`cmd/ongrid-cmdb` 装配、前端列表/创建/预览/权限。
+- 验收：受影响包 `go test -race` 通过；全量 `go test ./...`、`go vet ./...` 通过；CMDB 前端 29 文件/158 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint` 通过。提交 `abaf2bc`。
+- [ ] 真实浏览器截图（PR9 统一做）。
+- 已知限制：路径用带校验的 JSON 文本编辑，未做图形化 `PathPicker`；`type-relations` 端点已提供但抽屉暂未用它推荐下一层。
+- 已知限制：分组/视图的排序接口已完成，侧栏暂未提供上移/下移或拖拽入口；ACL grant/revoke 随 ACL Epic 一起延后。
+- 已知限制：图沿用共享 React Flow 组件的默认边样式（CMDB 关系没有 semantic tag），节点颜色按模型 id 落到中性色。
 
 ### PR9 E2E 收尾
 
