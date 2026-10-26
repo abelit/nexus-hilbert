@@ -25,12 +25,12 @@
 | PR3 偏好/关系/树视图/关系视图 | 代码完成，截图待 PR9 | `7e854a2` `cf7509b` `b20f4a9` `1af1f4b` `49f65c9` | API、偏好页、资源层级、关系创建、菜单分组均完成；真实浏览器截图待统一做 |
 | PR4 批量导入 | 代码完成，截图待 PR9 | `192eac2` | CSV/XLSX 解析、预览、提交、模板、Instances 入口 |
 | PR5 自动发现 UI | 代码完成，截图待 PR9 | `5239783` `a583d52` | `target-types` 端点，规则/账号/目标/目录/模板页面 |
-| PR6 ADC 发现池 | 待开始 | — | 后端两张表 + API + 前端 |
+| PR6 ADC 发现池 | 代码完成，截图待 PR9 | `4a0d95d` | 池表/执行日志、API、接受事务、`/cmdb/adc` 页面 |
 | PR7 操作历史 | 待开始 | — | 后端只读 API + 前端 |
 | PR8 拓扑视图 | 待开始 | — | 后端两张表 + 图装配 + 前端 |
 | PR9 E2E/收尾 | 待开始 | — | DCIM move/rename、ModelDetail 自动发现 tab、响应式截图 |
 
-下一步：**PR6 ADC 发现池**。PR1–PR5 的代码已完成，剩下的真实浏览器截图统一在 PR9 做。
+下一步：**PR7 操作历史**。PR1–PR6 的代码已完成，剩下的真实浏览器截图统一在 PR9 做。
 
 ## 已完成阶段的验收证据
 
@@ -58,6 +58,9 @@
 - `npm run lint` 有 9 个既有错误，位于未触及文件；本次改动未新增 lint 错误。
 - 未做真实 MySQL 容器级 compose 启动；SQLite 端到端和 MySQL gated 锁测试已覆盖核心路径。PR9 前补一次 compose 启动验收。
 - 发布前必须同时替换 `ongrid` 与 `ongrid-cmdb`；旧 manager 仍挂载 CMDB 路由。
+- ADC 关系装配的 peer 查找受 CMDB 最大分页限制（`MaxInstancePageSize`，当前 500）：一个字段匹配超过 500 个实例时，尾部的关系边不会写入；实例本身仍会接受。
+- 清空某个模型的执行日志当前仅要求登录，没有 admin gate；cantor 也没有更细的权限，ACL Epic 再补。
+- 发现池按 `(type_id, unique_value)` 合并，但该索引不是唯一索引（兼容 adoption 重复）；同一对的并发上报仍可能各插一行，下一次上报会合并到先查到的一行。
 
 ## PR3 明细（已完成）
 
@@ -158,12 +161,15 @@
 
 ### PR6 ADC 发现池（后端 + 前端）
 
-- [ ] 模型：`c_ad_ci`、`c_ad_exec_histories`（字段对齐 cantor；`(type_id,unique_value)` 复合索引；exec history append-only）。
-- [ ] store `internal/cmdb/data/discovery/store/adc.go`；`Migrate` 注册；计数用 `COUNT(*)`，不建 `c_ad_counter`。
-- [ ] biz `internal/cmdb/biz/discovery/usecase_adc.go`：`PoolRepo`、`InstanceWriter`、list/get/upsert/accept/delete/counter/exec-history；accept 幂等；`auto_accept`；`MarkAutoDiscovery` 写 `c_cis.a`；CI+关系同事务 `WriteWithRelations`。
-- [ ] server `http_adc.go`：`/v1/cmdb/discovery/adc*`；目标删除 409。
-- [ ] 前端 `pages/DiscoveryPool.tsx` + `components/discovery/adc/*`；路由 `/cmdb/adc`。
-- [ ] 测试：upsert/合并/重置/计数、accept 幂等、目标删除 409、路由契约。
+- [x] 模型：`internal/cmdb/model/discovery/pool.go` 的 `c_ad_ci`、`c_ad_exec_histories`；`(type_id,unique_value)` 复合索引；exec history 用 `AppendOnlyBase`。
+- [x] store `internal/cmdb/data/discovery/store/adc.go`；`Migrate` 注册；计数用 `COUNT(*)`，未建 `c_ad_counter`。
+- [x] biz `internal/cmdb/biz/discovery/usecase_adc.go`：`PoolRepo`、`InstanceWriter`、`AttributeResolver`；list/get/upsert/accept/delete/counter/exec-history；accept 幂等；`auto_accept`；`MarkAutoDiscovery` 写 `c_cis.a`；CI+关系同事务 `WriteWithRelations`。
+- [x] server `internal/cmdb/server/discovery/http_adc.go`：11 条 `/v1/cmdb/discovery/adc*` 路由；目标删除 409（`ErrTargetReferenced`）。
+- [x] 前端 `pages/DiscoveryPool.tsx` + `components/discovery/adc/{PoolTree,CounterStrip,PoolTable,RawDataDrawer,ExecHistoryDialog}.tsx`；路由 `/cmdb/adc`、侧栏、命令面板。
+- [x] 测试：upsert/合并/重置/计数/执行日志、accept 幂等与映射、目标删除 409、路由契约、`cmd/ongrid-cmdb` 装配。
+- 验收：受影响包 `go test -race` 通过；全量 `go test ./...`、`go vet ./...` 通过；CMDB 前端 27 文件/149 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint` 通过。提交 `4a0d95d`。
+- [ ] 真实浏览器截图（PR9 统一做）。
+- parity 缺口：cantor 的预定义 value mapping 文件不在两个仓库中，接受时写原始值；`aggregation_count` 仅存储不使用（cantor 后端同样未使用）。
 
 ### PR7 操作历史（后端 + 前端）
 
