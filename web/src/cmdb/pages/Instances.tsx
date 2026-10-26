@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { FileUp, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -228,6 +228,15 @@ export default function InstancesPage() {
               <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
               {tr('刷新', 'Refresh')}
             </Button>
+            <Link
+              to="/cmdb/batch"
+              className="og-button inline-flex items-center gap-1.5"
+              data-size="sm"
+              data-variant="outline"
+            >
+              <FileUp size={12} aria-hidden="true" />
+              {tr('批量导入', 'Batch import')}
+            </Link>
             <Button
               variant="primary"
               size="sm"

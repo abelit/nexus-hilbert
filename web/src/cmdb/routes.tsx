@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Boxes, Database, GitBranch, Layers3, ListTree, Network, Search, Server, Share2, Star } from 'lucide-react';
+import { Boxes, Database, FileUp, GitBranch, Layers3, ListTree, Network, Search, Server, Share2, Star } from 'lucide-react';
 
 import type { IconType } from '@/lib/icon';
 import { useI18n } from '@/i18n/locale';
@@ -28,6 +28,7 @@ const ServiceTreesPage = lazy(() => import('./pages/ServiceTrees'));
 const PreferencesPage = lazy(() => import('./pages/Preferences'));
 const SubscriptionsPage = lazy(() => import('./pages/Subscriptions'));
 const InstancesPage = lazy(() => import('./pages/Instances'));
+const BatchImportPage = lazy(() => import('./pages/BatchImport'));
 const SearchPage = lazy(() => import('./pages/Search'));
 const HierarchyPage = lazy(() => import('./pages/Hierarchy'));
 const TreeViewsPage = lazy(() => import('./pages/TreeViews'));
@@ -151,6 +152,14 @@ export const cmdbRoutes: CMDBRoute[] = [
     ),
   },
   {
+    path: '/cmdb/batch',
+    element: (
+      <PageShell>
+        <BatchImportPage />
+      </PageShell>
+    ),
+  },
+  {
     path: '/cmdb/hierarchy',
     element: (
       <PageShell>
@@ -236,6 +245,7 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
       { key: 'service-trees', to: '/cmdb/service-trees', icon: Layers3, label: tr('服务树定义', 'Tree definitions'), group: tr('模型管理', 'Models') },
       { key: 'preferences', to: '/cmdb/preferences', icon: Star, label: tr('偏好设置', 'Preferences'), group: tr('模型管理', 'Models') },
       { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources'), group: tr('资源管理', 'Resources') },
+      { key: 'batch', to: '/cmdb/batch', icon: FileUp, label: tr('批量导入', 'Batch import'), group: tr('资源管理', 'Resources') },
       { key: 'search', to: '/cmdb/search', icon: Search, label: tr('资源搜索', 'Resource search'), group: tr('资源管理', 'Resources') },
       { key: 'tree-views', to: '/cmdb/tree-views', icon: ListTree, label: tr('资源层级', 'Hierarchy'), group: tr('资源管理', 'Resources') },
       { key: 'relation-views', to: '/cmdb/service-tree', icon: Network, label: tr('关系视图', 'Relation views'), group: tr('资源管理', 'Resources') },
@@ -300,6 +310,13 @@ export const cmdbPaletteRoutes: Array<{
     zh: 'CMDB / 资源搜索',
     en: 'CMDB / Resource search',
     keywords: ['cmdb', 'search', 'query', 'sousuo'],
+    group: 'CMDB',
+  },
+  {
+    path: '/cmdb/batch',
+    zh: 'CMDB / 批量导入',
+    en: 'CMDB / Batch import',
+    keywords: ['cmdb', 'batch', 'import', 'csv', 'xlsx', 'daoru'],
     group: 'CMDB',
   },
   {
