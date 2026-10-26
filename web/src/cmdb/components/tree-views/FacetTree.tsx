@@ -5,6 +5,7 @@ import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
 
 import type { TypeAttribute } from '../../api/citype';
+import { escapeValue } from '../../lib/dsl';
 import { searchInstances } from '../../api/instance';
 
 // A lazy facet tree over a model's configured hierarchy levels.
@@ -17,7 +18,9 @@ import { searchInstances } from '../../api/instance';
 export type FacetEntry = { value: string; count: number };
 
 export function treeQuery(typeID: number, levels: TypeAttribute[], path: string[]): string {
-  return `_type:${typeID}` + path.map((value, index) => `,${levels[index]?.name ?? ''}:${value}`).join('');
+  // THE VALUE IS DATA, not query syntax: a comma in a hierarchy value must not
+  // become the next term. dsl.ts owns the escape rule for every other clause.
+  return `_type:${typeID}` + path.map((value, index) => `,${levels[index]?.name ?? ''}:${escapeValue(value)}`).join('');
 }
 
 function pathKey(path: string[]): string {
