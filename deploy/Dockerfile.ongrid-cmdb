@@ -36,8 +36,9 @@ FROM gcr.io/distroless/base-debian12:nonroot
 
 COPY --from=builder /out/ongrid-cmdb /ongrid-cmdb
 
-# 8082 = HTTP API, 9102 = Prometheus /metrics (compose sets these; the
-# binary defaults to the manager's :8080/:9100 when no env is supplied).
+# 8082 = HTTP API, 9102 = Prometheus /metrics. The binary applies these as
+# its own defaults before config.Load, so a bare `docker run` is consistent
+# with the exposed ports and with `--healthcheck`.
 EXPOSE 8082 9102
 
 USER nonroot

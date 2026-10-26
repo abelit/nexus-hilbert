@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"gorm.io/gorm"
 
 	cmdbcibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
@@ -62,6 +63,20 @@ func buildHandlers(db *gorm.DB, log *slog.Logger) cmdbserver.Handlers {
 // process without a rewrite.
 func newRouter(db *gorm.DB, signer *auth.Signer, h cmdbserver.Handlers, version string) http.Handler {
 	mux := chi.NewRouter()
+	// One HTTP span per request, named "{METHOD} {route}" when chi has already
+	// matched a pattern. The manager uses the same shape; without this the
+	// tracing.Init call is dead configuration and logs carry no trace_id.
+	mux.Use(func(next http.Handler) http.Handler {
+		return otelhttp.NewHandler(next, "ongrid-cmdb",
+			otelhttp.WithFilter(shouldTraceCMDBRequest),
+			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+				if route := chi.RouteContext(r.Context()).RoutePattern(); route != "" {
+					return r.Method + " " + route
+				}
+				return r.Method + " " + r.URL.Path
+			}),
+		)
+	})
 	mux.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -80,6 +95,17 @@ func newRouter(db *gorm.DB, signer *auth.Signer, h cmdbserver.Handlers, version 
 		})
 	})
 	return mux
+}
+
+// shouldTraceCMDBRequest keeps liveness/readiness/version probes out of Tempo.
+// API requests, including the import bodies, are traced.
+func shouldTraceCMDBRequest(r *http.Request) bool {
+	switch r.URL.Path {
+	case "/healthz", "/readyz", "/metrics":
+		return false
+	default:
+		return true
+	}
 }
 
 // readyz reports whether the process can serve CMDB traffic: the database is

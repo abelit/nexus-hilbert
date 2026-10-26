@@ -53,13 +53,13 @@ func TestRegisterAllMountsRepresentativeRoutes(t *testing.T) {
 	}
 }
 
-func TestRegisterAllSkipsNilHandlers(t *testing.T) {
-	r := chi.NewRouter()
-	RegisterAll(r, Handlers{})
-	routeCtx := chi.NewRouteContext()
-	if r.Match(routeCtx, http.MethodGet, "/v1/cmdb/health") {
-		t.Fatal("an empty Handlers set mounted /v1/cmdb/health")
-	}
+func TestRegisterAllRejectsIncompleteHandlers(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("RegisterAll accepted an incomplete Handlers set")
+		}
+	}()
+	RegisterAll(chi.NewRouter(), Handlers{})
 }
 
 // TestRegisterAllRouteSetMatchesGolden is a characterization test. It does not

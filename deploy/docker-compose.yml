@@ -228,9 +228,16 @@ services:
       ONGRID_SECRET_KEY: ${ONGRID_SECRET_KEY:-}
       ONGRID_OTEL_ENDPOINT: ${ONGRID_OTEL_ENDPOINT:-tempo:4318}
       ONGRID_OTEL_SAMPLING_RATIO: ${ONGRID_OTEL_SAMPLING_RATIO:-1}
+      # SQLite opt-in: with ONGRID_DB_DIALECT=sqlite, uncomment this path and
+      # the shared ./data mount below. Without the shared mount the manager
+      # and CMDB would each get a separate database file. The default stack is
+      # MySQL and uses neither.
+      # ONGRID_DB_PATH: ${ONGRID_DB_PATH:-/data/ongrid.db}
     # No host port: nginx and Prometheus reach it on the compose network.
     networks:
       - ongrid_net
+    # volumes:
+    #   - ./data:/data
 
   # ADR-008: TLS termination + frontend SPA + /api reverse proxy. Same
   # shape as deploy/install/docker-compose.yml; suitable for local dev.

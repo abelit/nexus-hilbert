@@ -32,7 +32,10 @@ import (
 // version is overwritten at build time via -ldflags.
 var version = "dev"
 
-const defaultHTTPAddr = ":8082"
+const (
+	defaultHTTPAddr    = ":8082"
+	defaultMetricsAddr = ":9102"
+)
 
 func main() {
 	for _, arg := range os.Args[1:] {
@@ -53,6 +56,15 @@ func main() {
 		}
 	}
 
+	// The standalone binary's defaults are its own ports, not the manager's
+	// :8080/:9100. Setting them before config.Load keeps a bare `./ongrid-cmdb`
+	// and `--healthcheck` (which reads the same env) on the same address.
+	if strings.TrimSpace(os.Getenv("ONGRID_HTTP_ADDR")) == "" {
+		_ = os.Setenv("ONGRID_HTTP_ADDR", defaultHTTPAddr)
+	}
+	if strings.TrimSpace(os.Getenv("ONGRID_METRICS_ADDR")) == "" {
+		_ = os.Setenv("ONGRID_METRICS_ADDR", defaultMetricsAddr)
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config load: %v\n", err)
@@ -60,6 +72,9 @@ func main() {
 	}
 
 	log := logger.WithService(logger.New(slog.LevelInfo), "ongrid-cmdb")
+	// cmdbdata.Migrate uses slog.Default() for schema-lineage messages; make
+	// those lines carry the same service/JSON shape as the rest of the process.
+	slog.SetDefault(log)
 	log.Info("configuration loaded",
 		slog.String("http_addr", cfg.HTTPAddr),
 		slog.String("metrics_addr", cfg.MetricsAddr),
@@ -90,13 +105,16 @@ func main() {
 		SamplingRatio:    otelSamplingRatio,
 	})
 	if err != nil {
+		// tracing.Init returns a nil shutdown on its error paths; registering a
+		// defer that calls it would panic during ordinary shutdown.
 		log.Warn("tracing: init failed (continuing without OTel)", slog.Any("err", err))
+	} else {
+		defer func() {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			_ = otelShutdown(shutdownCtx)
+		}()
 	}
-	defer func() {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer shutdownCancel()
-		_ = otelShutdown(shutdownCtx)
-	}()
 
 	db, err := dbx.Open(cfg.DB, log)
 	if err != nil {

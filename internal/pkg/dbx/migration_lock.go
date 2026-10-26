@@ -18,10 +18,10 @@ import (
 // replicas pointed at the same file contend on the same inode.
 const SQLiteMigrationLockSuffix = ".migrate.lock"
 
-// mysqlMigrationLockName is the advisory-lock name shared by every CMDB
-// replica. It is deliberately scoped to the CMDB schema, not to the database
-// connection: the CMDB service owns these migrations and no other bounded
-// context should take this lock.
+// mysqlMigrationLockName is the advisory-lock PREFIX shared by every CMDB
+// replica. MySQL GET_LOCK names are server-wide, not database-scoped, so the
+// actual name appends SELECT DATABASE() — otherwise two deployments on one
+// MySQL server would serialize each other's migrations.
 const mysqlMigrationLockName = "ongrid_cmdb_schema"
 
 // RunMigrationsLocked applies the same migrators as RunMigrations while
@@ -77,21 +77,54 @@ func runMigrationsWithMySQLLock(ctx context.Context, db *gorm.DB, timeout time.D
 	}
 	return db.WithContext(ctx).Connection(func(conn *gorm.DB) error {
 		conn = conn.WithContext(ctx)
+		lockName := mysqlMigrationLockNameFor(conn)
 		var got sql.NullInt64
-		if err := conn.Raw("SELECT GET_LOCK(?, ?)", mysqlMigrationLockName, seconds).Scan(&got).Error; err != nil {
+		if err := conn.Raw("SELECT GET_LOCK(?, ?)", lockName, seconds).Scan(&got).Error; err != nil {
 			return fmt.Errorf("acquire mysql migration lock: %w", err)
 		}
 		if !got.Valid || got.Int64 != 1 {
-			return fmt.Errorf("timed out after %s waiting for mysql migration lock %q", timeout, mysqlMigrationLockName)
+			return fmt.Errorf("timed out after %s waiting for mysql migration lock %q", timeout, lockName)
 		}
 		defer func() {
+			// RELEASE_LOCK must not inherit a cancelled request/signal context:
+			// the lock is connection-scoped, and a failed release would leave it
+			// held until the pooled connection is recycled.
+			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			var released sql.NullInt64
-			if err := conn.Raw("SELECT RELEASE_LOCK(?)", mysqlMigrationLockName).Scan(&released).Error; err != nil && log != nil {
-				log.Warn("release mysql migration lock", "err", err)
+			err := conn.Session(&gorm.Session{Context: releaseCtx}).
+				Raw("SELECT RELEASE_LOCK(?)", lockName).Scan(&released).Error
+			switch {
+			case err != nil:
+				if log != nil {
+					log.Warn("release mysql migration lock", "err", err)
+				}
+			case !released.Valid || released.Int64 != 1:
+				if log != nil {
+					log.Error("mysql migration lock was not released", "lock", lockName)
+				}
 			}
 		}()
 		return RunMigrations(conn, log, migrators...)
 	})
+}
+
+// mysqlMigrationLockNameFor appends the current database to the lock prefix.
+// GET_LOCK names are limited to 64 characters; a longer database name is
+// truncated, which still separates the common case and keeps the call valid.
+func mysqlMigrationLockNameFor(conn *gorm.DB) string {
+	name := mysqlMigrationLockName
+	var database string
+	if err := conn.Raw("SELECT DATABASE()").Scan(&database).Error; err == nil {
+		database = strings.TrimSpace(database)
+		if database != "" {
+			name += ":" + database
+		}
+	}
+	if len(name) > 64 {
+		name = name[:64]
+	}
+	return name
 }
 
 // acquireMigrationLock takes the SQLite file lock and returns its release.

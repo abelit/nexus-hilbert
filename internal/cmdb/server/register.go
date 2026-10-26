@@ -22,27 +22,24 @@ type Handlers struct {
 
 // RegisterAll mounts every CMDB handler on r.
 //
-// THE ORDER MATCHES cmd/ongrid's historical wiring. The paths are disjoint, so
+// THE ORDER MATCHES the manager's historical wiring. The paths are disjoint, so
 // order is not load-bearing today; keeping it stable makes a route-set diff
-// readable. A nil handler is skipped so a test can mount one subsystem without
-// constructing the rest.
+// readable.
+//
+// AN INCOMPLETE SET IS A PROGRAMMING ERROR, not a smaller route table. Skipping
+// a nil handler would silently unmount a whole subsystem while the process
+// looked healthy; the golden test uses a complete set and would not notice a
+// production wiring mistake.
 func RegisterAll(r chi.Router, h Handlers) {
 	if r == nil {
-		return
+		panic("cmdb server: RegisterAll called with a nil router")
 	}
-	if h.Meta != nil {
-		h.Meta.Register(r)
+	if h.Meta == nil || h.RelationType == nil || h.Discovery == nil || h.CIType == nil || h.CI == nil {
+		panic("cmdb server: RegisterAll called with an incomplete Handlers set")
 	}
-	if h.RelationType != nil {
-		h.RelationType.Register(r)
-	}
-	if h.Discovery != nil {
-		h.Discovery.Register(r)
-	}
-	if h.CIType != nil {
-		h.CIType.Register(r)
-	}
-	if h.CI != nil {
-		h.CI.Register(r)
-	}
+	h.Meta.Register(r)
+	h.RelationType.Register(r)
+	h.Discovery.Register(r)
+	h.CIType.Register(r)
+	h.CI.Register(r)
 }

@@ -12,6 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	cmdbdata "github.com/ongridio/ongrid/internal/cmdb/data"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
 	"github.com/ongridio/ongrid/internal/pkg/config"
@@ -132,6 +136,41 @@ func TestAdminGateRejectsNonAdminWrite(t *testing.T) {
 	rec = request(t, app, http.MethodPost, "/api/v1/cmdb/relation-types", tokenFor(t, signer, true), body)
 	if rec.Code < 200 || rec.Code >= 300 {
 		t.Fatalf("admin POST relation-types = %d %s, want 2xx", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRouterEmitsHTTPSpanAndFiltersProbes(t *testing.T) {
+	previous := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	app, _ := newTestApp(t)
+
+	// A normal request must produce one HTTP span. /version is used because
+	// it needs no token; the API routes are covered by the auth tests.
+	if rec := request(t, app, http.MethodGet, "/version", "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("GET /version = %d %s", rec.Code, rec.Body.String())
+	}
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	if !spans[0].SpanContext().IsValid() {
+		t.Fatal("HTTP span has an invalid span context")
+	}
+
+	// Liveness/readiness probes are excluded so they do not crowd out real
+	// request traces in Tempo.
+	if rec := request(t, app, http.MethodGet, "/healthz", "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("GET /healthz = %d", rec.Code)
+	}
+	if got := len(recorder.Ended()); got != 1 {
+		t.Fatalf("health probe emitted a span (ended spans = %d)", got)
 	}
 }
 

@@ -23,7 +23,7 @@ func NewHandler(uc *metabiz.Usecase) *Handler { return &Handler{uc: uc} }
 // Register attaches the CMDB status routes on r.
 //
 // The caller is responsible for r already carrying the auth middleware —
-// CMDB is mounted inside the manager's protected /api group, so identity
+// CMDB is mounted inside cmd/ongrid-cmdb's protected /api group, so identity
 // and bearer verification are inherited rather than re-implemented here.
 //
 // Routes:

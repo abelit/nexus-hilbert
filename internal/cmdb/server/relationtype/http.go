@@ -33,8 +33,8 @@ func NewHandler(uc *relationtypebiz.Usecase) *Handler { return &Handler{uc: uc} 
 // Register attaches the relation-type routes on r.
 //
 // The caller is responsible for r already carrying the auth middleware — CMDB
-// is mounted inside the manager's protected /api group, so bearer verification
-// is inherited rather than re-implemented.
+// is mounted inside cmd/ongrid-cmdb's protected /api group, so bearer
+// verification is inherited rather than re-implemented.
 //
 // Routes:
 //

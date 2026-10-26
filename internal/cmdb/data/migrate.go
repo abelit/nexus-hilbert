@@ -1,8 +1,8 @@
 // Package data composes the CMDB AutoMigrate steps.
 //
 // Ongrid has no versioned migration runner: each data package exposes a
-// Migrate(db) function and cmd/ongrid/main.go passes them to
-// dbx.RunMigrations. This package is the single CMDB entry point so the
+// Migrate(db) function and cmd/ongrid-cmdb passes them to
+// dbx.RunMigrationsLocked. This package is the single CMDB entry point so the
 // assembly layer adds one line rather than one line per CMDB sub-domain.
 package data
 
