@@ -25,8 +25,8 @@ const related = (type: typeof host, constraint: string) => ({
 });
 
 const relations = [
-  { id: 11, parent: related(host, '1-N'), child: related(disk, '1-N') },
-  { id: 12, parent: related(rack, '1-N'), child: related(host, '1-N') },
+  { id: 11, parent: related(host, '0'), child: related(disk, '0') },
+  { id: 12, parent: related(rack, '0'), child: related(host, '0') },
 ];
 
 function renderPage() {
@@ -59,6 +59,8 @@ describe('the flat relation list', () => {
     // tree would hide that `host` is a child of one model and a parent of
     // another.
     expect(screen.getAllByText('包含')).toHaveLength(2);
+    // The API stores cantor's codes; the console labels them.
+    expect(screen.getAllByText('1-N')).toHaveLength(2);
   });
 
   it('filters by either side of the pair', async () => {
@@ -111,7 +113,7 @@ describe('the flat relation list', () => {
     await selectOption(screen.getByLabelText('关系类型'), '连接');
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
-    await waitFor(() => expect(posted).toEqual({ relation_type_id: 5, constraint: '1-N' }));
+    await waitFor(() => expect(posted).toEqual({ relation_type_id: 5, constraint: '0' }));
     expect(postedPath).toBe('/api/v1/cmdb/ci-types/1/relation-children/2');
   });
 

@@ -281,7 +281,7 @@ export type RelatedType = {
   show_key?: string;
   attributes: TypeAttribute[];
   relation_type: RelationTypeRef;
-  /** `1-1`, `1-N`, `N-N` … */
+  /** cantor's code: `0` one-to-many, `1` one-to-one, `2` many-to-many. */
   constraint: string;
   parent_attr_ids: number[];
   child_attr_ids: number[];
@@ -295,6 +295,7 @@ export type ModelRelation = {
 
 export type RelationSave = {
   relation_type_id: number;
+  /** cantor's code: `0` one-to-many, `1` one-to-one, `2` many-to-many. */
   constraint: string;
   parent_attr_ids?: number[];
   child_attr_ids?: number[];
