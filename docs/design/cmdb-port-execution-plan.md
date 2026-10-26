@@ -29,9 +29,10 @@
 | PR7 操作历史 | 已完成 | `04b49aa` | 只读 API、6 条路由、`/cmdb/operation-history` 页面；截图由 PR9 覆盖 |
 | PR8 拓扑视图 | 已完成 | `abaf2bc` | 两张表、CRUD/排序/预览、图装配、`/cmdb/topology-views` 页面；截图由 PR9 覆盖 |
 | PR9 E2E/收尾 | 已完成 | `38d34eb` `c12fa0e` | DCIM move/rename、ModelDetail 自动发现 tab、144 张响应式截图、MySQL/CMDB/nginx 实测 |
-| 最终全分支评审 | 已完成 | `f94d283`…`88a7713` | 1 critical + 8 important 修复；7 minor 与 1 条残余风险记录 |
+| 最终全分支评审 | 已完成 | `f94d283`…`88a7713` | 1 critical + 8 important 修复 |
+| 评审 minor / 既有缺陷 | 已完成 | `97aa478`…`9063f79` | 7 minor、残余安全风险、3 个既有缺陷；镜像构建支持镜像源覆盖 |
 
-PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical、8 个 important 已全部修复（`f94d283`…`cdd051d`），7 个 minor 与 1 条残余风险记录在下文。分支可进入 PR/评审。未推送、未创建 PR；推送前按 AGENTS.md 运行 `gh pr checks`。
+PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 critical、8 important、8 minor）已全部修复（`f94d283`…`ace7538`），另修复 3 个评审中发现的既有缺陷，残余安全风险已关闭。分支可进入 PR/评审。未推送、未创建 PR；推送前按 AGENTS.md 运行 `gh pr checks`。
 
 ## 已完成阶段的验收证据
 
@@ -72,39 +73,45 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
 
 另外修复一条 minor：`data/history/store` 未把 `ctx` 传给 GORM，违反 AGENTS.md 对新增 IO 路径的要求，随 `f94d283` 提交。
 
-### 记录但本阶段不修（7 条 minor）
+### 评审 minor 修复（2026-10-27）
 
-- 发现目标删除与上报并发：`DeleteTarget` 的计数与删除不在同一把目标行锁下，可能留下指向已删除目标的池行；窗口窄、可手动删除，见 `data/discovery/store/target.go`。
-- 拓扑图把根节点预置为 visited，自引用中心模型的根→子边会被丢弃；触发面窄，修图遍历时可一并处理。
-- `HistoryCINames` 逐实例 `LoadCI`，拓扑最多 2000 节点时为 N+1；后续可改用批量读取。
-- `TopologyView.Path` 为 `map[string][]int32`，接管 cantor 的字符串 id 行会导致 500；本轮计划不接管 cantor 数据。
-- 拓扑分组/视图名称/category 未按 varchar(64)/(32) 校验，超长在 MySQL strict 下返回 500 而不是 400；接口 admin-only。
-- `FacetTree` 把层级值直接拼进搜索表达式，值含逗号时查询被拆错；可复用 `dsl.ts` 的 `escapeValue`。
-- `uninstall.sh --purge` 未删除新增的 `ongrid-cmdb` 镜像，升级/卸载后会残留磁盘。
+- 发现目标删除与上报并发：`DeleteTarget` 与 `UpsertPool` 现在都先锁目标行，MySQL 上串行化删除与上报；SQLite 依靠写事务。提交 `8207614`。
+- 拓扑图根节点不再预置 visited，自引用中心模型的根→子边保留。提交 `34a7bc2`。
+- `HistoryCINames` 改为一次 `LoadCIs` 批量读取，拓扑 2000 节点不再 N+1。提交 `0444a2b`。
+- `TopologyView.Path` 支持 cantor 的字符串 id，接管库不会因一行导致全部读取 500。提交 `34a7bc2`。
+- 拓扑名称/category 在 biz 边界按 varchar(64)/(32) 校验，超长返回 400。提交 `34a7bc2`。
+- `FacetTree` 复用 `dsl.ts` 的 `escapeValue`，含逗号的层级值不再拆错查询。提交 `f688c61`。
+- `uninstall.sh --purge` 同时删除 `ongrid-cmdb` 镜像，并在 release-package 测试中断言。提交 `ace7538`。
 
-### 仍未覆盖的风险
+### 残余风险已关闭
 
-- 历史密码脱敏依赖当前模型的有效属性集。属性被软删除后，历史行仍保留原值，而 resolver 已看不到它的 password 标记；任何登录用户仍可通过单 CI 历史读到这些旧值。后续应让历史解析包含软删除属性元数据，或在属性删除时清理/脱敏历史。
+- 历史密码脱敏现在从 `c_attributes` 读取属性标记（LEFT JOIN 不过滤 `delete_marker`），软删除的密码属性其 old/new 也会被掩码；store 测试覆盖软删除场景。提交 `97aa478`。
+
+### 既有缺陷修复（2026-10-27）
+
+- 模型详情的关系抽屉仍发送 `1-N`/`1-1`/`N-N`：与 `/cmdb/relations` 共用 `web/src/cmdb/lib/relation.ts` 的映射，发送 `0/1/2`。提交 `6d209a7`。
+- 发现模板导入缺少 admin gate：biz `ImportTemplates` 拒绝非 admin，前端导入按钮禁用；导出保持 any authed。提交 `f0b0a6d`。
+- ServiceTree 读取 `pairs` 而 API 返回 `cr_ids`：API 客户端统一映射为 `pairs`，测试改用真实 wire shape。提交 `d31b62b`。
 
 ### 本轮验证
 
 - Go：`go test ./...` 通过（168 个 ok 包，exit 0）；`make test-race`（`go test -race ./...`）通过（168 个 ok 包，exit 0，无 DATA RACE）；`go vet ./...` 通过。
 - `make test-integration`：通过（exit 0）。
 - `make test-e2e`：本环境未通过。首次失败是 Docker Hub 拉取 `mysql:8.0` 超时；用本地 `mysql:8.0.46` 打 `mysql:8.0` 标签重跑后，`tests/e2e/assistant_chat_test.go` 的 fake LLM/capture 用例失败，并在 O32 用例超时（10m）。该目录在本分支无改动，也不含 CMDB 引用，不是本分支回归；但 e2e 不能记为通过。
-- 前端：`make test-web-ci-cmdb` 30 文件 / **168 tests**；`npm run typecheck`、`npm run build` 通过；改动文件 `eslint` 0 错误。
+- 前端：`make test-web-ci-cmdb` 31 文件 / **170 tests**；`npm run typecheck`、`npm run build` 通过；改动文件 `eslint` 0 错误（`FacetTree` 有 1 条既有的 exhaustive-deps warning）。
 - 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
 - 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
+- `bash scripts/test-compose-release-package.sh` 通过（含新增的 uninstall 镜像断言）；`docker compose -f deploy/docker-compose.yml config` 通过。
 - `git diff --check` 通过；人工 import 边界核对通过（`cmdb/biz`→`cmdb/data`/其它 BC、`cmdb/server`→`cmdb/data`、`pkg`→BC、`cmd/ongrid`→`cmdb` 均为空）。
 - `make arch-lint` 仍未运行：本机无工具，且 `scripts/agent-observability/README.md:107` 已记录该配置在 go-arch-lint 1.12.0 下校验失败，属既有问题；不能记为通过。
 
 ## 已知限制（不要误判为已通过）
 
 - `make arch-lint` 未运行：本机缺少 `go-arch-lint`，且 Makefile 的 skip 分支仍会执行下一行。`scripts/agent-observability/README.md:107` 记录该配置在 go-arch-lint 1.12.0 下本身校验失败（缺 `internal/edgeagent/data/**`、空依赖项），属既有问题。PR 描述必须写“未运行”，不能写通过。
-- 历史密码脱敏只覆盖当前有效属性集；软删除属性的历史值仍可能泄露，见“最终全分支评审 / 仍未覆盖的风险”。
 - `make test-e2e` 在当前环境无法全绿：失败集中在未改动的 `tests/e2e/assistant_chat_test.go`（fake LLM/capture），且套件会超时；验收时按“未运行/未通过”记录。
 - `make test-release-workflow` 未运行：本机缺少 Ruby，Docker Hub 拉取 ruby 镜像超时；已用 Python 解析 `release.yml` 核对 job/needs/condition。
 - `npm run lint` 有 9 个既有错误，位于未触及文件；本次改动未新增 lint 错误。
-- 未做真实 MySQL 容器级 compose 启动；SQLite 端到端和 MySQL gated 锁测试已覆盖核心路径。PR9 前补一次 compose 启动验收。
+- CMDB 镜像已通过 `RUNTIME_IMAGE` 覆盖在无 gcr.io 访问的构建机上构建成功（`9063f79`）；`deploy/docker-compose.yml` 原样启动仍未执行，SQLite 端到端和 MySQL gated 锁测试已覆盖核心路径。
 - 发布前必须同时替换 `ongrid` 与 `ongrid-cmdb`；旧 manager 仍挂载 CMDB 路由。
 - ADC 关系装配的 peer 查找受 CMDB 最大分页限制（`MaxInstancePageSize`，当前 500）：一个字段匹配超过 500 个实例时，尾部的关系边不会写入；实例本身仍会接受。
 - 清空某个模型的执行日志当前仅要求登录，没有 admin gate；cantor 也没有更细的权限，ACL Epic 再补。
@@ -258,7 +265,7 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
   - 停 CMDB：`/api/v1/cmdb/health` 返回网关错误（本机为 **504**，不是 502；Docker 停止的容器 IP 仍被 nginx 缓存，表现为 connect timeout）、`/api/v1/version` 仍 200；重启 CMDB 后 `/cmdb-readyz` 恢复 200。
 - [x] 更新本文件；ADR/安装文档已在 PR1/PR2 覆盖，本轮无需改动。
 - 验收：全量 `go test ./...`、`go vet ./...`；CMDB 前端 29 文件/161 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint`；Playwright 144 tests。
-- [ ] 未运行 `deploy/docker-compose.yml` 原样启动：本机镜像仓库镜像不可达，`golang:1.25-alpine`/distroless 基础镜像拉取 403；改用本地缓存的 bookworm 变体构建 e2e 镜像，提交的 `deploy/Dockerfile.ongrid-cmdb` 未改动。PR 描述必须写明。
+- [ ] 未运行 `deploy/docker-compose.yml` 原样启动：本机 dockerd 未配置代理、无法直连 gcr.io，阿里云镜像对 `golang:1.25-alpine` 也返回 403；已从 `gcr.m.daocloud.io`/`docker.m.daocloud.io` 拉取基础镜像并打本地 tag，`make docker-ongrid-cmdb` 构建通过（`ongrid-cmdb:v0.18.2`）。Dockerfile/Makefile/开发 compose 增加 `RUNTIME_IMAGE` 覆盖（提交 `9063f79`）。compose 原样启动仍未执行，PR 描述必须写明。
 - [ ] 未创建/推送 PR；`gh pr checks` 未运行。
 
 ## 每个 PR 的完成定义
