@@ -40,6 +40,7 @@ func TestDiscoveryRoutesAreRegistered(t *testing.T) {
 		{http.MethodDelete, "/v1/cmdb/discovery/accounts/55", "/v1/cmdb/discovery/accounts/{id}"},
 		{http.MethodPost, "/v1/cmdb/discovery/templates/import", "/v1/cmdb/discovery/templates/import"},
 		{http.MethodGet, "/v1/cmdb/discovery/templates/export", "/v1/cmdb/discovery/templates/export"},
+		{http.MethodGet, "/v1/cmdb/discovery/target-types", "/v1/cmdb/discovery/target-types"},
 		{http.MethodGet, "/v1/cmdb/discovery/providers", "/v1/cmdb/discovery/providers"},
 		{http.MethodGet, "/v1/cmdb/discovery/catalog/http/aliyun/categories", "/v1/cmdb/discovery/catalog/http/{provider}/categories"},
 		{http.MethodGet, "/v1/cmdb/discovery/catalog/http/aliyun/resources", "/v1/cmdb/discovery/catalog/http/{provider}/resources"},

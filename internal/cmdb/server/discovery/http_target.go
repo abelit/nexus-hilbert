@@ -286,6 +286,19 @@ func (h *Handler) listSyncHistories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, got)
 }
 
+// --- models that have targets ---
+
+// listTargetTypes feeds the discovery-pool tree. It returns only models with at
+// least one target, with the label and icon the console draws.
+func (h *Handler) listTargetTypes(w http.ResponseWriter, r *http.Request) {
+	got, err := h.uc.ListTargetTypes(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": got, "total": len(got)})
+}
+
 // --- the built-in rules ---
 
 func (h *Handler) ensureBuiltinRules(w http.ResponseWriter, r *http.Request) {

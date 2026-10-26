@@ -37,10 +37,15 @@ func (r *DiscoveryResolver) ResolveCIType(ctx context.Context, ref string) (*dis
 	if view == nil {
 		return nil, nil
 	}
+	icon := ""
+	if view.Type.Icon != nil {
+		icon = *view.Type.Icon
+	}
 	return &discoverybiz.CITypeRef{
 		ID:    view.Type.ID,
 		Name:  view.Type.Name,
 		Alias: view.Type.Alias,
+		Icon:  icon,
 
 		// THE IDENTIFYING ATTRIBUTE'S NAME, resolved through the model's whole
 		// inheritance chain — so a target bound to a child model can map the

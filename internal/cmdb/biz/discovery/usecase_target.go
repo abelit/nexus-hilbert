@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ type CITypeRef struct {
 	ID    model.ID
 	Name  string
 	Alias string
+	Icon  string
 
 	// UniqueKey is the NAME of the attribute that identifies an instance of this
 	// model. Empty when the model declares none, which makes a target impossible
@@ -187,6 +189,56 @@ func (u *Usecase) WithModels(resolver ModelResolver) *Usecase {
 }
 
 // ListTargets returns one model's targets.
+// TargetTypeCount is one model that has discovery targets.
+type TargetTypeCount struct {
+	TypeID      model.ID `json:"type_id"`
+	Name        string   `json:"name,omitempty"`
+	Alias       string   `json:"alias,omitempty"`
+	Icon        string   `json:"icon,omitempty"`
+	TargetCount int      `json:"target_count"`
+}
+
+// ListTargetTypes returns the models that have at least one target, with the
+// model label and icon the console needs for the pool tree.
+//
+// THE COUNT IS DERIVED FROM THE TARGET ROWS rather than a counter table: a
+// deployment has tens of targets, not millions, and cantor's c_ad_counter was a
+// cache that could disagree with the rows it described.
+func (u *Usecase) ListTargetTypes(ctx context.Context) ([]TargetTypeCount, error) {
+	if u.repo == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	targets, err := u.repo.ListAllTargets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts := map[model.ID]int{}
+	for _, target := range targets {
+		if target.TypeID != nil {
+			counts[*target.TypeID]++
+		}
+	}
+	ids := make([]model.ID, 0, len(counts))
+	for id := range counts {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	out := make([]TargetTypeCount, 0, len(ids))
+	for _, id := range ids {
+		item := TargetTypeCount{TypeID: id, TargetCount: counts[id]}
+		if u.models != nil {
+			if ref, err := u.models.ResolveCIType(ctx, fmt.Sprint(id)); err != nil {
+				return nil, err
+			} else if ref != nil {
+				item.Name, item.Alias, item.Icon = ref.Name, ref.Alias, ref.Icon
+			}
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 func (u *Usecase) ListTargets(ctx context.Context, typeRef string) ([]Target, error) {
 	if u.repo == nil {
 		return nil, errs.ErrNotWiredYet

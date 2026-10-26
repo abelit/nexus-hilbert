@@ -51,6 +51,31 @@ func targetOf(typeID, adrID model.ID, extra map[string]any) discoverymodel.Targe
 
 func actor(admin bool) Actor { return Actor{UserID: 42, IsAdmin: admin} }
 
+func TestListTargetTypesCountsTargetsPerModel(t *testing.T) {
+	repo := newStub()
+	repo.targets = []discoverymodel.Target{
+		targetOf(7, 1, nil), targetOf(7, 1, nil), targetOf(8, 1, nil),
+	}
+	uc := NewUsecase(repo).WithModels(&stubModels{refs: map[string]*CITypeRef{
+		"7": {ID: 7, Name: "host", Alias: "主机", Icon: "icon-host"},
+		"8": {ID: 8, Name: "switch", Alias: "交换机"},
+	}})
+
+	got, err := uc.ListTargetTypes(context.Background())
+	if err != nil {
+		t.Fatalf("ListTargetTypes: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("types = %+v, want 2", got)
+	}
+	if got[0].TypeID != 7 || got[0].TargetCount != 2 || got[0].Alias != "主机" || got[0].Icon != "icon-host" {
+		t.Fatalf("first = %+v", got[0])
+	}
+	if got[1].TypeID != 8 || got[1].TargetCount != 1 || got[1].Alias != "交换机" {
+		t.Fatalf("second = %+v", got[1])
+	}
+}
+
 func targetFixture(t *testing.T) (*Usecase, *stubRepo) {
 	t.Helper()
 	repo := newStub()

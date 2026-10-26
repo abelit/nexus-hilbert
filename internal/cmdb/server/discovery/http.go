@@ -47,6 +47,7 @@ func NewHandler(uc *discoverybiz.Usecase) *Handler { return &Handler{uc: uc} }
 //	DELETE /v1/cmdb/discovery/accounts/{id}                  (any authed)
 //	POST   /v1/cmdb/discovery/templates/import               (admin) — a template file
 //	GET    /v1/cmdb/discovery/templates/export               (any authed)
+//	GET    /v1/cmdb/discovery/target-types                   (any authed) — models with targets
 //	GET    /v1/cmdb/discovery/providers                      (any authed)
 //	GET    /v1/cmdb/discovery/catalog/http/{provider}/categories   (any authed)
 //	GET    /v1/cmdb/discovery/catalog/http/{provider}/resources    (any authed)
@@ -73,6 +74,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/cmdb/discovery/templates/import", h.importTemplates)
 	r.Get("/v1/cmdb/discovery/templates/export", h.exportTemplates)
 
+	r.Get("/v1/cmdb/discovery/target-types", h.listTargetTypes)
 	r.Get("/v1/cmdb/discovery/providers", h.providers)
 	r.Get("/v1/cmdb/discovery/catalog/http/{provider}/categories", h.httpCategories)
 	r.Get("/v1/cmdb/discovery/catalog/http/{provider}/resources", h.httpResources)

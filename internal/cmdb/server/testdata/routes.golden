@@ -62,6 +62,7 @@ GET /v1/cmdb/discovery/rules
 GET /v1/cmdb/discovery/rules/{ref}
 GET /v1/cmdb/discovery/rules/{ref}/accounts
 GET /v1/cmdb/discovery/sync
+GET /v1/cmdb/discovery/target-types
 GET /v1/cmdb/discovery/targets/{id}
 GET /v1/cmdb/discovery/targets/{id}/sync-histories
 GET /v1/cmdb/discovery/templates/export
