@@ -71,9 +71,6 @@ RELEASE_IMAGE_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-$(subst /,-,$(R
 RELEASE_MANAGER_AMD64_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-linux-amd64.digest
 RELEASE_MANAGER_ARM64_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-linux-arm64.digest
 
-DB_DSN     ?= root:root@tcp(127.0.0.1:3306)/ongrid?charset=utf8mb4&parseTime=true&loc=Local
-MIGRATIONS := db/migrations
-
 .DEFAULT_GOAL := help
 
 # ----------------------------------------------------------------------------
@@ -110,10 +107,9 @@ build-ongrid-edge: ## 构建边端 ongrid-edge
 
 .PHONY: test test-race test-integration test-e2e test-e2e-live
 .PHONY: test-apm-acceptance
-test-apm-acceptance: ## APM 真实多语言、ES 关联、告警、容量和按需 Profiling 验收（独立 Docker）
-	APM_TEST_LOAD=1 APM_TEST_OVERHEAD="$${APM_TEST_OVERHEAD:-1}" scripts/apm-test/run-languages.sh
-	APM_TEST_LANGUAGE_LOG_DIR="$${APM_ACCEPTANCE_OUTPUT:-$(CURDIR)/output/apm-acceptance}" scripts/apm-test/run-logs.sh
-	scripts/apm-test/run.sh
+test-apm-acceptance: ## APM 查询、日志关联、告警、容量和按需 Profiling 验收（独立 Docker）
+	APM_TEST_LOAD=1 scripts/apm-test/run.sh
+	scripts/apm-test/run-logs.sh
 	scripts/apm-test/run-profiles.sh
 	npm run typecheck --prefix web
 	npm test --prefix web -- --run src/api/apm.test.ts src/pages/Apm.test.tsx src/pages/Logs.test.tsx src/pages/DailyTools.test.tsx src/pages/Traces.test.tsx --maxWorkers=2 --minWorkers=2 --testTimeout=20000
@@ -128,7 +124,7 @@ test-race: ## 单元测试 + race
 test-k8s-capabilities: ## 隔离 Linux 环境验证节点 JVM attach 权限（需要 root/sudo）
 	@test "$$(uname -s)" = Linux || { echo 'Linux is required'; exit 1; }
 	@set -eu; tmp_dir=$$(mktemp -d); trap 'rm -rf "$$tmp_dir"' EXIT; \
-	go test -race -c -o "$$tmp_dir/edge.test" ./cmd/ongrid-edge; \
+	go test -race -c -o "$$tmp_dir/edge.test" ./internal/edgeagent/k8s/hostruntime; \
 	if [ "$$(id -u)" = 0 ]; then \
 		env ONGRID_TEST_K8S_CAPABILITIES=1 "$$tmp_dir/edge.test" -test.v -test.timeout=45s -test.run='^TestK8sHostCapabilitiesSurviveJVMAttach$$'; \
 	else \
@@ -140,7 +136,7 @@ test-k8s-autoapm: ## 隔离 Linux 环境验证 Chart 权限与非 root OBI 采�
 	@test "$$(uname -s)" = Linux && test "$$(id -u)" = 0 || { echo 'Run as root in isolated Linux with the Chart capabilities'; exit 1; }
 	@test -x "$${ONGRID_TEST_AUTOAPM_BIN_DIR}/obi" && test -x "$${ONGRID_TEST_AUTOAPM_BIN_DIR}/otelcol-contrib"
 	@set -eu; tmp_dir=$$(mktemp -d); trap 'rm -rf "$$tmp_dir"' EXIT; \
-	go test -race -c -o "$$tmp_dir/edge.test" ./cmd/ongrid-edge; \
+	go test -race -c -o "$$tmp_dir/edge.test" ./internal/edgeagent/k8s/hostruntime; \
 	go test -race -c -o "$$tmp_dir/autoapm.test" ./internal/edgeagent/plugins/autoapm; \
 	env ONGRID_TEST_K8S_AUTOAPM_BINARY="$$tmp_dir/autoapm.test" "$$tmp_dir/edge.test" -test.v -test.timeout=7m -test.run='^TestK8sHostAutoAPMIntegration$$'
 
@@ -148,6 +144,11 @@ test-k8s-autoapm: ## 隔离 Linux 环境验证 Chart 权限与非 root OBI 采�
 test-edge-metrics-env: ## Edge 诊断端口安装配置保留检查
 	bash -n deploy/install/edge/install.sh deploy/install/edge/install-edge.sh
 	python3 scripts/test-edge-metrics-env.py
+
+.PHONY: test-edge-root-install
+test-edge-root-install: ## Edge root 安装、重装和升级回归检查（隔离容器）
+	docker run --rm --network none --mount "type=bind,source=$(CURDIR),target=/src,readonly" \
+		ubuntu:22.04 bash /src/scripts/test-edge-root-install.sh
 
 test-integration: ## 集成测试（build tag: integration）
 	go test -tags=integration ./...
@@ -166,9 +167,17 @@ test-e2e-live: ## E2E live mode（用 tests/e2e/secrets.local.env 打通真实�
 lint: ## 运行 golangci-lint
 	golangci-lint run
 
-arch-lint: ## 运行 go-arch-lint（校验 BC 边界）
-	@command -v go-arch-lint >/dev/null 2>&1 || { echo "go-arch-lint not installed; skipping"; exit 0; }
-	go-arch-lint check
+ARCH_LINT ?= go-arch-lint
+.PHONY: tools-arch test-arch-policy
+tools-arch: ## 安装固定版本的架构检查工具
+	go install github.com/fe3dback/go-arch-lint@v1.19.0
+
+arch-lint: ## 校验生产代码 BC 边界（缺少工具时明确失败）
+	@command -v $(ARCH_LINT) >/dev/null 2>&1 || { echo "go-arch-lint not installed; run make tools-arch" >&2; exit 1; }
+	$(ARCH_LINT) check
+
+test-arch-policy: ## 验证架构规则确实拒绝跨域和跨层 import
+	python3 scripts/test-arch-policy.py --binary $(ARCH_LINT)
 
 # ----------------------------------------------------------------------------
 # proto
@@ -197,17 +206,6 @@ proto: ## [api] 重新生成 proto（优先 buf，回退 protoc + protoc-gen-go/
 			--go-grpc_opt=require_unimplemented_servers=true \
 			$$(find . -name '*.proto' -not -path './gen/*' -print); \
 	fi
-
-# ----------------------------------------------------------------------------
-# migrate
-# ----------------------------------------------------------------------------
-
-.PHONY: migrate-up migrate-down
-migrate-up: ## DB migrate up（DB_DSN 可覆盖）
-	migrate -path $(MIGRATIONS) -database "mysql://$(DB_DSN)" up
-
-migrate-down: ## DB migrate down 1 步
-	migrate -path $(MIGRATIONS) -database "mysql://$(DB_DSN)" down 1
 
 # ----------------------------------------------------------------------------
 # docker
@@ -246,11 +244,6 @@ docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 # ----------------------------------------------------------------------------
 # compose
 # ----------------------------------------------------------------------------
-
-APM_GO_SOURCE ?= .
-.PHONY: build-apm-go
-build-apm-go: ## 构建 Go APM 示例（版本与提交写入二进制）
-	cd "$(APM_GO_SOURCE)" && $(GO_BUILD) -o "$(abspath $(BIN_DIR))/apm-go" ./examples/apm-go
 
 COMPOSE ?= docker compose
 COMPOSE_ARGS ?= -f deploy/docker-compose.yml
@@ -898,6 +891,7 @@ package-all: ## [release] 打 amd64 + arm64 两个生产安装包到 dist/out/
 	done
 
 test-release-package: ## [test] 校验安装 URL 与 Compose 发布包内容
+	$(MAKE) --no-print-directory test-edge-root-install
 	bash scripts/test-public-url.sh
 	bash scripts/test-upgrade-data-permissions.sh
 	bash scripts/test-install-asset-modes.sh
@@ -960,3 +954,12 @@ test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm
 		src/components/ChatLayout.test.tsx src/components/Sidebar.test.tsx \
 		src/components/icons/Provider.test.tsx src/pages/kubernetes/edgeAttachments.test.ts \
 		src/pages/kubernetes/registryCommands.test.ts
+
+.PHONY: test-agent-runtime
+test-agent-runtime: ## 统一 Agent runtime 回归（tools 依赖 Linux cmdpolicy）
+	go test -race ./internal/manager/biz/aiops/... ./internal/manager/biz/approval ./internal/manager/service/aiops ./internal/manager/server/aiops ./internal/manager/biz/imbridge ./internal/manager/service/imbridge ./internal/manager/service/flow ./internal/manager/biz/report ./internal/manager/biz/alert/investigator ./internal/manager/biz/marketplace ./internal/manager/biz/agenttrace ./internal/manager/service/skill ./internal/skill/... ./cmd/ongrid
+
+.PHONY: build-host-identity-probe
+build-host-identity-probe: ## 构建 Host/Edge 隔离验收探针（不执行系统命令）
+	@mkdir -p $(BIN_DIR)
+	$(GO_BUILD) -o $(BIN_DIR)/host-identity-probe ./tests/acceptance/hostidentity/probe

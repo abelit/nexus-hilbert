@@ -197,13 +197,21 @@ func (u *Usecase) SilenceIncident(ctx context.Context, id, operatorUserID uint64
 		return err
 	}
 	matchers := `[]`
+	var deviceID *uint64
 	if incident.DeviceID != nil {
 		matchers = fmt.Sprintf(`[{"field":"device_id","operator":"=","value":"%d"}]`, *incident.DeviceID)
+		id := *incident.DeviceID
+		deviceID = &id
 	}
 	reasonCopy := reason
+	// silenceMatches treats empty fields as wildcards, so the row must carry
+	// the incident's device and rule; scope_type alone would mute every
+	// incident of that scope.
 	if err := u.repo.CreateSilence(ctx, &model.Silence{
 		Name:         buildSilenceName(incident),
 		ScopeType:    incident.ScopeType,
+		DeviceID:     deviceID,
+		Rule:         incident.Rule,
 		Status:       model.SilenceStatusActive,
 		MatchersJSON: matchers,
 		Reason:       &reasonCopy,
@@ -499,8 +507,8 @@ func (u *Usecase) RecordFiring(ctx context.Context, in FiringInput) (*FiringResu
 		if incident.LabelsJSON != "" {
 			_ = json.Unmarshal([]byte(incident.LabelsJSON), &labels)
 		}
-		// edge_id == device_id 1:1 post entity-split (see model comment).
-		u.workflowDispatcher.OnAlertFired(incident.ID, incident.Rule, incident.RuleName, incident.Severity, devID, devID, labels, occurredAt)
+		// Host identity is durable; execution resolves the current Edge at dispatch.
+		u.workflowDispatcher.OnAlertFired(incident.ID, incident.Rule, incident.RuleName, incident.Severity, 0, devID, labels, occurredAt)
 	}
 
 	return &FiringResult{
@@ -1369,7 +1377,7 @@ func (u *Usecase) MaybeNotify(ctx context.Context, res *FiringResult, msg notify
 	if rule := u.lookupRuleForIncident(ctx, res.Incident); rule != nil &&
 		rule.NotifyWindowSeconds > 0 && rule.NotifyMinFires > 0 {
 		since := occurredAt.Add(-time.Duration(rule.NotifyWindowSeconds) * time.Second)
-		count, err := u.repo.CountEventsByType(ctx, model.EventTypeFiring, since, res.Incident.Rule, "")
+		count, err := u.repo.CountEventsByType(ctx, model.EventTypeFiring, since, res.Incident.Rule, "", rule.NotifyMinFires)
 		if err != nil {
 			u.log.Warn("alert: count firing events for dampening failed",
 				slog.String("rule", res.Incident.Rule),

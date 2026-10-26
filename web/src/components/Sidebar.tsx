@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { OngridLogo } from './OngridLogo';
+import { SessionRevealRegion } from './SessionRevealRegion';
 import { Button } from './ui';
 import { useI18n } from '@/i18n/locale';
 import { cmdbNavSection } from '@/cmdb';
@@ -188,6 +189,7 @@ export function Sidebar() {
   if (narrow ? !mobileExpanded : sidebarCollapsed) {
     return (
       <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col items-center gap-2 overflow-hidden border-r border-zinc-800/60 bg-zinc-900 py-3">
+        <SessionRevealRegion>
         {/* Brand mark + expand toggle: logo doubles as the expand
             affordance — saves a row in the narrow column. */}
         <Hint content={tr('Ongrid · 点击展开', 'Ongrid · click to expand')}><Button variant="subtle" size="sm"
@@ -199,6 +201,7 @@ export function Sidebar() {
         >
           <OngridLogo size={34} />
         </Button></Hint>
+        </SessionRevealRegion>
         <Button variant="subtle" size="sm"
           type="button"
           onClick={toggleNavigation}
@@ -287,11 +290,11 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col overflow-hidden border-r border-zinc-800/60 bg-zinc-900">
+    <aside className="flex h-full min-h-0 w-[232px] shrink-0 flex-col overflow-hidden border-r border-zinc-800/60 bg-zinc-900">
       {/* Brand row — keeps the product identity visible while the user
           row below still owns the avatar + menu. Clicking the wordmark
           goes home. */}
-      <div className="flex items-center gap-1.5 border-b border-zinc-800/60 px-3 py-3">
+      <SessionRevealRegion className="flex items-center gap-1.5 border-b border-zinc-800/60 px-3 py-3">
         <Link
           to="/"
           aria-label={tr('Ongrid 首页', 'Ongrid home')}
@@ -303,7 +306,7 @@ export function Sidebar() {
         </Link>
         {/* Version + upgrade CTA moved to Settings → About / Upgrade — the brand
             mark stays clean. */}
-      </div>
+      </SessionRevealRegion>
 
       {/* user / collapse / bell */}
       <DropdownMenu open={userMenuOpen} onOpenChange={setUserMenuOpen}>
@@ -405,13 +408,11 @@ export function Sidebar() {
           storageKey="observability"
           title={tr('监控告警', 'Observability')}
           defaultOpen={false}
-          initialHiddenKeys={['agent-observability']}
           items={[
             { key: 'monitor', to: '/monitor', icon: ChartLine, label: tr('监控', 'Monitor') },
             { key: 'apm', to: '/apm', icon: Boxes, label: tr('服务', 'Services') },
             { key: 'logs', to: '/logs', icon: FileText, label: tr('日志', 'Logs') },
             { key: 'traces', to: '/traces', icon: Waypoints, label: tr('链路', 'Traces') },
-            { key: 'agent-observability', to: '/agent-observability', icon: Bot, label: tr('Agent', 'Agent') },
             { key: 'alerts', to: '/alerts', icon: Siren, label: tr('告警', 'Alerts'), badge: incidentOpen },
           ]}
         />

@@ -2,11 +2,19 @@ package tunnel
 
 import "time"
 
+// Filesystem scan budgets are shared by Manager and Edge so transport waits
+// outlast all four waves of a maximum-size batch plus the df snapshot.
+const (
+	HostFilesPerPathTimeout  = 5 * time.Minute
+	HostFilesBatchTimeout    = 4 * HostFilesPerPathTimeout
+	HostFilesMetadataTimeout = 30 * time.Second
+	HostFilesCallTimeout     = HostFilesBatchTimeout + HostFilesMetadataTimeout + 30*time.Second
+)
+
 // host_files RPC method names. These are the wire constants the manager
 // (Caller) and edge (RegisterHandler) use to address the three filesystem
-// inspection tools introduced by PR-8 of The skill manifest at
-// skills/host-files/SKILL.md routes the LLM to these via the BaseTool
-// implementations in internal/manager/biz/aiops/tools/host_files_basetool.go.
+// inspection tools. The LLM calls these via the BaseTool
+// implementations in internal/manager/biz/aiops/tools/host_files.go.
 //
 // Body wire format is JSON (). Field names match the public
 // JSON Schema declared in the BaseTool Info() method —

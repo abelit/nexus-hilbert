@@ -4,7 +4,7 @@ import { getToken } from '@/store/auth';
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export type ImageAttachment = {
-	 id: string;
+  id: string;
   name: string;
   mime_type: string;
   size: number;
@@ -49,6 +49,7 @@ export type ChatMessage = {
 };
 
 export type ChatSession = {
+  runtime_version?: string;
  apm_source?: { trace_id: string; repo_id: string; source_directory: string; revision: string; commit_sha: string; error?: string };
   id: string;
   user_id: number;
@@ -350,7 +351,7 @@ export async function streamMessage(
   const decoder = new TextDecoder();
   let buf = '';
 
-  while (true) {
+  for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });

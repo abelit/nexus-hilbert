@@ -351,9 +351,9 @@ sudo ONGRID_CLOUD_ADDR=ongrid.example.com:40012 \
 脚本会：
 
 - 根据 `uname -s/-m` 挑选 `ongrid-edge-<os>-<arch>` 二进制，拷贝到 `/usr/local/bin/ongrid-edge`。
-- 创建系统用户 `ongrid-edge`、日志目录 `/var/log/ongrid-edge`。
+- 准备 `root:root` 所有的配置、状态和日志目录，不再创建专用系统用户；已有账户保持不变。
 - 渲染 `/etc/ongrid-edge/ongrid-edge.env` 并安装 systemd unit。
-- `systemctl enable --now ongrid-edge` 并打印状态与最近 20 行日志。
+- 执行 `systemctl enable ongrid-edge` 和 `systemctl restart ongrid-edge`，以 root 身份运行服务，并打印状态与最近 20 行日志。
 
 卸载：`sudo /path/to/install-edge.sh --uninstall`。
 
@@ -403,3 +403,9 @@ sudo docker exec ongrid-prometheus wget -qO- \
 `/opt/ongrid/prometheus.yml` 是 bind-mounted scrape config，改完跑 `docker compose restart prometheus` 或 `curl -XPOST http://prometheus:9090/-/reload`（`--web.enable-lifecycle` 已开）。
 
 **备份**已迁移到宿主机目录（v0.7.45+），见上文「数据存储 → 数据备份」小节，不再需要 `docker run --rm -v prometheus_data:/data`。
+
+### Agent runtime 迁移（统一 Graph）
+
+统一运行时版本仅使用 Graph/Eino。删除旧 `.env` 中的 `ONGRID_AGENT_KERNEL`；不再支持切换 legacy。手动设置旧变量的裸二进制部署会记录迁移告警并使用 Graph，Compose 不再向容器传递该变量。
+
+升级前验证联网搜索、诊断工具、专家任务、IM、审批和历史会话续聊。Graph 初始化失败时聊天返回明确的不可用错误，其他 Manager 功能继续运行；根据启动日志修复配置并重启，不再隐式回退旧循环。首次发布先金丝雀验证，不变更会话表结构。回滚恢复上一版 Manager 镜像和对应 Compose 配置。

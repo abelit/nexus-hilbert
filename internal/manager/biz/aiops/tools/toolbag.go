@@ -55,6 +55,7 @@ import (
 // ToolSearch sits in the same flat slice as everything else.
 var tierByName = map[string]string{
 	// core (always full schema).
+	"load_skill":              "core",
 	"get_host_load":           "core",
 	"get_host_processes":      "core",
 	"query_promql":            "core",
@@ -74,8 +75,8 @@ var tierByName = map[string]string{
 	"get_topology":            "core",
 	"query_incidents":         "core",
 	"query_change_events":     "core",
-	"get_edge_summary":        "core",
-	"rank_edges":              "core",
+	"get_host_summary":        "core",
+	"rank_hosts":              "core",
 	"correlate_incident":      "core",
 	"AgentTool":               "core",
 	"SendMessage":             "core",
@@ -94,7 +95,7 @@ var tierByName = map[string]string{
 	// diagnostic exploration — most chats don't need it, and its
 	// when_to_use blob is large enough to want defer-loading once
 	// the marketplace pushes the bag past threshold.
-	"find_outlier_edges":    "specialty",
+	"find_outlier_hosts":    "specialty",
 	"get_incident_detail":   "specialty",
 	"query_alert_rules":     "specialty",
 	"host_find_large_files": "specialty",
@@ -416,4 +417,46 @@ func (r redactedTool) InvokableRun(ctx context.Context, argsJSON string, opts ..
 		return "", fmt.Errorf("redactedTool: inner not wired")
 	}
 	return r.inner.InvokableRun(ctx, argsJSON, opts...)
+}
+
+// UpsertTools 同步后注册工具的完整目录，同名项替换，不生成重复条目。
+func (b *ToolBag) UpsertTools(tools []basetool.BaseTool) {
+	if b == nil {
+		return
+	}
+	updates := map[string]basetool.BaseTool{}
+	order := []string{}
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		info, err := tool.Info(context.Background())
+		if err != nil || info == nil || info.Name == "" {
+			continue
+		}
+		if _, ok := updates[info.Name]; !ok {
+			order = append(order, info.Name)
+		}
+		updates[info.Name] = tool
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	all := append(append([]basetool.BaseTool{}, b.core...), b.deferred...)
+	for i, t := range all {
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil {
+			continue
+		}
+		if replacement, ok := updates[info.Name]; ok {
+			all[i] = replacement
+			delete(updates, info.Name)
+		}
+	}
+	for _, name := range order {
+		if t, ok := updates[name]; ok {
+			all = append(all, t)
+		}
+	}
+	updated := NewToolBag(all, b.threshold)
+	b.core, b.deferred, b.deferring = updated.core, updated.deferred, updated.deferring
 }

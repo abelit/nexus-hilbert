@@ -39,14 +39,14 @@ type envelope struct {
 type eventsAPIPayload struct {
 	TeamID string `json:"team_id"`
 	Event  struct {
-		Type      string `json:"type"`        // "message" | "app_mention" | ...
-		Subtype   string `json:"subtype"`     // empty for normal user text; "bot_message", "message_changed" etc. to ignore
-		Channel   string `json:"channel"`     // C…/G…/D… channel id
-		User      string `json:"user"`        // sender user id
-		Text      string `json:"text"`        // raw text (may contain <@U…> mention markup)
-		TS        string `json:"ts"`          // message ts (used as event id for dedup)
-		BotID     string `json:"bot_id"`      // present on bot-sent messages — used to break echo loops
-		ThreadTS  string `json:"thread_ts"`   // present on reply threads — used as ImThread.ImThreadID
+		Type     string `json:"type"`      // "message" | "app_mention" | ...
+		Subtype  string `json:"subtype"`   // empty for normal user text; "bot_message", "message_changed" etc. to ignore
+		Channel  string `json:"channel"`   // C…/G…/D… channel id
+		User     string `json:"user"`      // sender user id
+		Text     string `json:"text"`      // raw text (may contain <@U…> mention markup)
+		TS       string `json:"ts"`        // message ts (used as event id for dedup)
+		BotID    string `json:"bot_id"`    // present on bot-sent messages — used to break echo loops
+		ThreadTS string `json:"thread_ts"` // present on reply threads — used as ImThread.ImThreadID
 	} `json:"event"`
 }
 
@@ -112,6 +112,21 @@ func (c *StreamClient) Run(ctx context.Context) error {
 		return fmt.Errorf("ws dial: %w", err)
 	}
 	defer conn.Close()
+	// ReadMessage takes no context: closing the socket is the only thing that
+	// unblocks it. Without this, Run never returns on cancellation and the
+	// supervisor has to abandon the goroutine and its socket (#517 shape).
+	// gorilla documents Close as safe to call concurrently with ReadMessage.
+	// watchDone releases the watcher when Run returns on its own, so a slot that
+	// reconnects many times does not accumulate one goroutine per attempt.
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-watchDone:
+		}
+	}()
 
 	// Keep the connection warm. Slack's idle close hits ~30s. The ping
 	// runs in a goroutine so the read loop never blocks behind a write.
