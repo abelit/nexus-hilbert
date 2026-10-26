@@ -22,13 +22,14 @@
 | --- | --- | --- | --- |
 | PR1 独立运行时 | 已完成 | `9cef6aa` `ac24647` `2caebf4` `a2b3754` `ed626fc` | 迁移锁、路由 golden、`cmd/ongrid-cmdb`、manager 解耦、开发部署、评审修复 |
 | PR2 生产安装/发布 | 已完成 | `1fe51c2` | install compose/nginx/Prometheus、install/upgrade 健康检查、Makefile、release workflow、ADR/运维文档 |
-| PR3 偏好/关系/树视图/关系视图 | 代码完成，截图待 PR9 | `7e854a2` `cf7509b` `b20f4a9` `1af1f4b` `49f65c9` | API、偏好页、资源层级、关系创建、菜单分组均完成；真实浏览器截图待统一做 |
-| PR4 批量导入 | 代码完成，截图待 PR9 | `192eac2` | CSV/XLSX 解析、预览、提交、模板、Instances 入口 |
-| PR5 自动发现 UI | 代码完成，截图待 PR9 | `5239783` `a583d52` | `target-types` 端点，规则/账号/目标/目录/模板页面 |
-| PR6 ADC 发现池 | 代码完成，截图待 PR9 | `4a0d95d` | 池表/执行日志、API、接受事务、`/cmdb/adc` 页面 |
-| PR7 操作历史 | 代码完成，截图待 PR9 | `04b49aa` | 只读 API、6 条路由、`/cmdb/operation-history` 页面 |
-| PR8 拓扑视图 | 代码完成，截图待 PR9 | `abaf2bc` | 两张表、CRUD/排序/预览、图装配、`/cmdb/topology-views` 页面 |
-| PR9 E2E/收尾 | 完成 | （本次提交） | DCIM move/rename、ModelDetail 自动发现 tab、144 张响应式截图、MySQL/CMDB/nginx 实测 |
+| PR3 偏好/关系/树视图/关系视图 | 已完成 | `7e854a2` `cf7509b` `b20f4a9` `1af1f4b` `49f65c9` | API、偏好页、资源层级、关系创建、菜单分组；真实浏览器截图由 PR9 覆盖 |
+| PR4 批量导入 | 已完成 | `192eac2` | CSV/XLSX 解析、预览、提交、模板、Instances 入口；截图由 PR9 覆盖 |
+| PR5 自动发现 UI | 已完成 | `5239783` `a583d52` | `target-types` 端点，规则/账号/目标/目录/模板页面；截图由 PR9 覆盖 |
+| PR6 ADC 发现池 | 已完成 | `4a0d95d` | 池表/执行日志、API、接受事务、`/cmdb/adc` 页面；截图由 PR9 覆盖 |
+| PR7 操作历史 | 已完成 | `04b49aa` | 只读 API、6 条路由、`/cmdb/operation-history` 页面；截图由 PR9 覆盖 |
+| PR8 拓扑视图 | 已完成 | `abaf2bc` | 两张表、CRUD/排序/预览、图装配、`/cmdb/topology-views` 页面；截图由 PR9 覆盖 |
+| PR9 E2E/收尾 | 已完成 | `38d34eb` `c12fa0e` | DCIM move/rename、ModelDetail 自动发现 tab、144 张响应式截图、MySQL/CMDB/nginx 实测 |
+| 最终全分支评审 | 已完成 | `f94d283`…`88a7713` | 1 critical + 8 important 修复；7 minor 与 1 条残余风险记录 |
 
 PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical、8 个 important 已全部修复（`f94d283`…`cdd051d`），7 个 minor 与 1 条残余风险记录在下文。分支可进入 PR/评审。未推送、未创建 PR；推送前按 AGENTS.md 运行 `gh pr checks`。
 
@@ -179,8 +180,8 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
 ### PR3 验证
 
 - [x] `make test-web-ci-cmdb`（130 tests）、`npm run typecheck`、`npm run build`。
-- [ ] `npm run lint`（区分既有错误）。
-- [ ] 真实浏览器：390/768/1280/1920，zh/en，light/dark；Preferences、TreeViews、Relations、ServiceTree；检查表格横向滚动、操作列、空态/错误态/加载态；截图附 PR（统一放到 PR9）。
+- [x] `npm run lint`：全量 53 problems（9 errors / 44 warnings），均为既有问题；改动文件 0 错误。
+- [x] 真实浏览器：390/768/1280/1920，zh/en，light/dark；Preferences、TreeViews、Relations、ServiceTree 均由 PR9 的响应式 spec 覆盖（144 passed）。
 
 ## 后续阶段清单
 
@@ -203,7 +204,7 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
 - [x] 目标树的模型列表合并 `target-types` 与全部已挂载模型：只列“已有目标”的模型会让模型的首个目标无法从页面创建。
 - [x] 账号只在读取成功后回写，读取失败不覆盖已有账号。
 - 验收：`npx vitest run src/cmdb/pages/Discovery.test.tsx`（10 tests）、CMDB 全量 26 文件/144 tests、`npm run typecheck`、`npm run build`、改动文件 `eslint` 通过。提交 `a583d52`。
-- [ ] 真实浏览器截图（PR9 统一做）。
+- [x] 真实浏览器截图（PR9 统一完成：144 passed）。
 - 已知限制：HTTP 规则首次创建目标时，映射字段需要先在抽屉里选择资源类型（规则自带 `categories`，如 `ecs`）；插件/SNMP/组件规则从规则字段表或内置目录取字段。
 
 ### PR6 ADC 发现池（后端 + 前端）
@@ -226,7 +227,7 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
 - [x] 前端 `pages/OperationHistory.tsx` + `components/history/{HistoryFilters,HistoryRecordDrawer}.tsx` 四 tab + 过滤/分页/抽屉；路由 `/cmdb/operation-history`。
 - [x] 测试：过滤/分页/时间范围/空结果/权限、路由契约、`cmd/ongrid-cmdb` 装配。
 - 验收：受影响包 `go test -race` 通过；全量 `go test ./...`、`go vet ./...` 通过；CMDB 前端 28 文件/154 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint` 通过。提交 `04b49aa`。
-- [ ] 真实浏览器截图（PR9 统一做）。
+- [x] 真实浏览器截图（PR9 统一完成：144 passed）。
 - 已知限制：`c_records.created_at`、`uid`、`type_id`、`ci_id`、`attr_id`、`record_id`、`trigger_id` 已有索引；`c_ci_type_histories.created_at` 与 `c_ci_trigger_histories.created_at` 没有新增索引，按时间过滤这两张表在大数据量下会扫描。
 - 已知限制：模型变更表没有 `record_id`（cantor 自己的 `uid/change`），所以“用户”列取该表的 `uid`，不能关联到一次写入的来源/工单。
 
@@ -238,7 +239,7 @@ PR1–PR9 的代码与验证已完成，最终全分支评审的 1 个 critical�
 - [x] 前端 `api/topology.ts`、`pages/TopologyViews.tsx`、`components/topology/{TopoGraph,TopologySidebar,TopologyViewDrawer}.tsx`；复用共享 `TopologyGraph`（`@xyflow/react` + dagre）；路由 `/cmdb/topology-views`。
 - [x] 测试：图去重/自环/上下层/上限、store CRUD/排序/分组守卫、路由契约、`cmd/ongrid-cmdb` 装配、前端列表/创建/预览/权限。
 - 验收：受影响包 `go test -race` 通过；全量 `go test ./...`、`go vet ./...` 通过；CMDB 前端 29 文件/158 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint` 通过。提交 `abaf2bc`。
-- [ ] 真实浏览器截图（PR9 统一做）。
+- [x] 真实浏览器截图（PR9 统一完成：144 passed）。
 - 已知限制：路径用带校验的 JSON 文本编辑，未做图形化 `PathPicker`；`type-relations` 端点已提供但抽屉暂未用它推荐下一层。
 - 已知限制：分组/视图的排序接口已完成，侧栏暂未提供上移/下移或拖拽入口；ACL grant/revoke 随 ACL Epic 一起延后。
 - 已知限制：图沿用共享 React Flow 组件的默认边样式（CMDB 关系没有 semantic tag），节点颜色按模型 id 落到中性色。
