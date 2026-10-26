@@ -115,8 +115,18 @@ func BuildGraph(ctx context.Context, q GraphQueries, in GraphInput) (*Graph, err
 		visited[root.ID] = true
 		frontier = append(frontier, root.ID)
 	}
+	// THE TWO DIRECTIONS EACH START AT THE ROOTS. levelsOf puts positive levels
+	// first, so by the time the first negative level runs the frontier holds the
+	// deepest downward children; walking up from there would draw grandparents
+	// of the children instead of the roots' parents. cantor reset its id list to
+	// root_ids before the negative loop for the same reason.
+	rootFrontier := append([]model.ID(nil), frontier...)
+	lastLevel := 0
 
 	for _, level := range levels {
+		if level.Level < 0 && lastLevel > 0 {
+			frontier = rootFrontier
+		}
 		if len(frontier) == 0 {
 			break
 		}
@@ -174,6 +184,7 @@ func BuildGraph(ctx context.Context, q GraphQueries, in GraphInput) (*Graph, err
 			}
 		}
 		frontier = next
+		lastLevel = level.Level
 	}
 
 	ids := make([]model.ID, 0, len(nodes))

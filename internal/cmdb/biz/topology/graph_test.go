@@ -83,11 +83,18 @@ func graphFixture() *stubGraph {
 			},
 		},
 		parents: map[model.ID][]GraphEdge{
+			// A parent of a root is what the -1 level draws.
+			100: {
+				{From: 400, To: 100, FromTypeID: 4, ToTypeID: 1},
+			},
+			// A parent of a downward child is NOT part of an upward level:
+			// cantor restarted the upward walk at the roots, not at the last
+			// downward frontier.
 			200: {
-				{From: 400, To: 200, FromTypeID: 4, ToTypeID: 2},
+				{From: 500, To: 200, FromTypeID: 4, ToTypeID: 4},
 			},
 		},
-		names: map[model.ID]string{200: "sw-01", 400: "dc-01"},
+		names: map[model.ID]string{200: "sw-01", 400: "dc-01", 500: "dc-02"},
 		icons: map[model.ID]string{1: "icon-host", 2: "icon-switch", 4: "icon-dc"},
 	}
 }
@@ -118,6 +125,9 @@ func TestBuildGraphWalksBothDirectionsAndDeduplicates(t *testing.T) {
 	if byID[200].Name != "sw-01" || byID[400].Name != "dc-01" {
 		t.Fatalf("names were not filled: %+v", byID)
 	}
+	if _, ok := byID[500]; ok {
+		t.Fatalf("parent of the downward child was drawn: %+v", byID[500])
+	}
 	if byID[100].Name != "web-01" || byID[101].Name != "web-02" {
 		t.Fatalf("root names were lost: %+v", byID)
 	}
@@ -127,8 +137,8 @@ func TestBuildGraphWalksBothDirectionsAndDeduplicates(t *testing.T) {
 	if got.Links[0].From != 100 || got.Links[0].To != 200 {
 		t.Fatalf("first link = %+v, want 100→200", got.Links[0])
 	}
-	if got.Links[1].From != 400 || got.Links[1].To != 200 {
-		t.Fatalf("second link = %+v, want 400→200", got.Links[1])
+	if got.Links[1].From != 400 || got.Links[1].To != 100 {
+		t.Fatalf("second link = %+v, want 400→100, the root's parent", got.Links[1])
 	}
 	if got.Type2Meta[1] != "icon-host" || got.Type2Meta[2] != "icon-switch" || got.Type2Meta[4] != "icon-dc" {
 		t.Fatalf("type2meta = %+v", got.Type2Meta)
