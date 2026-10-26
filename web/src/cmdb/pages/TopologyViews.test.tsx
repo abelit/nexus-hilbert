@@ -81,6 +81,37 @@ describe('the topology views page', () => {
     expect(screen.getByText('1 个节点，0 条边')).toBeInTheDocument();
   });
 
+  it('does not leave the previous graph on screen when the next view fails', async () => {
+    const broken = { ...view, id: 8, name: '故障视图' };
+    const groupBoth = { ...group, views: [view, broken] };
+    server.use(
+      http.get('/api/v1/cmdb/topology-views/groups', () =>
+        HttpResponse.json({ items: [groupBoth], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/topology-views', () =>
+        HttpResponse.json({ items: [view, broken], total: 2 }),
+      ),
+      http.get('/api/v1/cmdb/topology-views/7/graph', () =>
+        HttpResponse.json({
+          nodes: [{ id: 100, type_id: 1, name: 'web-01' }],
+          links: [],
+          type2meta: {},
+        }),
+      ),
+      http.get('/api/v1/cmdb/topology-views/8/graph', () =>
+        HttpResponse.json({ error: 'too large' }, { status: 400 }),
+      ),
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [host], total: 1 })),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('topo-graph')).toHaveTextContent('web-01');
+    await userEvent.click(screen.getByRole('button', { name: '查看拓扑视图 故障视图' }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByTestId('topo-graph')).not.toBeInTheDocument();
+  });
+
   it('creates a view and sends its path', async () => {
     let posted: unknown;
     baseHandlers();

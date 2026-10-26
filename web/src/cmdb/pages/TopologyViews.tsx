@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -91,16 +91,27 @@ export default function TopologyViewsPage() {
       .catch(() => setModels([]));
   }, [isAdmin]);
 
+  // A GRAPH BELONGS TO THE VIEW THAT ASKED FOR IT. The sequence guards against
+  // a late response from a view the operator has already left; clearing the
+  // previous graph before the request also stops a failed view from showing
+  // its predecessor's picture under its own title.
+  const graphSeq = useRef(0);
+
   const loadGraph = useCallback(
     async (id: number) => {
-      setGraphLoading(true);
+      const seq = ++graphSeq.current;
+      setGraph(null);
       setGraphErr(null);
+      setGraphLoading(true);
       try {
-        setGraph(await getTopologyGraph(id));
+        const got = await getTopologyGraph(id);
+        if (seq === graphSeq.current) setGraph(got);
       } catch (error) {
-        setGraphErr(describeError(error, tr('无法装配拓扑图', 'Could not assemble the graph')));
+        if (seq === graphSeq.current) {
+          setGraphErr(describeError(error, tr('无法装配拓扑图', 'Could not assemble the graph')));
+        }
       } finally {
-        setGraphLoading(false);
+        if (seq === graphSeq.current) setGraphLoading(false);
       }
     },
     [tr],
@@ -108,10 +119,17 @@ export default function TopologyViewsPage() {
 
   useEffect(() => {
     if (selectedID == null) {
+      graphSeq.current += 1;
       setGraph(null);
+      setGraphErr(null);
+      setGraphLoading(false);
       return;
     }
     void loadGraph(selectedID);
+    return () => {
+      // Invalidate this request on unmount or when the selection changes.
+      graphSeq.current += 1;
+    };
   }, [selectedID, loadGraph]);
 
   const selectedView = views.find((view) => view.id === selectedID) ?? null;
