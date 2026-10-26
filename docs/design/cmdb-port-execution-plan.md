@@ -24,11 +24,13 @@
 | PR2 生产安装/发布 | 已完成 | `1fe51c2` | install compose/nginx/Prometheus、install/upgrade 健康检查、Makefile、release workflow、ADR/运维文档 |
 | PR3 偏好/关系/树视图/关系视图 | 代码完成，截图待 PR9 | `7e854a2` `cf7509b` `b20f4a9` `1af1f4b` `49f65c9` | API、偏好页、资源层级、关系创建、菜单分组均完成；真实浏览器截图待统一做 |
 | PR4 批量导入 | 代码完成，截图待 PR9 | `192eac2` | CSV/XLSX 解析、预览、提交、模板、Instances 入口 |
-| PR5 自动发现 UI | 后端就绪，前端待做 | `5239783` | `target-types` 端点完成；Rules/Targets/Catalog/Templates 页面待做 |
+| PR5 自动发现 UI | 代码完成，截图待 PR9 | `5239783` `a583d52` | `target-types` 端点，规则/账号/目标/目录/模板页面 |
 | PR6 ADC 发现池 | 待开始 | — | 后端两张表 + API + 前端 |
 | PR7 操作历史 | 待开始 | — | 后端只读 API + 前端 |
 | PR8 拓扑视图 | 待开始 | — | 后端两张表 + 图装配 + 前端 |
 | PR9 E2E/收尾 | 待开始 | — | DCIM move/rename、ModelDetail 自动发现 tab、响应式截图 |
+
+下一步：**PR6 ADC 发现池**。PR1–PR5 的代码已完成，剩下的真实浏览器截图统一在 PR9 做。
 
 ## 已完成阶段的验收证据
 
@@ -57,7 +59,7 @@
 - 未做真实 MySQL 容器级 compose 启动；SQLite 端到端和 MySQL gated 锁测试已覆盖核心路径。PR9 前补一次 compose 启动验收。
 - 发布前必须同时替换 `ongrid` 与 `ongrid-cmdb`；旧 manager 仍挂载 CMDB 路由。
 
-## 下一步：PR3（偏好/关系/树视图/关系视图）
+## PR3 明细（已完成）
 
 目标：补齐 CMDB 菜单中的偏好、模型关系、资源层级、关系视图入口，全部复用现有后端；不新增后端接口。
 
@@ -145,9 +147,14 @@
 
 - [x] 后端 `GET /v1/cmdb/discovery/target-types`（any authed）→ `{items:[{type_id,name,alias,icon,target_count}],total}`；usecase 从 target 行计数，handler + 测试 + golden 已更新。提交 `5239783`。
   裁定：计数在 usecase 内完成而不是新增 store group-by；一次部署的 target 只有几十条，避免为单次查询增加 store 方法。
-- [ ] `web/src/cmdb/api/discovery.ts`：rules/accounts/targets/catalog/templates 封装。
-- [ ] `web/src/cmdb/pages/Discovery.tsx`：Rules/Targets/Catalog/Templates 四 tab；规则抽屉含账号与插件脚本 `Textarea`；目标抽屉含映射、agent/query/all、cron、auto_accept、脱敏凭据；target test 展示后端 501。
-- [ ] 路由 `/cmdb/discovery`；Vitest。
+- [x] `web/src/cmdb/api/discovery.ts`：rules/accounts/targets/catalog/templates 封装。
+- [x] `web/src/cmdb/pages/Discovery.tsx` + `components/discovery/{RulesPanel,TargetDrawer,TargetsPanel,CatalogPanel,TemplatesPanel}.tsx`：四 tab；规则抽屉含账号与插件脚本 `Textarea`；目标抽屉含映射、agent/query/all、cron、auto_accept、脱敏凭据；target test 展示后端 501。
+- [x] 路由 `/cmdb/discovery`、侧栏「资源管理」、命令面板；Vitest 10 tests。
+- [x] 目标树的模型列表合并 `target-types` 与全部已挂载模型：只列“已有目标”的模型会让模型的首个目标无法从页面创建。
+- [x] 账号只在读取成功后回写，读取失败不覆盖已有账号。
+- 验收：`npx vitest run src/cmdb/pages/Discovery.test.tsx`（10 tests）、CMDB 全量 26 文件/144 tests、`npm run typecheck`、`npm run build`、改动文件 `eslint` 通过。提交 `a583d52`。
+- [ ] 真实浏览器截图（PR9 统一做）。
+- 已知限制：HTTP 规则首次创建目标时，映射字段需要先在抽屉里选择资源类型（规则自带 `categories`，如 `ecs`）；插件/SNMP/组件规则从规则字段表或内置目录取字段。
 
 ### PR6 ADC 发现池（后端 + 前端）
 
