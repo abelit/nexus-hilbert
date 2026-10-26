@@ -40,16 +40,28 @@ export type ServiceTreeInput = {
   option?: Record<string, unknown>;
 };
 
+// THE WIRE FIELD IS `cr_ids`, the stored model pairs; the console calls the
+// mapped result `pairs` because that is what the tree walk reads. Mapping here
+// keeps every caller on one shape and stops an edit from writing the derived
+// `tree` back.
+type ServiceTreeWire = Omit<ServiceTree, 'pairs'> & { cr_ids?: TypePair[] };
+
+function toServiceTree(raw: ServiceTreeWire): ServiceTree {
+  return { ...raw, pairs: raw.cr_ids ?? [] };
+}
+
 export function listServiceTrees(): Promise<ServiceTree[]> {
-  return cmdbGet<ListResponse<ServiceTree>>('/preferences/service-trees').then((got) => got.items ?? []);
+  return cmdbGet<ListResponse<ServiceTreeWire>>('/preferences/service-trees').then((got) =>
+    (got.items ?? []).map(toServiceTree),
+  );
 }
 
 export function createServiceTree(input: ServiceTreeInput): Promise<ServiceTree> {
-  return cmdbPost<ServiceTree>('/preferences/service-trees', input);
+  return cmdbPost<ServiceTreeWire>('/preferences/service-trees', input).then(toServiceTree);
 }
 
 export function updateServiceTree(id: number, input: ServiceTreeInput): Promise<ServiceTree> {
-  return cmdbPut<ServiceTree>(`/preferences/service-trees/${id}`, input);
+  return cmdbPut<ServiceTreeWire>(`/preferences/service-trees/${id}`, input).then(toServiceTree);
 }
 
 export function deleteServiceTree(id: number): Promise<void> {

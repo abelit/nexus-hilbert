@@ -43,7 +43,7 @@ const trees = [
     id: 5,
     name: '机房树',
     is_public: true,
-    pairs: [
+    cr_ids: [
       { parent_id: 1, child_id: 2 },
       { parent_id: 2, child_id: 3 },
     ],
@@ -117,7 +117,7 @@ describe('creating one', () => {
     server.use(
       http.post('/api/v1/cmdb/preferences/service-trees', () => {
         posted += 1;
-        return HttpResponse.json({ id: 6, name: 'x', is_public: false, pairs: [] }, { status: 201 });
+        return HttpResponse.json({ id: 6, name: 'x', is_public: false, cr_ids: [] }, { status: 201 });
       }),
     );
     renderPage();
@@ -139,7 +139,7 @@ describe('creating one', () => {
     server.use(
       http.post('/api/v1/cmdb/preferences/service-trees', async ({ request }) => {
         posted.push(await request.json());
-        return HttpResponse.json({ id: 6, name: '新树', is_public: false, pairs: [] }, { status: 201 });
+        return HttpResponse.json({ id: 6, name: '新树', is_public: false, cr_ids: [] }, { status: 201 });
       }),
     );
     renderPage();

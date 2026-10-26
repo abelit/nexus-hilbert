@@ -72,7 +72,7 @@ describe('the definition selects the shape', () => {
         is_public: true,
         // 机房 → 机柜 → 主机. The ROOT is 机房 because it never appears as a child
         // — that is what makes the pairs a tree rather than a bag of edges.
-        pairs: [
+        cr_ids: [
           { parent_id: 1, child_id: 2 },
           { parent_id: 2, child_id: 3 },
         ],
@@ -97,7 +97,7 @@ describe('the definition selects the shape', () => {
         // TWO BRANCHES: 机房 → 机柜 and 机房 → 主机. The depth is one, although
         // there are two pairs — counting pairs would offer a level that does not
         // exist.
-        pairs: [
+        cr_ids: [
           { parent_id: 1, child_id: 2 },
           { parent_id: 1, child_id: 3 },
         ],
@@ -117,7 +117,7 @@ describe('the definition selects the shape', () => {
   });
 
   it('shows a definition whose pairs no longer resolve instead of hiding it', async () => {
-    handlers([{ id: 7, name: '旧定义', is_public: false, pairs: [] }]);
+    handlers([{ id: 7, name: '旧定义', is_public: false, cr_ids: [] }]);
     renderPage();
 
     // THE ENTRY IS STILL IN THE PICKER AND THE PAGE SAYS WHY IT CANNOT RENDER.
