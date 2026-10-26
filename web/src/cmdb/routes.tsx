@@ -30,6 +30,7 @@ const SubscriptionsPage = lazy(() => import('./pages/Subscriptions'));
 const InstancesPage = lazy(() => import('./pages/Instances'));
 const SearchPage = lazy(() => import('./pages/Search'));
 const HierarchyPage = lazy(() => import('./pages/Hierarchy'));
+const TreeViewsPage = lazy(() => import('./pages/TreeViews'));
 const ServiceTreePage = lazy(() => import('./pages/ServiceTree'));
 const DCIMPage = lazy(() => import('./pages/DCIM'));
 const IPAMPage = lazy(() => import('./pages/IPAM'));
@@ -150,6 +151,22 @@ export const cmdbRoutes: CMDBRoute[] = [
     ),
   },
   {
+    path: '/cmdb/tree-views',
+    element: (
+      <PageShell>
+        <TreeViewsPage />
+      </PageShell>
+    ),
+  },
+  {
+    path: '/cmdb/tree-views/:typeId',
+    element: (
+      <PageShell>
+        <TreeViewsPage />
+      </PageShell>
+    ),
+  },
+  {
     path: '/cmdb/service-tree',
     element: (
       <PageShell>
@@ -210,7 +227,7 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
       { key: 'preferences', to: '/cmdb/preferences', icon: Star, label: tr('偏好设置', 'Preferences') },
       { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources') },
       { key: 'search', to: '/cmdb/search', icon: Search, label: tr('资源搜索', 'Resource search') },
-      { key: 'hierarchy', to: '/cmdb/hierarchy', icon: ListTree, label: tr('资源层级', 'Hierarchy') },
+      { key: 'tree-views', to: '/cmdb/tree-views', icon: ListTree, label: tr('资源层级', 'Hierarchy') },
       { key: 'service-tree', to: '/cmdb/service-tree', icon: Network, label: tr('服务树', 'Service tree') },
       { key: 'dcim', to: '/cmdb/dcim', icon: Server, label: tr('数据中心', 'Data centre') },
       { key: 'ipam', to: '/cmdb/ipam', icon: Network, label: tr('IPAM', 'IPAM') },
@@ -276,7 +293,7 @@ export const cmdbPaletteRoutes: Array<{
     group: 'CMDB',
   },
   {
-    path: '/cmdb/hierarchy',
+    path: '/cmdb/tree-views',
     zh: 'CMDB / 资源层级',
     en: 'CMDB / Hierarchy',
     keywords: ['cmdb', 'hierarchy', 'tree', 'cengji'],
