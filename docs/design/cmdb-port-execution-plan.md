@@ -23,7 +23,7 @@
 | PR1 独立运行时 | 已完成 | `9cef6aa` `ac24647` `2caebf4` `a2b3754` `ed626fc` | 迁移锁、路由 golden、`cmd/ongrid-cmdb`、manager 解耦、开发部署、评审修复 |
 | PR2 生产安装/发布 | 已完成 | `1fe51c2` | install compose/nginx/Prometheus、install/upgrade 健康检查、Makefile、release workflow、ADR/运维文档 |
 | PR3 偏好/关系/树视图/关系视图 | 代码完成，截图待 PR9 | `7e854a2` `cf7509b` `b20f4a9` `1af1f4b` `49f65c9` | API、偏好页、资源层级、关系创建、菜单分组均完成；真实浏览器截图待统一做 |
-| PR4 批量导入 | 待开始 | — | 纯前端，后端已就绪 |
+| PR4 批量导入 | 代码完成，截图待 PR9 | `192eac2` | CSV/XLSX 解析、预览、提交、模板、Instances 入口 |
 | PR5 自动发现 UI | 待开始 | — | 前端 + 一个只读端点 |
 | PR6 ADC 发现池 | 待开始 | — | 后端两张表 + API + 前端 |
 | PR7 操作历史 | 待开始 | — | 后端只读 API + 前端 |
@@ -134,11 +134,12 @@
 
 ### PR4 批量导入（前端）
 
-- [ ] `web/src/cmdb/api/import.ts`：`previewImport`/`commitImport` → `/import/preview|commit`。
-- [ ] `web/src/cmdb/lib/sheet.ts`：CSV 原生解析；XLSX 懒加载 `exceljs`；行/列上限 5000/200；模板生成。
-- [ ] `web/src/cmdb/pages/BatchImport.tsx` + `components/import/{UploadStep,MappingStep,PreviewStep,ResultDialog}.tsx`。
-- [ ] Instances 页入口；路由 `/cmdb/batch`；Vitest 覆盖解析/映射/坏行/失败保留。
-- [ ] 唯一新增运行时依赖 `exceljs`，确认独立 chunk。
+- [x] `web/src/cmdb/api/import.ts`：`previewImport`/`commitImport` → `/import/preview|commit`。
+- [x] `web/src/cmdb/lib/sheet.ts`：CSV 原生解析；XLSX 懒加载 `exceljs`；行/列上限 5000/200；模板生成。
+- [x] `web/src/cmdb/pages/BatchImport.tsx`：模型/存在策略/上传/预览/列映射/坏行/提交/结果；模板下载。
+- [x] Instances 页入口；路由 `/cmdb/batch`；Vitest 覆盖解析、预览、提交、坏 JSON/超限。
+- [x] 唯一新增运行时依赖 `exceljs`，构建产物为独立懒加载 chunk（~938KB）。
+- 验收：`npx vitest run src/cmdb/pages/BatchImport.test.tsx src/cmdb/lib/sheet.test.ts`（4 tests 通过）；CMDB 全量 25 文件/134 tests；`npm run typecheck`、`npm run build` 通过。提交 `192eac2`。
 
 ### PR5 自动发现 UI（前端 + 一个只读端点）
 
