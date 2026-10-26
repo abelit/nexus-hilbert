@@ -24,7 +24,7 @@
 | PR2 生产安装/发布 | 已完成 | `1fe51c2` | install compose/nginx/Prometheus、install/upgrade 健康检查、Makefile、release workflow、ADR/运维文档 |
 | PR3 偏好/关系/树视图/关系视图 | 代码完成，截图待 PR9 | `7e854a2` `cf7509b` `b20f4a9` `1af1f4b` `49f65c9` | API、偏好页、资源层级、关系创建、菜单分组均完成；真实浏览器截图待统一做 |
 | PR4 批量导入 | 代码完成，截图待 PR9 | `192eac2` | CSV/XLSX 解析、预览、提交、模板、Instances 入口 |
-| PR5 自动发现 UI | 待开始 | — | 前端 + 一个只读端点 |
+| PR5 自动发现 UI | 后端就绪，前端待做 | `5239783` | `target-types` 端点完成；Rules/Targets/Catalog/Templates 页面待做 |
 | PR6 ADC 发现池 | 待开始 | — | 后端两张表 + API + 前端 |
 | PR7 操作历史 | 待开始 | — | 后端只读 API + 前端 |
 | PR8 拓扑视图 | 待开始 | — | 后端两张表 + 图装配 + 前端 |
@@ -143,7 +143,8 @@
 
 ### PR5 自动发现 UI（前端 + 一个只读端点）
 
-- [ ] 后端 `GET /v1/cmdb/discovery/target-types`（any authed）→ `{items:[{type_id,name,alias,icon,target_count}],total}`；store group-by + usecase + handler + 测试。
+- [x] 后端 `GET /v1/cmdb/discovery/target-types`（any authed）→ `{items:[{type_id,name,alias,icon,target_count}],total}`；usecase 从 target 行计数，handler + 测试 + golden 已更新。提交 `5239783`。
+  裁定：计数在 usecase 内完成而不是新增 store group-by；一次部署的 target 只有几十条，避免为单次查询增加 store 方法。
 - [ ] `web/src/cmdb/api/discovery.ts`：rules/accounts/targets/catalog/templates 封装。
 - [ ] `web/src/cmdb/pages/Discovery.tsx`：Rules/Targets/Catalog/Templates 四 tab；规则抽屉含账号与插件脚本 `Textarea`；目标抽屉含映射、agent/query/all、cron、auto_accept、脱敏凭据；target test 展示后端 501。
 - [ ] 路由 `/cmdb/discovery`；Vitest。
