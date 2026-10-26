@@ -70,6 +70,22 @@ type RelationRepo interface {
 	// TypeIDsForInstances resolves the model of each instance, for the levels a
 	// walk needs to label.
 	TypeIDsForInstances(ctx context.Context, ids []model.ID) (map[model.ID]model.ID, error)
+
+	// GraphChildren returns every edge leaving any of the ids, with both
+	// endpoints' models. It is the topology walk's downward step: a graph wants
+	// the raw edges, not a tree position.
+	GraphChildren(ctx context.Context, ids []model.ID) ([]GraphEdge, error)
+
+	// GraphParents returns every edge arriving at any of the ids.
+	GraphParents(ctx context.Context, ids []model.ID) ([]GraphEdge, error)
+}
+
+// GraphEdge is one relation row with both endpoints' models.
+type GraphEdge struct {
+	From       model.ID
+	To         model.ID
+	FromTypeID model.ID
+	ToTypeID   model.ID
 }
 
 // RelationRef identifies one edge between two instances.

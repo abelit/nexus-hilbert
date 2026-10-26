@@ -23,6 +23,8 @@ DELETE /v1/cmdb/preferences/auto-subscription
 DELETE /v1/cmdb/preferences/saved-searches/{id}
 DELETE /v1/cmdb/preferences/service-trees/{id}
 DELETE /v1/cmdb/relation-types/{id}
+DELETE /v1/cmdb/topology-views/groups/{id}
+DELETE /v1/cmdb/topology-views/{id}
 GET /v1/cmdb/attributes
 GET /v1/cmdb/attributes/{ref}
 GET /v1/cmdb/ci-relations/search
@@ -97,6 +99,11 @@ GET /v1/cmdb/preferences/saved-searches
 GET /v1/cmdb/preferences/service-trees
 GET /v1/cmdb/preferences/tree-levels
 GET /v1/cmdb/relation-types
+GET /v1/cmdb/topology-views
+GET /v1/cmdb/topology-views/groups
+GET /v1/cmdb/topology-views/type-relations/{ref}
+GET /v1/cmdb/topology-views/{id}
+GET /v1/cmdb/topology-views/{id}/graph
 POST /v1/cmdb/attributes
 POST /v1/cmdb/ci-relations/batch
 POST /v1/cmdb/ci-relations/path/s
@@ -135,6 +142,9 @@ POST /v1/cmdb/model-groups
 POST /v1/cmdb/preferences/saved-searches
 POST /v1/cmdb/preferences/service-trees
 POST /v1/cmdb/relation-types
+POST /v1/cmdb/topology-views
+POST /v1/cmdb/topology-views/groups
+POST /v1/cmdb/topology-views/preview
 PUT /v1/cmdb/attributes/{id}
 PUT /v1/cmdb/ci-types/{ref}
 PUT /v1/cmdb/ci-types/{ref}/attribute-groups/{id}
@@ -161,3 +171,7 @@ PUT /v1/cmdb/preferences/ci-types/{ref}/tree-levels
 PUT /v1/cmdb/preferences/saved-searches/{id}
 PUT /v1/cmdb/preferences/service-trees/{id}
 PUT /v1/cmdb/relation-types/{id}
+PUT /v1/cmdb/topology-views/groups/order
+PUT /v1/cmdb/topology-views/groups/{id}
+PUT /v1/cmdb/topology-views/order
+PUT /v1/cmdb/topology-views/{id}

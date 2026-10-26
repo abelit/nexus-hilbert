@@ -10,6 +10,7 @@ import (
 	"github.com/ongridio/ongrid/internal/cmdb/server/history"
 	"github.com/ongridio/ongrid/internal/cmdb/server/meta"
 	"github.com/ongridio/ongrid/internal/cmdb/server/relationtype"
+	"github.com/ongridio/ongrid/internal/cmdb/server/topology"
 )
 
 // Handlers is the set of CMDB HTTP handlers the process mounts.
@@ -18,6 +19,7 @@ type Handlers struct {
 	RelationType *relationtype.Handler
 	Discovery    *discovery.Handler
 	History      *history.Handler
+	Topology     *topology.Handler
 	CIType       *citype.Handler
 	CI           *ci.Handler
 }
@@ -37,13 +39,14 @@ func RegisterAll(r chi.Router, h Handlers) {
 		panic("cmdb server: RegisterAll called with a nil router")
 	}
 	if h.Meta == nil || h.RelationType == nil || h.Discovery == nil || h.History == nil ||
-		h.CIType == nil || h.CI == nil {
+		h.Topology == nil || h.CIType == nil || h.CI == nil {
 		panic("cmdb server: RegisterAll called with an incomplete Handlers set")
 	}
 	h.Meta.Register(r)
 	h.RelationType.Register(r)
 	h.Discovery.Register(r)
 	h.History.Register(r)
+	h.Topology.Register(r)
 	h.CIType.Register(r)
 	h.CI.Register(r)
 }

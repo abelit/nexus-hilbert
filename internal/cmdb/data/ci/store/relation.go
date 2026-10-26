@@ -539,6 +539,51 @@ func (r *Repo) WalkParents(ctx context.Context, ids []model.ID) ([]cibiz.WalkKey
 	return keys, ancestors, nil
 }
 
+// GraphChildren returns every edge leaving any of the ids.
+func (r *Repo) GraphChildren(ctx context.Context, ids []model.ID) ([]cibiz.GraphEdge, error) {
+	return r.graphEdges(ctx, ids, "cr.first_ci_id")
+}
+
+// GraphParents returns every edge arriving at any of the ids.
+func (r *Repo) GraphParents(ctx context.Context, ids []model.ID) ([]cibiz.GraphEdge, error) {
+	return r.graphEdges(ctx, ids, "cr.second_ci_id")
+}
+
+// graphEdges is the one batch read both directions use.
+//
+// IT JOINS BOTH CI ROWS because the walk filters by MODEL, and the model lives
+// on the instance rather than on the edge. A deleted endpoint drops its edge
+// from the graph: a node that will not be drawn cannot have a line to one.
+func (r *Repo) graphEdges(ctx context.Context, ids []model.ID, anchor string) ([]cibiz.GraphEdge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := modelIDsToAny(ids)
+	var rows []struct {
+		From       model.ID `gorm:"column:from_ci"`
+		To         model.ID `gorm:"column:to_ci"`
+		FromTypeID model.ID `gorm:"column:from_type_id"`
+		ToTypeID   model.ID `gorm:"column:to_type_id"`
+	}
+	if err := r.db.WithContext(ctx).Raw(
+		"SELECT cr.first_ci_id AS from_ci, cr.second_ci_id AS to_ci, "+
+			"f.type_id AS from_type_id, t.type_id AS to_type_id "+
+			"FROM c_ci_relations cr "+
+			"JOIN c_cis f ON f.id = cr.first_ci_id AND f.delete_marker = 0 "+
+			"JOIN c_cis t ON t.id = cr.second_ci_id AND t.delete_marker = 0 "+
+			"WHERE cr.delete_marker = 0 AND "+anchor+" IN ("+placeholders(len(args))+") "+
+			"ORDER BY cr.id", args...).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("cmdb ci: graph edges: %w", err)
+	}
+	out := make([]cibiz.GraphEdge, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, cibiz.GraphEdge{
+			From: row.From, To: row.To, FromTypeID: row.FromTypeID, ToTypeID: row.ToTypeID,
+		})
+	}
+	return out, nil
+}
+
 // TypeIDsForInstances resolves each instance's model.
 func (r *Repo) TypeIDsForInstances(ctx context.Context, ids []model.ID) (map[model.ID]model.ID, error) {
 	out := make(map[model.ID]model.ID, len(ids))

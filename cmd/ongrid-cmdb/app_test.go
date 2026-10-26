@@ -165,6 +165,28 @@ func TestHistoryAuthz(t *testing.T) {
 	}
 }
 
+// The topology reads must reach the store, not the ErrNotWiredYet placeholder.
+func TestTopologyIsWired(t *testing.T) {
+	app, signer := newTestApp(t)
+	user := tokenFor(t, signer, false)
+	admin := tokenFor(t, signer, true)
+
+	for _, path := range []string{
+		"/api/v1/cmdb/topology-views",
+		"/api/v1/cmdb/topology-views/groups",
+	} {
+		if rec := request(t, app, http.MethodGet, path, user, ""); rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := request(t, app, http.MethodPost, "/api/v1/cmdb/topology-views", user, `{"name":"x"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin create view = %d, want 403", rec.Code)
+	}
+	if rec := request(t, app, http.MethodPost, "/api/v1/cmdb/topology-views", admin, `{"name":"x"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("admin create view with no central model = %d %s, want 400", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminGateRejectsNonAdminWrite(t *testing.T) {
 	app, signer := newTestApp(t)
 	body := `{"name":"runs_on","color":"#1890ff"}`

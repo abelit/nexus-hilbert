@@ -93,6 +93,12 @@ func (relationRepoStub) WalkParents(context.Context, []model.ID) ([]WalkKey, []m
 func (relationRepoStub) TypeIDsForInstances(context.Context, []model.ID) (map[model.ID]model.ID, error) {
 	return nil, errors.New("not used")
 }
+func (relationRepoStub) GraphChildren(context.Context, []model.ID) ([]GraphEdge, error) {
+	return nil, errors.New("not used")
+}
+func (relationRepoStub) GraphParents(context.Context, []model.ID) ([]GraphEdge, error) {
+	return nil, errors.New("not used")
+}
 
 // The data-centre graph reads are unused by the instance tests; embedding this
 // keeps the double from growing a method per addition to the port.

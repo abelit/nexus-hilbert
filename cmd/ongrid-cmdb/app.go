@@ -20,12 +20,14 @@ import (
 	cmdbhistorybiz "github.com/ongridio/ongrid/internal/cmdb/biz/history"
 	cmdbmetabiz "github.com/ongridio/ongrid/internal/cmdb/biz/meta"
 	cmdbrelationtypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/relationtype"
+	cmdbtopologybiz "github.com/ongridio/ongrid/internal/cmdb/biz/topology"
 	cmdbcistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
 	cmdbcitypedata "github.com/ongridio/ongrid/internal/cmdb/data/citype/store"
 	cmdbdiscoverydata "github.com/ongridio/ongrid/internal/cmdb/data/discovery/store"
 	cmdbhistorydata "github.com/ongridio/ongrid/internal/cmdb/data/history/store"
 	cmdbmetastore "github.com/ongridio/ongrid/internal/cmdb/data/meta/store"
 	cmdbrelationtypedata "github.com/ongridio/ongrid/internal/cmdb/data/relationtype/store"
+	cmdbtopologydata "github.com/ongridio/ongrid/internal/cmdb/data/topology/store"
 	cmdbserver "github.com/ongridio/ongrid/internal/cmdb/server"
 	cmdbciserver "github.com/ongridio/ongrid/internal/cmdb/server/ci"
 	cmdbcitypeserver "github.com/ongridio/ongrid/internal/cmdb/server/citype"
@@ -33,6 +35,7 @@ import (
 	cmdbhistoryserver "github.com/ongridio/ongrid/internal/cmdb/server/history"
 	cmdbservermeta "github.com/ongridio/ongrid/internal/cmdb/server/meta"
 	cmdbserverrelationtype "github.com/ongridio/ongrid/internal/cmdb/server/relationtype"
+	cmdbservertopology "github.com/ongridio/ongrid/internal/cmdb/server/topology"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
 )
 
@@ -62,11 +65,16 @@ func buildHandlers(db *gorm.DB, log *slog.Logger) cmdbserver.Handlers {
 		WithAttributes(cmdbcitypebiz.NewHistoryAttributes(citypeUC)).
 		WithCINames(cmdbcibiz.NewHistoryCINames(ciUC))
 
+	topologyUC := cmdbtopologybiz.NewUsecase(cmdbtopologydata.NewRepo(db)).
+		WithGraph(cmdbcibiz.NewTopologyGraph(ciUC)).
+		WithModelRelations(cmdbcitypebiz.NewTopologyModelRelations(citypeUC))
+
 	return cmdbserver.Handlers{
 		Meta:         cmdbservermeta.NewHandler(cmdbmetabiz.NewUsecase(cmdbmetastore.NewRepo(db), log)),
 		RelationType: cmdbserverrelationtype.NewHandler(cmdbrelationtypebiz.NewUsecase(cmdbrelationtypedata.NewRepo(db), log)),
 		Discovery:    cmdbdiscoveryserver.NewHandler(discoveryUC),
 		History:      cmdbhistoryserver.NewHandler(historyUC),
+		Topology:     cmdbservertopology.NewHandler(topologyUC),
 		CIType:       cmdbcitypeserver.NewHandler(citypeUC),
 		CI:           cmdbciserver.NewHandler(ciUC),
 	}
