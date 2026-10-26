@@ -66,6 +66,10 @@ if bash "$repo_root/deploy/install/uninstall.sh" --mode=systemd >"$tmp_dir/unins
   echo "uninstall unexpectedly accepted --mode=systemd" >&2
   exit 1
 fi
+grep -Fq 'ongrid/ongrid-cmdb:${VERSION_FROM_FILE}' "$repo_root/deploy/install/uninstall.sh" || {
+  echo "uninstall --purge leaves the ongrid-cmdb image on disk" >&2
+  exit 1
+}
 if [[ -d "$repo_root/deploy/install/systemd" ]] \
     && find "$repo_root/deploy/install/systemd" -type f -print -quit | grep -q .; then
   echo "Manager systemd install files still exist" >&2
