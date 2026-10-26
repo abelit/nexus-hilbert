@@ -32,6 +32,7 @@ PACKAGE_CLEAN ?= 1
 CLOUD_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
 CLOUD_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid
 CLOUD_MANAGER_IMAGE_REF ?= $(CLOUD_IMAGE_REPO):$(VERSION)
+CLOUD_CMDB_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/ongrid-cmdb:$(VERSION)
 CLOUD_WEB_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/ongrid-web:$(VERSION)
 FRONTIER_VERSION ?= 1.2.6
 FRONTIER_SOURCE_IMAGES ?= docker.io/singchia/frontier:$(FRONTIER_VERSION)
@@ -264,8 +265,8 @@ run-ongrid: ## 本地直接跑 ongrid
 	go run ./cmd/ongrid
 
 run-ongrid-cmdb: ## 本地直接跑 CMDB 独立服务
-	ONGRID_HTTP_ADDR=$${ONGRID_HTTP_ADDR:-:8082} \
-	ONGRID_METRICS_ADDR=$${ONGRID_METRICS_ADDR:-:9102} \
+	ONGRID_HTTP_ADDR=$${ONGRID_CMDB_HTTP_ADDR:-:8082} \
+	ONGRID_METRICS_ADDR=$${ONGRID_CMDB_METRICS_ADDR:-:9102} \
 	go run ./cmd/ongrid-cmdb
 
 run-ongrid-edge: ## 本地直接跑 ongrid-edge
@@ -353,7 +354,7 @@ docker-build-web: ## [release] 构建 ongrid-web:$(VERSION) 镜像（前端 SPA 
 		$(DOCKER_BUILD_WEB_CACHE_ARGS) \
 		--load "$(WEB_BUILD_CONTEXT)"
 
-.PHONY: docker-push-cloud-manager docker-push-cloud-manager-platform docker-merge-cloud-manager docker-push-cloud-web docker-push-cloud-images docker-push-release-images release-image-refs verify-release-images test-release-manifest-filter test-release-image-publish
+.PHONY: docker-push-cloud-manager docker-push-cloud-manager-platform docker-merge-cloud-manager docker-push-cloud-cmdb docker-push-cloud-web docker-push-cloud-images docker-push-release-images release-image-refs verify-release-images test-release-manifest-filter test-release-image-publish
 docker-push-cloud-manager: ## [release] 发布 manager 多架构镜像到 CNB（兼容本地串行发布）
 	bash "$(RELEASE_IMAGE_PUBLISHER)" \
 		"$(CLOUD_MANAGER_IMAGE_REF)" \
@@ -390,6 +391,18 @@ docker-merge-cloud-manager: ## [release] 将原生 amd64/arm64 manager digest �
 		"$(RELEASE_MANAGER_AMD64_DIGEST_FILE)" \
 		"$(RELEASE_MANAGER_ARM64_DIGEST_FILE)"
 
+docker-push-cloud-cmdb: ## [release] 发布 CMDB 多架构镜像到 CNB
+	bash "$(RELEASE_IMAGE_PUBLISHER)" \
+		"$(CLOUD_CMDB_IMAGE_REF)" \
+		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
+		-- docker buildx build \
+		--platform $(CLOUD_IMAGE_PLATFORMS) \
+		--build-arg VERSION=$(VERSION) \
+		-t $(CLOUD_CMDB_IMAGE_REF) \
+		-f deploy/Dockerfile.ongrid-cmdb \
+		$(DOCKER_BUILD_CACHE_ARGS) \
+		--push .
+
 docker-push-cloud-web: ## [release] 发布 Web 多架构镜像到 CNB
 	bash "$(RELEASE_IMAGE_PUBLISHER)" \
 		"$(CLOUD_WEB_IMAGE_REF)" \
@@ -402,7 +415,7 @@ docker-push-cloud-web: ## [release] 发布 Web 多架构镜像到 CNB
 		$(DOCKER_BUILD_WEB_CACHE_ARGS) \
 		--push .
 
-docker-push-cloud-images: docker-push-cloud-manager docker-push-cloud-web ## [release] 发布 manager + Web 多架构镜像到 CNB
+docker-push-cloud-images: docker-push-cloud-manager docker-push-cloud-cmdb docker-push-cloud-web ## [release] 发布 manager + CMDB + Web 多架构镜像到 CNB
 
 .PHONY: docker-build-k8s-edge docker-push-k8s-edge k8s-edge-image-ref
 docker-build-k8s-edge: ## [dev] 构建本地 Kubernetes ongrid-edge 镜像（默认 linux/amd64）
@@ -441,13 +454,14 @@ k8s-edge-image-ref:
 docker-push-release-images: docker-push-cloud-images docker-push-k8s-edge ## [release] 发布全部项目自身多架构镜像
 
 release-image-refs: ## [release] 打印本次发布的项目自身镜像
-	@printf '%s\n' "$(CLOUD_MANAGER_IMAGE_REF)" "$(CLOUD_WEB_IMAGE_REF)" "$(K8S_EDGE_IMAGE_REF)"
+	@printf '%s\n' "$(CLOUD_MANAGER_IMAGE_REF)" "$(CLOUD_CMDB_IMAGE_REF)" "$(CLOUD_WEB_IMAGE_REF)" "$(K8S_EDGE_IMAGE_REF)"
 
 verify-release-images: ## [release] 校验项目自身镜像均包含 amd64 + arm64 manifest
 	@command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 	bash scripts/verify-release-images.sh \
 		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
 		"$(CLOUD_MANAGER_IMAGE_REF)" \
+		"$(CLOUD_CMDB_IMAGE_REF)" \
 		"$(CLOUD_WEB_IMAGE_REF)" \
 		"$(K8S_EDGE_IMAGE_REF)"
 

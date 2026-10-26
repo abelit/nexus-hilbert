@@ -156,6 +156,10 @@ for arch in amd64 arm64; do
     "$extract_dir/$package_root/install.sh"
   cmp "$repo_root/deploy/install/profiles-gateway.yaml" \
     "$extract_dir/$package_root/profiles-gateway.yaml"
+  grep -Fq 'ongrid-cmdb:' "$extract_dir/$package_root/docker-compose.yml"
+  grep -Fq 'image: docker.cnb.cool/ongridio/ongrid/ongrid-cmdb:${ONGRID_VERSION}' \
+    "$extract_dir/$package_root/docker-compose.yml"
+  grep -Fq 'ONGRID_CMDB_METRICS_PORT' "$extract_dir/$package_root/.env.example"
   grep -Fq 'pcap-parser:' "$extract_dir/$package_root/docker-compose.yml"
   grep -Fq 'ONGRID_PACKET_PARSER_URL: http://pcap-parser:8080' \
     "$extract_dir/$package_root/docker-compose.yml"

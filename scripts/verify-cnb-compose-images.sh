@@ -20,6 +20,7 @@ render_images() {
 
 render_images "$repo_root/deploy/install/docker-compose.yml" "$tmp_dir/install.actual"
 cat >"$tmp_dir/install.expected" <<'EOF'
+docker.cnb.cool/ongridio/ongrid/ongrid-cmdb:v9.9.9
 docker.cnb.cool/ongridio/ongrid/ongrid-web:v9.9.9
 docker.cnb.cool/ongridio/ongrid:v9.9.9
 docker.cnb.cool/ongridio/ongrid/frontier:1.2.6
