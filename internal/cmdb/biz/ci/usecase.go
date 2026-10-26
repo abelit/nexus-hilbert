@@ -150,6 +150,23 @@ type WriteResult struct {
 // lock in the database, which is what stops two simultaneous creates of the
 // same unique value from both passing the lookup.
 func (u *Usecase) Create(ctx context.Context, in WriteRequest) (*WriteResult, error) {
+	return u.write(ctx, in, nil, false)
+}
+
+// WriteWithRelations creates or updates an instance and writes the edges its
+// fields established, all in one repository transaction.
+//
+// THE RELATIONS ARE ALREADY RESOLVED by the caller: it has the peer instances
+// and the model pair's rule, and resolving them here would make this package
+// own the discovery module's search. What this method adds is the guarantee
+// that the edges and the instance cannot be committed separately.
+func (u *Usecase) WriteWithRelations(ctx context.Context, in WriteRequest, relations []RelationSpec, markAutoDiscovery bool) (*WriteResult, error) {
+	return u.write(ctx, in, relations, markAutoDiscovery)
+}
+
+// write is the shared body, taking the resolved extras so Create keeps its
+// original signature and both paths share one policy and one transaction.
+func (u *Usecase) write(ctx context.Context, in WriteRequest, relations []RelationSpec, markAutoDiscovery bool) (*WriteResult, error) {
 	if u.repo == nil || u.types == nil {
 		return nil, errs.ErrNotWiredYet
 	}
@@ -191,6 +208,8 @@ func (u *Usecase) Create(ctx context.Context, in WriteRequest) (*WriteResult, er
 		Policy: policy,
 		Specs:  u.plannerSpecs(set),
 		Values: values, Audit: in.Audit,
+		MarkAutoDiscovery: markAutoDiscovery,
+		Relations:         relations,
 	})
 }
 

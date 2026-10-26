@@ -31,6 +31,27 @@ type WriteRepo interface {
 	WriteCI(ctx context.Context, in WriteSpec) (*WriteResult, error)
 }
 
+// RelationSpec is one edge a write lays down beside the instance.
+//
+// THE DIRECTION IS EXPLICIT because a discovered relation says which model may
+// point at which, not which instance was created first. cantor tried one
+// direction and fell back to the other on failure; resolving it before the
+// write is the same answer without an error-driven retry.
+type RelationSpec struct {
+	PeerCIID   model.ID
+	PeerTypeID model.ID
+
+	// DiscoveredIsFirst says whether the instance being written is the FIRST
+	// end of the edge. The other end is PeerCIID.
+	DiscoveredIsFirst bool
+
+	// DiscoveredTypeID is the model of the instance being written.
+	DiscoveredTypeID model.ID
+
+	RelationTypeID model.ID
+	Constraint     model.Constraint
+}
+
 // WriteSpec is everything one instance write needs, including the policy.
 type WriteSpec struct {
 	// TypeRef is the model's NAME, carried for the error messages: a caller
@@ -56,6 +77,19 @@ type WriteSpec struct {
 	// has to compare a row against its peers can leave the row itself out.
 	// cantor's subnet update passed its own id for exactly this.
 	ValidatingID model.ID
+
+	// MarkAutoDiscovery writes cantor's `c_cis.a` flag. It is set by the
+	// discovery accept path and by nothing else: an instance a person typed is
+	// not a discovered one.
+	MarkAutoDiscovery bool
+
+	// Relations are edges written in the SAME transaction as the instance.
+	//
+	// THE DISCOVERY ACCEPT PATH IS THE ONLY CALLER. cantor created the instance
+	// in one transaction and the edges in a Celery task, so a task that never
+	// ran left an accepted machine with no place in the graph — and a retry
+	// could not tell that from a machine that genuinely has no peers.
+	Relations []RelationSpec
 
 	// Parent, when set, is the instance the new one is contained by: the edge
 	// is written in the SAME transaction as the insert.

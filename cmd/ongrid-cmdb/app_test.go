@@ -124,6 +124,26 @@ func TestCMDBHealthAndListWithAdminToken(t *testing.T) {
 	}
 }
 
+// The pool's routes must reach a wired use case, not the ErrNotWiredYet
+// placeholder: a 200 with an empty page is the difference between "no sightings
+// yet" and "the composition root forgot WithPool".
+func TestDiscoveryPoolIsWired(t *testing.T) {
+	app, signer := newTestApp(t)
+	token := tokenFor(t, signer, true)
+
+	for _, path := range []string{
+		"/api/v1/cmdb/discovery/adc?type_id=1",
+		"/api/v1/cmdb/discovery/adc/counter?type_id=1",
+		"/api/v1/cmdb/discovery/adc/ci-types",
+		"/api/v1/cmdb/discovery/adc/exec-histories?type_id=1",
+	} {
+		rec := request(t, app, http.MethodGet, path, token, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestAdminGateRejectsNonAdminWrite(t *testing.T) {
 	app, signer := newTestApp(t)
 	body := `{"name":"runs_on","color":"#1890ff"}`

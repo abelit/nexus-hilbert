@@ -2,8 +2,10 @@ package citype
 
 import (
 	"context"
+	"fmt"
 
 	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
+	discoverybiz "github.com/ongridio/ongrid/internal/cmdb/biz/discovery"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	"github.com/ongridio/ongrid/internal/cmdb/model/value"
 )
@@ -109,6 +111,48 @@ func (r *CIResolver) ResolveForCI(ctx context.Context, ref string) (*cibiz.Attri
 		}
 	}
 	return set, nil
+}
+
+// DiscoveryAttributeResolver answers the discovery pool's "which attributes
+// does this model carry" question.
+//
+// IT IS THE SAME EFFECTIVE SET the instance write uses — inherited attributes
+// included — because the pool's columns must match what an accept will write.
+// A resolver that listed only the model's own bindings would hide an inherited
+// attribute from the pool and then accept it happily, which is the sort of
+// disagreement a console shows as a permanently empty column.
+type DiscoveryAttributeResolver struct {
+	uc *Usecase
+}
+
+// NewDiscoveryAttributeResolver builds the adapter.
+func NewDiscoveryAttributeResolver(uc *Usecase) *DiscoveryAttributeResolver {
+	return &DiscoveryAttributeResolver{uc: uc}
+}
+
+var _ discoverybiz.AttributeResolver = (*DiscoveryAttributeResolver)(nil)
+
+// ResolveAttributes returns the model's effective attributes in binding order.
+func (r *DiscoveryAttributeResolver) ResolveAttributes(ctx context.Context, typeID model.ID) ([]discoverybiz.AttributeRef, error) {
+	view, err := r.uc.GetByRef(ctx, fmt.Sprint(typeID))
+	if err != nil {
+		return nil, err
+	}
+	if view == nil {
+		return nil, nil
+	}
+	effective, err := r.uc.effectiveAttributes(ctx, view)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]discoverybiz.AttributeRef, 0, len(effective.Attributes))
+	for _, item := range effective.Attributes {
+		out = append(out, discoverybiz.AttributeRef{
+			ID: item.ID, Name: item.Name, Alias: item.Alias,
+			ValueType: item.ValueType, IsList: item.IsList,
+		})
+	}
+	return out, nil
 }
 
 // RelationBetween answers the instance side's question about one model pair.

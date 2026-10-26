@@ -266,6 +266,129 @@ export function listComponentAttributes(name: string): Promise<CatalogField[]> {
   );
 }
 
+// --- the discovery pool (`c_ad_ci`) ---
+
+/**
+ * One sighting, before or after a person accepted it.
+ *
+ * `instance` IS KEYED BY THE MODEL'S ATTRIBUTE NAMES — the target's mapping has
+ * already been applied — so the pool's columns line up with the model's.
+ */
+export type PoolEntry = {
+  id: number;
+  type_id: number;
+  adt_id: number;
+  unique_value: string;
+  instance: Record<string, unknown>;
+  oneagent_id?: string;
+  oneagent_name?: string;
+  ci_id?: number;
+  is_accept: boolean;
+  accept_by?: string;
+  accept_time?: string;
+  created_at?: string;
+  updated_at?: string;
+  adr_name?: string;
+  adr_type?: string;
+  is_inner: boolean;
+};
+
+export type PoolPage = {
+  items: PoolEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type PoolFilter = {
+  type_id: number;
+  is_accept?: boolean;
+  unique_value?: string;
+  oneagent_id?: string;
+  page?: number;
+  page_size?: number;
+};
+
+export type PoolCounters = {
+  rule_count: number;
+  exec_target_count: number;
+  instance_count: number;
+  accept_count: number;
+  this_month_count: number;
+  this_week_count: number;
+  last_month_count: number;
+  last_week_count: number;
+};
+
+/** One mapped model attribute, which becomes a pool column. */
+export type PoolAttribute = {
+  id: number;
+  name: string;
+  alias: string;
+  value_type: string;
+  is_list: boolean;
+};
+
+export type ExecHistory = {
+  id: number;
+  type_id: number;
+  stdout: string;
+  created_at?: string;
+};
+
+export type ExecHistoryPage = {
+  items: ExecHistory[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export function listPool(filter: PoolFilter): Promise<PoolPage> {
+  return cmdbGet<PoolPage>('/discovery/adc', filter as Query);
+}
+
+export function getPool(id: number): Promise<PoolEntry> {
+  return cmdbGet<PoolEntry>(`/discovery/adc/${id}`);
+}
+
+/** Writes a sighting as an instance and marks it accepted. Idempotent. */
+export function acceptPool(id: number): Promise<{ adc_id: number; item: PoolEntry }> {
+  return cmdbPut(`/discovery/adc/${id}/accept`);
+}
+
+/** Removes the sighting; an instance it already became is left alone. */
+export function deletePool(id: number): Promise<void> {
+  return cmdbDelete(`/discovery/adc/${id}`);
+}
+
+export function getPoolCounters(typeID: number): Promise<PoolCounters> {
+  return cmdbGet<PoolCounters>('/discovery/adc/counter', { type_id: typeID });
+}
+
+/** Models that have discovery targets, in the shape the pool tree draws. */
+export function listPoolCITypes(): Promise<TargetTypeCount[]> {
+  return cmdbGet<ListResponse<TargetTypeCount>>('/discovery/adc/ci-types').then((got) => got.items ?? []);
+}
+
+export function listPoolAttributes(typeRef: string | number): Promise<PoolAttribute[]> {
+  return cmdbGet<ListResponse<PoolAttribute>>(
+    `/discovery/adc/ci-types/${encodeURIComponent(String(typeRef))}/attributes`,
+  ).then((got) => got.items ?? []);
+}
+
+export function listExecHistories(typeID: number, page = 1, pageSize = 20): Promise<ExecHistoryPage> {
+  return cmdbGet<ExecHistoryPage>('/discovery/adc/exec-histories', {
+    type_id: typeID,
+    page,
+    page_size: pageSize,
+  });
+}
+
+/** Deletes one model's whole discovery log. */
+export function clearExecHistories(typeID: number): Promise<void> {
+  return cmdbDelete(`/discovery/adc/exec-histories/${typeID}`);
+}
+
 // --- template files ---
 
 export type TemplateDocument = {

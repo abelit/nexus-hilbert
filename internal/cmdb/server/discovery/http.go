@@ -55,6 +55,7 @@ func NewHandler(uc *discoverybiz.Usecase) *Handler { return &Handler{uc: uc} }
 //	GET    /v1/cmdb/discovery/catalog/http/{provider}/mapping      (any authed)
 //	GET    /v1/cmdb/discovery/catalog/snmp/attributes              (any authed)
 //	GET    /v1/cmdb/discovery/catalog/components/{name}/attributes (any authed)
+//	GET    /v1/cmdb/discovery/adc                            (any authed) — the pool; see http_adc.go
 //
 // THE TEMPLATE IMPORT IS ADMIN-GATED because it writes provider definitions
 // across the deployment at once — it is the one route here whose effect is not
@@ -84,6 +85,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/cmdb/discovery/catalog/components/{name}/attributes", h.componentAttributes)
 
 	h.registerTargets(r)
+	h.registerADC(r)
 }
 
 // pageParams reads the paging query parameters the other CMDB list endpoints
@@ -449,6 +451,7 @@ func actorOf(r *http.Request) (discoverybiz.Actor, error) {
 	}
 	return discoverybiz.Actor{
 		UserID:  model.ID(t.UserID),
+		Email:   t.Email,
 		IsAdmin: t.IsSuperuser || t.Role == "admin",
 	}, nil
 }

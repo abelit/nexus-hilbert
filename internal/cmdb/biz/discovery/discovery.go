@@ -15,6 +15,11 @@ import (
 type Actor struct {
 	UserID model.ID
 
+	// Email is the caller's display identity, used where cantor stored a
+	// nickname — the pool's `accept_by` is the only such column. Empty is
+	// normal and falls back to the numeric id.
+	Email string
+
 	// IsAdmin reports whether the caller may write a PLUGIN rule. cantor gated
 	// that on a per-operation ACL — create/update/delete plugin — which is
 	// resource-level authorization and lands with the rest of it. Until then
@@ -37,6 +42,20 @@ type Usecase struct {
 	// side: which instance an agent runs on, and whether an expression selects
 	// one. Nillable for the same reason.
 	instances InstanceQueries
+
+	// pool is the discovery pool's persistence. Nillable so the rule and target
+	// routes keep working in a deployment that wires no pool, and so a test can
+	// keep the two layers apart.
+	pool PoolRepo
+
+	// writer is the instance side's accept path. It is a consumer-declared port
+	// because acceptance is the one place this module writes an instance, and
+	// the owning business package must stay the only one that knows how.
+	writer InstanceWriter
+
+	// attrs answers "which attributes does this model carry", which the pool
+	// needs to keep its columns to the mapped subset.
+	attrs AttributeResolver
 
 	// Now is the clock, injectable so a test can reason about timestamps
 	// without sleeping.

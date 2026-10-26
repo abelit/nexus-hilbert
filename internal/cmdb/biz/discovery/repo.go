@@ -282,9 +282,9 @@ var (
 	// ErrTargetReferenced is returned when a target is deleted while a pool entry
 	// refers to it.
 	//
-	// REGISTERED FOR THE POOL LAYER, which is the next increment: `c_ad_ci` does
-	// not exist yet, so until it does there is nothing that can refer to a
-	// target and nothing can be orphaned by removing one.
+	// THE GUARD IS INSIDE THE DELETE'S TRANSACTION, like the rule guard: a
+	// report accepted between a count and a delete would leave a pool row whose
+	// target no longer exists, which is a row nothing can ever accept.
 	ErrTargetReferenced = fmt.Errorf("%w: discovered instances in the pool refer to this target", errs.ErrConflict)
 
 	// ErrTargetMappingNeedsUniqueKey is returned for a target whose mapping does

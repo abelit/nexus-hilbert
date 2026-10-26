@@ -78,10 +78,18 @@ func writeCITx(tx *gorm.DB, in cibiz.WriteSpec) (cibiz.WriteResult, error) {
 		if err != nil {
 			return result, err
 		}
+		if in.MarkAutoDiscovery {
+			if err := tx.Model(&cimodel.CI{}).Where("id = ?", existing.ID).Update("a", true).Error; err != nil {
+				return result, fmt.Errorf("mark discovered instance: %w", err)
+			}
+		}
+		if err := writeRelationSpecsTx(tx, existing.ID, in); err != nil {
+			return result, err
+		}
 		return cibiz.WriteResult{CIID: existing.ID, Created: false, Changes: changes}, nil
 	}
 
-	ci := &cimodel.CI{TypeID: in.TypeID}
+	ci := &cimodel.CI{TypeID: in.TypeID, IsAutoDiscovery: in.MarkAutoDiscovery}
 	if err := insertCIWithValues(tx, ci, in.Specs, in.Values, in.Audit); err != nil {
 		return result, err
 	}
@@ -102,7 +110,50 @@ func writeCITx(tx *gorm.DB, in cibiz.WriteSpec) (cibiz.WriteResult, error) {
 			return result, err
 		}
 	}
+	if err := writeRelationSpecsTx(tx, ci.ID, in); err != nil {
+		return result, err
+	}
 	return cibiz.WriteResult{CIID: ci.ID, Created: true}, nil
+}
+
+// writeRelationSpecsTx lays down the edges a discovered instance established.
+//
+// IT RUNS INSIDE THE INSTANCE'S TRANSACTION, so an edge that the model graph
+// refuses rolls the instance back with it. cantor wrote the instance and then
+// dispatched a Celery task for the edges, which is how an accepted machine
+// could end up with no place in the graph and no record that anything failed.
+//
+// A SELF-LOOP IS SKIPPED. A discovery rule that maps a field onto the same
+// model can match the instance itself when the provider reports its own
+// identifier; an instance related to itself is always wrong, and refusing the
+// whole accept would throw away a good instance over one bad edge.
+func writeRelationSpecsTx(tx *gorm.DB, ciID model.ID, in cibiz.WriteSpec) error {
+	for _, rel := range in.Relations {
+		if rel.PeerCIID == 0 || rel.PeerCIID == ciID || rel.RelationTypeID == 0 {
+			continue
+		}
+		firstID, secondID := ciID, rel.PeerCIID
+		firstType, secondType := rel.DiscoveredTypeID, rel.PeerTypeID
+		if !rel.DiscoveredIsFirst {
+			firstID, secondID = rel.PeerCIID, ciID
+			firstType, secondType = rel.PeerTypeID, rel.DiscoveredTypeID
+		}
+		source := string(model.RelationFromAutoDiscovery)
+		if _, err := addRelationTx(tx, cibiz.RelationAddSpec{
+			FirstCIID:         firstID,
+			SecondCIID:        secondID,
+			RelationTypeID:    rel.RelationTypeID,
+			FirstTypeID:       firstType,
+			SecondTypeID:      secondType,
+			Constraint:        rel.Constraint,
+			EnforceConstraint: true,
+			Source:            &source,
+			Actor:             in.Audit.Actor,
+		}); err != nil {
+			return fmt.Errorf("cmdb ci: write discovered relation: %w", err)
+		}
+	}
+	return nil
 }
 
 // lockTypeRow takes the per-model write lock.

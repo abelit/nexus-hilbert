@@ -206,6 +206,17 @@ func (r *Repo) DeleteTarget(ctx context.Context, id model.ID) (*discoverybiz.Tar
 			}
 			return err
 		}
+		// A TARGET WITH SIGHTINGS IS NOT REMOVED. The pool rows name it as their
+		// source, and deleting it would leave them unmappable: a row that can
+		// never be accepted and whose reason no longer exists. The count and the
+		// delete share this transaction, so a report cannot slip in between.
+		var bound int64
+		if err := tx.Model(&discoverymodel.PoolEntry{}).Where("adt_id = ?", id).Count(&bound).Error; err != nil {
+			return err
+		}
+		if bound > 0 {
+			return fmt.Errorf("%w: %d pool rows", discoverybiz.ErrTargetReferenced, bound)
+		}
 		if err := tx.Where("adt_id = ?", id).Delete(&discoverymodel.RuleSyncHistory{}).Error; err != nil {
 			return err
 		}

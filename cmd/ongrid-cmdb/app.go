@@ -43,9 +43,16 @@ func buildHandlers(db *gorm.DB, log *slog.Logger) cmdbserver.Handlers {
 		cmdbcitypebiz.NewCIResolver(citypeUC),
 		log,
 	)
-	discoveryUC := cmdbdiscoverybiz.NewUsecase(cmdbdiscoverydata.NewRepo(db)).
+	discoveryRepo := cmdbdiscoverydata.NewRepo(db)
+	discoveryUC := cmdbdiscoverybiz.NewUsecase(discoveryRepo).
 		WithModels(cmdbcitypebiz.NewDiscoveryResolver(citypeUC)).
-		WithInstances(cmdbcibiz.NewDiscoveryQueries(ciUC))
+		WithInstances(cmdbcibiz.NewDiscoveryQueries(ciUC)).
+		// The pool shares the discovery store, and acceptance writes through
+		// the instance side: the two adapters are what keep biz packages from
+		// importing each other's implementations.
+		WithPool(discoveryRepo).
+		WithWriter(cmdbcibiz.NewDiscoveryWriter(ciUC)).
+		WithAttributes(cmdbcitypebiz.NewDiscoveryAttributeResolver(citypeUC))
 
 	return cmdbserver.Handlers{
 		Meta:         cmdbservermeta.NewHandler(cmdbmetabiz.NewUsecase(cmdbmetastore.NewRepo(db), log)),

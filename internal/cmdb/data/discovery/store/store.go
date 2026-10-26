@@ -26,10 +26,10 @@ func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
 // Migrate registers the discovery tables.
 //
-// THE FIVE THE RULE AND TARGET LAYERS NEED: a rule, its credentials, a target
-// that binds one to a model, the relations a target's fields establish, and the
-// log of what was handed to which agent. The POOL is the next increment's, and a
-// table nothing writes is a table whose shape nobody has had to defend yet.
+// THE SEVEN THE MODULE NEEDS: a rule, its credentials, a target that binds one
+// to a model, the relations a target's fields establish, the log of what was
+// handed to which agent, and the two pool tables — the sightings themselves and
+// the log of what happened to them.
 func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return errors.New("cmdb discovery store: nil db")
@@ -40,6 +40,8 @@ func Migrate(db *gorm.DB) error {
 		&discoverymodel.Target{},
 		&discoverymodel.TargetRelation{},
 		&discoverymodel.RuleSyncHistory{},
+		&discoverymodel.PoolEntry{},
+		&discoverymodel.ExecHistory{},
 	)
 }
 

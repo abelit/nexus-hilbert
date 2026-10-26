@@ -11,6 +11,8 @@ DELETE /v1/cmdb/ci-types/{ref}/unique-constraints/{id}
 DELETE /v1/cmdb/dcim/server-rooms/{roomID}/racks/{rackID}/devices/{deviceID}
 DELETE /v1/cmdb/dcim/{type}/{id}
 DELETE /v1/cmdb/discovery/accounts/{id}
+DELETE /v1/cmdb/discovery/adc/exec-histories/{typeID}
+DELETE /v1/cmdb/discovery/adc/{id}
 DELETE /v1/cmdb/discovery/rules/{ref}
 DELETE /v1/cmdb/discovery/targets/{id}
 DELETE /v1/cmdb/instances/{id}
@@ -48,6 +50,12 @@ GET /v1/cmdb/dcim/history/operations
 GET /v1/cmdb/dcim/server-rooms/{roomID}/racks
 GET /v1/cmdb/dcim/tree-view
 GET /v1/cmdb/discovery/accounts/{id}
+GET /v1/cmdb/discovery/adc
+GET /v1/cmdb/discovery/adc/ci-types
+GET /v1/cmdb/discovery/adc/ci-types/{ref}/attributes
+GET /v1/cmdb/discovery/adc/counter
+GET /v1/cmdb/discovery/adc/exec-histories
+GET /v1/cmdb/discovery/adc/{id}
 GET /v1/cmdb/discovery/catalog/components/{name}/attributes
 GET /v1/cmdb/discovery/catalog/http/{provider}/attributes
 GET /v1/cmdb/discovery/catalog/http/{provider}/categories
@@ -103,6 +111,8 @@ POST /v1/cmdb/ci/search
 POST /v1/cmdb/dcim/racks/recalc-units
 POST /v1/cmdb/dcim/server-rooms/{roomID}/racks/{rackID}/devices/{deviceID}
 POST /v1/cmdb/dcim/{type}
+POST /v1/cmdb/discovery/adc
+POST /v1/cmdb/discovery/adc/exec-histories
 POST /v1/cmdb/discovery/ci-types/{ref}/targets
 POST /v1/cmdb/discovery/rules
 POST /v1/cmdb/discovery/rules/builtin
@@ -127,6 +137,7 @@ PUT /v1/cmdb/ci-types/{ref}/triggers/{id}
 PUT /v1/cmdb/ci-types/{ref}/unique-constraints/{id}
 PUT /v1/cmdb/dcim/server-rooms/{roomID}/racks/{rackID}/devices/{deviceID}
 PUT /v1/cmdb/dcim/{type}/{id}
+PUT /v1/cmdb/discovery/adc/{id}/accept
 PUT /v1/cmdb/discovery/ci-types/{ref}/target-relations
 PUT /v1/cmdb/discovery/rules/{ref}
 PUT /v1/cmdb/discovery/rules/{ref}/accounts
