@@ -50,8 +50,8 @@ export function cmdbPut<T>(path: string, body?: unknown): Promise<T> {
   return request<T>('PUT', `/cmdb${path}`, body);
 }
 
-export function cmdbDelete(path: string): Promise<void> {
-  return request<void>('DELETE', `/cmdb${path}`);
+export function cmdbDelete(path: string, body?: unknown): Promise<void> {
+  return request<void>('DELETE', `/cmdb${path}`, body);
 }
 
 /**

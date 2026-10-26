@@ -8,7 +8,7 @@
 // has no permission gate.
 
 import { cmdbDelete, cmdbGet, cmdbPost, cmdbPut, type ListResponse } from './http';
-import type { CIType } from './citype';
+import type { CIType, TypeAttribute } from './citype';
 
 // --- service-tree definitions (`c_prv`) ---
 
@@ -133,4 +133,98 @@ export function setAutoSubscription(input: Partial<AutoSubscription>): Promise<A
 
 export function deleteAutoSubscription(): Promise<void> {
   return cmdbDelete('/preferences/auto-subscription');
+}
+
+// --- model groups (`c_ci_type_groups`) ---
+
+export type ModelGroupWrite = {
+  name?: string;
+  type_ids?: number[];
+};
+
+export function listModelGroups(): Promise<ModelGroup[]> {
+  return cmdbGet<ListResponse<ModelGroup>>('/preferences/model-groups').then((got) => got.items ?? []);
+}
+
+export function createModelGroup(name: string): Promise<ModelGroup> {
+  return cmdbPost<ModelGroup>('/model-groups', { name });
+}
+
+export function updateModelGroup(id: number, input: ModelGroupWrite): Promise<ModelGroup> {
+  return cmdbPut<ModelGroup>(`/model-groups/${id}`, input);
+}
+
+/**
+ * Removes a group, or only detaches the named models when `typeIDs` is not
+ * empty. The backend treats a DELETE with no body as "remove the group".
+ */
+export function deleteModelGroup(id: number, typeIDs?: number[]): Promise<void> {
+  const body = typeIDs && typeIDs.length > 0 ? { type_ids: typeIDs } : undefined;
+  return cmdbDelete(`/model-groups/${id}`, body);
+}
+
+export function reorderModelGroups(groupIDs: number[]): Promise<void> {
+  return cmdbPut<void>('/model-groups/order', { group_ids: groupIDs });
+}
+
+// --- hierarchy level views (`c_ptv`) ---
+
+export type TreeLevel = {
+  id: number;
+  type_id: number;
+  name: string;
+  alias: string;
+  icon?: string;
+  /** The attributes the hierarchy shows, in order. */
+  levels: TypeAttribute[];
+};
+
+export function listTreeLevels(): Promise<TreeLevel[]> {
+  return cmdbGet<TreeLevel[]>('/preferences/tree-levels');
+}
+
+/** An empty list clears the model's level view. */
+export function setTreeLevels(ref: string | number, levels: string[]): Promise<TreeLevel> {
+  return cmdbPut<TreeLevel>(`/preferences/ci-types/${encodeURIComponent(String(ref))}/tree-levels`, { levels });
+}
+
+// --- saved searches (`c_pso`) ---
+
+export type SavedSearch = {
+  id: number;
+  name: string;
+  option?: Record<string, unknown>;
+  prv_id?: number;
+  ptv_id?: number;
+  type_id?: number;
+};
+
+export type SavedSearchInput = {
+  name: string;
+  option: Record<string, unknown>;
+  prv_id?: number;
+  ptv_id?: number;
+  type_id?: number;
+};
+
+export type SavedSearchFilter = {
+  type_id?: number;
+  prv_id?: number;
+  ptv_id?: number;
+};
+
+export function listSavedSearches(filter?: SavedSearchFilter): Promise<SavedSearch[]> {
+  return cmdbGet<ListResponse<SavedSearch>>('/preferences/saved-searches', filter).then((got) => got.items ?? []);
+}
+
+export function createSavedSearch(input: SavedSearchInput): Promise<SavedSearch> {
+  return cmdbPost<SavedSearch>('/preferences/saved-searches', input);
+}
+
+export function updateSavedSearch(id: number, input: SavedSearchInput): Promise<SavedSearch> {
+  return cmdbPut<SavedSearch>(`/preferences/saved-searches/${id}`, input);
+}
+
+export function deleteSavedSearch(id: number): Promise<void> {
+  return cmdbDelete(`/preferences/saved-searches/${id}`);
 }
