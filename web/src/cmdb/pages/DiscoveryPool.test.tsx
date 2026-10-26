@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -125,6 +125,64 @@ describe('the discovery pool', () => {
     await waitFor(() => expect(puts).toBe(1));
     await waitFor(() => expect(screen.getByLabelText('已接受数量')).toHaveTextContent('1'));
     expect(screen.queryByRole('button', { name: '接受 i-1' })).not.toBeInTheDocument();
+  });
+
+  it('does not let a previous model’s delayed response overwrite the current one', async () => {
+    const switchAttribute = {
+      id: 20, name: 'name', alias: '设备名', value_type: '2', is_list: false,
+    };
+    const switchEntry = {
+      ...pending,
+      id: 2,
+      type_id: 2,
+      unique_value: 's-1',
+      instance: { name: 's-1' },
+      oneagent_name: 'agent two',
+    };
+    server.use(
+      http.get('/api/v1/cmdb/discovery/adc/ci-types', () =>
+        HttpResponse.json({
+          items: [
+            { type_id: 1, name: 'host', alias: '主机', icon: '', target_count: 1 },
+            { type_id: 2, name: 'switch', alias: '交换机', icon: '', target_count: 1 },
+          ],
+          total: 2,
+        }),
+      ),
+      http.get('/api/v1/cmdb/discovery/adc/ci-types/:typeID/attributes', async ({ params }) => {
+        if (String(params.typeID) === '1') {
+          await delay(400);
+          return HttpResponse.json({ items: [hostAttribute], total: 1 });
+        }
+        return HttpResponse.json({ items: [switchAttribute], total: 1 });
+      }),
+      http.get('/api/v1/cmdb/discovery/adc/counter', async ({ request }) => {
+        const typeID = new URL(request.url).searchParams.get('type_id');
+        if (typeID === '1') {
+          await delay(400);
+          return HttpResponse.json(counters);
+        }
+        return HttpResponse.json({ ...counters, instance_count: 1 });
+      }),
+      http.get('/api/v1/cmdb/discovery/adc', async ({ request }) => {
+        const typeID = new URL(request.url).searchParams.get('type_id');
+        if (typeID === '1') {
+          await delay(400);
+          return HttpResponse.json({ items: [pending], total: 1, page: 1, page_size: 20 });
+        }
+        return HttpResponse.json({ items: [switchEntry], total: 1, page: 1, page_size: 20 });
+      }),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: '查看 交换机 的发现池' }));
+    expect((await screen.findAllByText('s-1')).length).toBeGreaterThan(0);
+    expect(await screen.findByRole('columnheader', { name: '设备名' })).toBeInTheDocument();
+
+    // Let the previous model's requests land; none of them may be applied now.
+    await delay(600);
+    expect(screen.queryAllByText('i-1')).toHaveLength(0);
+    expect(screen.queryByRole('columnheader', { name: '主机名' })).not.toBeInTheDocument();
   });
 
   it('shows the raw report in a drawer', async () => {

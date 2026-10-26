@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw, ScrollText } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -66,6 +66,12 @@ export default function DiscoveryPoolPage() {
   const [raw, setRaw] = useState<PoolEntry | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  // A RESPONSE BELONGS TO THE MODEL THAT ASKED FOR IT. Switching models
+  // invalidates every in-flight counter, column and row request; without this
+  // a slow previous response could repaint its rows under the new model's name
+  // and an accept would then act on the wrong model's sighting.
+  const requestSeq = useRef(0);
+
   const loadTypes = useCallback(async () => {
     setTypesLoading(true);
     setTypesErr(null);
@@ -88,10 +94,13 @@ export default function DiscoveryPoolPage() {
   }, [loadTypes]);
 
   const loadCounters = useCallback(
-    async (typeID: number) => {
+    async (typeID: number, seq: number) => {
       try {
-        setCounters(await getPoolCounters(typeID));
+        const got = await getPoolCounters(typeID);
+        if (seq !== requestSeq.current) return;
+        setCounters(got);
       } catch (error) {
+        if (seq !== requestSeq.current) return;
         // A FAILED COUNTER IS NOT A FAILED POOL: the table is still usable, and
         // replacing the whole page with an error over a summary would hide it.
         toast.error(describeError(error, tr('无法读取发现池统计', 'Could not load the pool counters')));
@@ -101,10 +110,13 @@ export default function DiscoveryPoolPage() {
   );
 
   const loadAttributes = useCallback(
-    async (typeID: number) => {
+    async (typeID: number, seq: number) => {
       try {
-        setAttributes(await listPoolAttributes(typeID));
+        const got = await listPoolAttributes(typeID);
+        if (seq !== requestSeq.current) return;
+        setAttributes(got);
       } catch (error) {
+        if (seq !== requestSeq.current) return;
         setAttributes([]);
         toast.error(describeError(error, tr('无法读取发现池列', 'Could not load the pool columns')));
       }
@@ -113,7 +125,13 @@ export default function DiscoveryPoolPage() {
   );
 
   const loadEntries = useCallback(
-    async (typeID: number, nextPage: number, nextStatus: StatusFilter, quiet = false) => {
+    async (
+      typeID: number,
+      nextPage: number,
+      nextStatus: StatusFilter,
+      seq: number,
+      quiet = false,
+    ) => {
       if (quiet) setRefreshing(true);
       else setLoading(true);
       setErr(null);
@@ -124,13 +142,17 @@ export default function DiscoveryPoolPage() {
           page_size: PAGE_SIZE,
           is_accept: nextStatus === 'all' ? undefined : nextStatus === 'accepted',
         });
+        if (seq !== requestSeq.current) return;
         setEntries(got.items ?? []);
         setTotal(got.total ?? 0);
       } catch (error) {
+        if (seq !== requestSeq.current) return;
         setErr(describeError(error, tr('无法读取发现池', 'Could not load the discovery pool')));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (seq === requestSeq.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [tr],
@@ -138,16 +160,28 @@ export default function DiscoveryPoolPage() {
 
   useEffect(() => {
     if (selected == null) {
+      requestSeq.current += 1;
       setEntries([]);
       setTotal(0);
       setCounters(null);
       setAttributes([]);
+      setErr(null);
+      setLoading(false);
+      setRefreshing(false);
       return;
     }
+    const seq = ++requestSeq.current;
     setPage(1);
-    void loadCounters(selected);
-    void loadAttributes(selected);
-    void loadEntries(selected, 1, status);
+    // CLEAR THE PREVIOUS MODEL BEFORE THE REQUEST, so a slow or failed load
+    // cannot leave its rows and columns under the new model's title.
+    setEntries([]);
+    setTotal(0);
+    setCounters(null);
+    setAttributes([]);
+    setErr(null);
+    void loadCounters(selected, seq);
+    void loadAttributes(selected, seq);
+    void loadEntries(selected, 1, status, seq);
   }, [selected, status, loadCounters, loadAttributes, loadEntries]);
 
   const selectedType = types.find((item) => item.type_id === selected) ?? null;
@@ -156,20 +190,23 @@ export default function DiscoveryPoolPage() {
 
   const refresh = () => {
     if (selected == null) return;
-    void loadCounters(selected);
-    void loadAttributes(selected);
-    void loadEntries(selected, page, status, true);
+    const seq = requestSeq.current;
+    void loadCounters(selected, seq);
+    void loadAttributes(selected, seq);
+    void loadEntries(selected, page, status, seq, true);
   };
 
   const accept = async (row: PoolEntry) => {
+    const seq = requestSeq.current;
+    const typeID = selected;
     setAccepting(row.id);
     try {
       await acceptPool(row.id);
       toast.success(tr(`已接受 ${row.unique_value}`, `Accepted ${row.unique_value}`));
-      if (selected != null) {
+      if (typeID != null && seq === requestSeq.current) {
         await Promise.all([
-          loadCounters(selected),
-          loadEntries(selected, page, status, true),
+          loadCounters(typeID, seq),
+          loadEntries(typeID, page, status, seq, true),
         ]);
       }
     } catch (error) {
@@ -187,13 +224,15 @@ export default function DiscoveryPoolPage() {
       ),
     );
     if (!ok) return;
+    const seq = requestSeq.current;
+    const typeID = selected;
     try {
       await deletePool(row.id);
       toast.success(tr('已删除', 'Deleted'));
-      if (selected != null) {
+      if (typeID != null && seq === requestSeq.current) {
         await Promise.all([
-          loadCounters(selected),
-          loadEntries(selected, page, status, true),
+          loadCounters(typeID, seq),
+          loadEntries(typeID, page, status, seq, true),
         ]);
       }
     } catch (error) {
@@ -305,7 +344,7 @@ export default function DiscoveryPoolPage() {
                     if (selected == null) return;
                     const target = next + 1;
                     setPage(target);
-                    void loadEntries(selected, target, status);
+                    void loadEntries(selected, target, status, requestSeq.current);
                   }}
                 />
               </Card>
