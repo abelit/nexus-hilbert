@@ -186,7 +186,7 @@ export function TemplatesPanel() {
               variant="primary"
               type="button"
               onClick={() => void importFile()}
-              disabled={busy !== null}
+              disabled={!isAdmin || busy !== null}
               className="inline-flex items-center gap-1.5"
             >
               <Upload size={12} aria-hidden="true" />

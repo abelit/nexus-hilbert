@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	discoverymodel "github.com/ongridio/ongrid/internal/cmdb/model/discovery"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
 // The rule layer's posture: a plugin carries CODE, so its field list is not
@@ -101,7 +102,7 @@ func TestImportTemplates(t *testing.T) {
 	got, err := uc.ImportTemplates(context.Background(), []RuleInput{
 		{Name: "a", Type: strp("snmp")},
 		{Name: "b", Type: strp("http")},
-	}, Actor{UserID: 3})
+	}, Actor{UserID: 3, IsAdmin: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestImportTemplates(t *testing.T) {
 	// A template with no name is refused, and the refusal says WHICH one.
 	_, err = uc.ImportTemplates(context.Background(), []RuleInput{
 		{Name: "a"}, {Name: "  "},
-	}, Actor{UserID: 3})
+	}, Actor{UserID: 3, IsAdmin: true})
 	if err == nil || !containsText(err.Error(), "template 2") {
 		t.Fatalf("err = %v, want it to name the template", err)
 	}
@@ -131,4 +132,18 @@ func containsText(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+// A template import rewrites provider definitions across the deployment, so it
+// is administrative even when every rule in the file is an ordinary one.
+func TestTemplateImportIsAdministrative(t *testing.T) {
+	uc, _ := newStubUsecase(t)
+	rules := []RuleInput{{Name: "plain", Type: strp("snmp")}}
+
+	if _, err := uc.ImportTemplates(context.Background(), rules, Actor{UserID: 9}); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("non-admin template import err = %v, want forbidden", err)
+	}
+	if _, err := uc.ImportTemplates(context.Background(), rules, Actor{UserID: 1, IsAdmin: true}); err != nil {
+		t.Fatalf("admin template import: %v", err)
+	}
 }

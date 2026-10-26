@@ -351,6 +351,11 @@ describe('the discovery page', () => {
     expect(screen.getByRole('button', { name: '新建规则' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '编辑 阿里云' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '删除 阿里云' })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('tab', { name: '模板' }));
+    expect(await screen.findByRole('button', { name: '导入模板' })).toBeDisabled();
+    // Export is a read and stays available to every authenticated caller.
+    expect(screen.getByRole('button', { name: '导出模板' })).toBeEnabled();
   });
 });
 

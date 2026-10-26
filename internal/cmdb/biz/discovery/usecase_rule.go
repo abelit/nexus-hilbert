@@ -170,6 +170,12 @@ func (u *Usecase) ImportTemplates(ctx context.Context, in []RuleInput, actor Act
 	if u.repo == nil {
 		return nil, errs.ErrNotWiredYet
 	}
+	// A TEMPLATE REWRITES PROVIDER DEFINITIONS ACROSS THE DEPLOYMENT. The route
+	// comment already promised the admin gate; enforce it here so every caller,
+	// not only the console, gets the same answer.
+	if !actor.IsAdmin {
+		return nil, fmt.Errorf("%w: importing templates is administrative", errs.ErrForbidden)
+	}
 	if len(in) == 0 {
 		return &TemplateImportResult{}, nil
 	}
