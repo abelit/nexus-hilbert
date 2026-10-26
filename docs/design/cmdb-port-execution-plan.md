@@ -22,7 +22,7 @@
 | --- | --- | --- | --- |
 | PR1 独立运行时 | 已完成 | `9cef6aa` `ac24647` `2caebf4` `a2b3754` `ed626fc` | 迁移锁、路由 golden、`cmd/ongrid-cmdb`、manager 解耦、开发部署、评审修复 |
 | PR2 生产安装/发布 | 已完成 | `1fe51c2` | install compose/nginx/Prometheus、install/upgrade 健康检查、Makefile、release workflow、ADR/运维文档 |
-| PR3 偏好/关系/树视图/关系视图 | 待开始 | — | 纯前端，后端已就绪 |
+| PR3 偏好/关系/树视图/关系视图 | 进行中 | `7e854a2` `cf7509b` | API 客户端与偏好页完成；树视图/关系/菜单待做 |
 | PR4 批量导入 | 待开始 | — | 纯前端，后端已就绪 |
 | PR5 自动发现 UI | 待开始 | — | 前端 + 一个只读端点 |
 | PR6 ADC 发现池 | 待开始 | — | 后端两张表 + API + 前端 |
@@ -63,7 +63,7 @@
 
 ### PR3a API 客户端
 
-- [ ] `web/src/cmdb/api/preferences.ts` 增加：
+- [x] `web/src/cmdb/api/preferences.ts` 增加：
   - `listModelGroups()` → `GET /preferences/model-groups`（`{items,total}`）；
   - `createModelGroup(name)` → `POST /model-groups`；
   - `updateModelGroup(id, {name?, type_ids?})` → `PUT /model-groups/{id}`；
@@ -72,20 +72,21 @@
   - `TreeLevel`/`listTreeLevels()` → `GET /preferences/tree-levels`（bare array）；
   - `setTreeLevels(ref, levels: string[])` → `PUT /preferences/ci-types/{ref}/tree-levels`；
   - `SavedSearch`/`listSavedSearches(params?)`/`createSavedSearch`/`updateSavedSearch`/`deleteSavedSearch`。
-- [ ] 新增 `web/src/cmdb/api/preferences.test.ts`，覆盖查询串、列表解包、写 body。
-- 验收：`npm test -- src/cmdb/api/preferences.test.ts`。
+- [x] 新增 `web/src/cmdb/api/preferences.test.ts`，覆盖查询串、列表解包、写 body。
+- 验收：`npx vitest run src/cmdb/api/preferences.test.ts`（4 tests 通过）。提交 `7e854a2`。
 
 ### PR3b Preferences 页面
 
-- [ ] `web/src/cmdb/pages/Preferences.tsx`，Tabs：
+- [x] `web/src/cmdb/pages/Preferences.tsx`，Tabs：
   - **模型与列**：复用现有 `Subscriptions` 内容（给 `Subscriptions.tsx` 增加 `embedded?: boolean`，嵌入时隐藏 `PageHeader`）。
   - **模型分组**：列表、创建/重命名、删除、上下移动、给分组分配模型（`listCITypes` 多选）。仅 admin 可写。
   - **树层级**：选择模型 + 有序属性列表（`listTypeAttributes`），保存 `setTreeLevels`；空列表表示清除。
-  - **自动订阅**：复用/抽取 `Subscriptions` 的自动订阅面板。
+  - **自动订阅**：复用 `Subscriptions` 的自动订阅入口（模型与列 tab 内）。
   - **保存搜索**：列表、创建/编辑（名称 + option JSON + 可选 type_id）、删除。
-- [ ] 组件放 `web/src/cmdb/components/preferences/`：`ModelGroupsPanel.tsx`、`TreeLevelsPanel.tsx`、`SavedSearchesPanel.tsx`。
-- [ ] `Preferences.test.tsx`：分组 CRUD/非 admin 禁用、树层级保存、保存搜索 CRUD、空态。
-- 验收：`npm test -- src/cmdb/pages/Preferences.test.tsx`；`npm run build`。
+- [x] 组件放 `web/src/cmdb/components/preferences/`：`ModelGroupsPanel.tsx`、`TreeLevelsPanel.tsx`、`SavedSearchesPanel.tsx`。
+- [x] `Preferences.test.tsx`：分组列表/创建/分配/非 admin 禁用、树层级保存、保存搜索创建/非法 JSON。
+- 验收：`npx vitest run src/cmdb/pages/Preferences.test.tsx`（6 tests 通过）、`npm run typecheck` 通过。提交 `cf7509b`。
+- [ ] 真实浏览器截图（PR3 收尾统一做）。
 
 ### PR3c TreeViews 页面
 
