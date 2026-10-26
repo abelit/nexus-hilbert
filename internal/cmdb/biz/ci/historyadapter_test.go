@@ -1,6 +1,13 @@
 package ci
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	model "github.com/ongridio/ongrid/internal/cmdb/model"
+	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
+	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
+)
 
 // History names instances with the show attribute, falling back to the unique
 // one. A password, link or file attribute must never supply that name: the
@@ -29,5 +36,33 @@ func TestHistoryNameAttributeSkipsSensitiveAttributes(t *testing.T) {
 				t.Fatalf("attribute = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A page of history names up to two hundred instances. Loading them one by one
+// is an N+1 the topology graph multiplies to two thousand; the adapter uses the
+// batch read.
+func TestHistoryCINamesLoadsInstancesInOneQuery(t *testing.T) {
+	repo := &readRepoStub{}
+	one := &cimodel.CI{TypeID: 1}
+	one.ID = 1
+	two := &cimodel.CI{TypeID: 1}
+	two.ID = 2
+	repo.cis = map[model.ID]*cimodel.CI{1: one, 2: two}
+	types := &resolverStub{
+		ct:    citypemodel.CIType{Name: "host"},
+		specs: map[model.ID]AttributeSpec{10: {ID: 10, Name: "hostname"}},
+		show:  AttributeSpec{ID: 10, Name: "hostname"},
+	}
+	uc := NewUsecase(repo, types, nil)
+
+	if _, err := NewHistoryCINames(uc).ResolveCINames(context.Background(), []model.ID{1, 2}); err != nil {
+		t.Fatalf("ResolveCINames: %v", err)
+	}
+	if repo.batchLoads != 1 {
+		t.Fatalf("batch loads = %d, want 1", repo.batchLoads)
+	}
+	if repo.singleLoads != 0 {
+		t.Fatalf("single loads = %d, want 0", repo.singleLoads)
 	}
 }

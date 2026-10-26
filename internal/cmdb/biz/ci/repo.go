@@ -51,6 +51,11 @@ type ValueRepo interface {
 	// LoadCI returns a CI by id, or nil when it does not exist.
 	LoadCI(ctx context.Context, ciID model.ID) (*cimodel.CI, error)
 
+	// LoadCIs returns the CIs with the given ids, keyed by id. Missing ids are
+	// absent. Batch reads exist so a page of history does not issue one query
+	// per instance.
+	LoadCIs(ctx context.Context, ciIDs []model.ID) (map[model.ID]*cimodel.CI, error)
+
 	// DeleteCI removes a CI together with its value rows and the relations it
 	// participates in, in one transaction. Deletion is soft for the CI itself
 	// (Ongrid's delete_marker convention); value rows are removed outright

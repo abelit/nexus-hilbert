@@ -254,6 +254,22 @@ func (r *Repo) LoadCI(ctx context.Context, ciID model.ID) (*cimodel.CI, error) {
 	}
 }
 
+// LoadCIs returns the CIs with the given ids, keyed by id.
+func (r *Repo) LoadCIs(ctx context.Context, ciIDs []model.ID) (map[model.ID]*cimodel.CI, error) {
+	out := make(map[model.ID]*cimodel.CI, len(ciIDs))
+	if len(ciIDs) == 0 {
+		return out, nil
+	}
+	var rows []cimodel.CI
+	if err := r.db.WithContext(ctx).Where("id IN ?", ciIDs).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("cmdb ci: load instances: %w", err)
+	}
+	for i := range rows {
+		out[rows[i].ID] = &rows[i]
+	}
+	return out, nil
+}
+
 // ListCIsByType returns a page of the model's instances plus the total.
 //
 // Ordered by id DESCENDING, which is cantor's order and the one a console

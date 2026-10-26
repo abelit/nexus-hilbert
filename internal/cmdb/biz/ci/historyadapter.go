@@ -51,15 +51,16 @@ func (r *HistoryCINames) ResolveCINames(ctx context.Context, ids []model.ID) (ma
 	if r == nil || r.uc == nil || len(ids) == 0 {
 		return out, nil
 	}
+	loaded, err := r.uc.repo.LoadCIs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("cmdb ci: resolve history instances: %w", err)
+	}
 	byType := map[model.ID][]model.ID{}
 	for _, id := range ids {
 		if id == 0 {
 			continue
 		}
-		ci, err := r.uc.repo.LoadCI(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("cmdb ci: resolve history instance %d: %w", id, err)
-		}
+		ci := loaded[id]
 		if ci == nil {
 			continue
 		}

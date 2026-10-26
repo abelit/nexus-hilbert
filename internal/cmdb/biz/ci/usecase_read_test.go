@@ -19,15 +19,33 @@ import (
 
 type readRepo struct {
 	ci   *cimodel.CI
+	cis  map[model.ID]*cimodel.CI
 	rows []ValueRow
 
 	listed  []cimodel.CI
 	total   int64
 	lastLim int
 	lastOff int
+
+	singleLoads int
+	batchLoads  int
 }
 
-func (r *readRepo) LoadCI(context.Context, model.ID) (*cimodel.CI, error) { return r.ci, nil }
+func (r *readRepo) LoadCI(context.Context, model.ID) (*cimodel.CI, error) {
+	r.singleLoads++
+	return r.ci, nil
+}
+
+func (r *readRepo) LoadCIs(_ context.Context, ids []model.ID) (map[model.ID]*cimodel.CI, error) {
+	r.batchLoads++
+	out := map[model.ID]*cimodel.CI{}
+	for _, id := range ids {
+		if r.cis != nil && r.cis[id] != nil {
+			out[id] = r.cis[id]
+		}
+	}
+	return out, nil
+}
 
 func (r *readRepo) ListCIsByType(_ context.Context, _ model.ID, limit, offset int) ([]cimodel.CI, int64, error) {
 	r.lastLim, r.lastOff = limit, offset
@@ -60,8 +78,10 @@ type readRepoStub struct {
 
 // resolverStub is a TypeResolver over one model.
 type resolverStub struct {
-	ct    citypemodel.CIType
-	specs map[model.ID]AttributeSpec
+	ct     citypemodel.CIType
+	specs  map[model.ID]AttributeSpec
+	show   AttributeSpec
+	unique AttributeSpec
 }
 
 func (s *resolverStub) ResolveForCI(_ context.Context, ref string) (*AttributeSet, error) {
@@ -69,7 +89,7 @@ func (s *resolverStub) ResolveForCI(_ context.Context, ref string) (*AttributeSe
 		return nil, nil
 	}
 	set := &AttributeSet{
-		Type: s.ct, Specs: s.specs,
+		Type: s.ct, Specs: s.specs, ShowAttr: s.show, UniqueAttr: s.unique,
 		ByName:  map[string]model.ID{},
 		ByAlias: map[string]model.ID{},
 	}
