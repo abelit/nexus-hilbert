@@ -24,6 +24,8 @@ MySQL auto-starts as part of compose. The `ongrid` service is wired with `depend
 
 Schema is managed via GORM `AutoMigrate` at startup. The manager reconciles its own tables; `ongrid-cmdb` alone owns the CMDB (`c_*`) migrations and takes a MySQL advisory lock (`ongrid_cmdb_schema`) before running them, so two CMDB replicas cannot AutoMigrate concurrently. There is no separate `migrate` step. Stop and recreate **both** `ongrid` and `ongrid-cmdb` together on upgrade; an old manager still mounts the CMDB routes.
 
+To copy an existing nexus-cantor CMDB database into `ongrid`, use the same binary's one-off `migrate-cantor` subcommand; the full dry-run, user-mapping, rollback and limitation notes are in [docs/install/cmdb-service.md](../docs/install/cmdb-service.md#从-nexus-cantor-迁移-cmdb-数据).
+
 Images are built with `make docker` (wraps `docker build` with the correct context = repo root).
 
 The builder stage downloads Go modules, so the image build needs to reach a

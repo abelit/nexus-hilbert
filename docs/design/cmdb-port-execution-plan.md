@@ -272,6 +272,21 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - [x] `deploy/docker-compose.yml` 原样栈已在本机运行（project `deploy`：`ongrid`、`ongrid-cmdb`、`ongrid-nginx`、`ongrid-frontier`）。验收：`/cmdb-readyz` 200、`/healthz` 200、未认证 `/api/v1/version` 401、认证后 `/api/v1/cmdb/health` 200（`{"generation":"fresh","origin":"mysql","fresh":true}`）、`/api/v1/cmdb/ci-types` 200、`docker exec ongrid-cmdb /ongrid-cmdb --healthcheck` exit 0。CMDB 镜像通过 `RUNTIME_IMAGE` 覆盖构建（提交 `9063f79`）。停止 CMDB 的网关隔离早前实测为 504，本轮未重复停服。
 - [ ] 未创建/推送 PR；`gh pr checks` 未运行。
 
+## PR10 cantor 数据导入（本分支 `feat/cmdb-cantor-data-migration`）
+
+- [x] `internal/cmdb/data/cantorimport`：按目标 `information_schema` 生成列计划；复制 47 张 CMDB 表；软删除 `deleted` → `delete_marker`/`deleted_at`；目标新增列用默认值补齐；目标 NULL→NOT NULL 有默认值则填默认，无默认值中止并报表/列；`ON DUPLICATE KEY UPDATE` 支持部分导入后续跑。
+- [x] 用户映射：源 uid 1 → 目标超级管理员；其余按 email 复用或创建 disabled、空密码身份；源历史中已删除的 uid 创建 `cantor-uid-<uid>@invalid.local` 占位；支持 `--users=create|preserve|admin`。
+- [x] `cmd/ongrid-cmdb migrate-cantor`：`--source-dsn`/`ONGRID_CANTOR_DSN`、`--target-dsn`/`ONGRID_DB_DSN`、`--dry-run`、`--resume`、`--users`、`--batch-size`、`--tables`；非 dry-run 先走 `dbx.RunMigrationsLocked`；报告不输出 DSN 密码。
+- [x] 修复导入数据暴露的两个读取缺陷：
+  - `ListByType` 在 `fields` 为空且快照为空时不回退值表，导致 adoption/import 后列表所有值空白；新增回归测试。
+  - 拓扑 `path` 的 `"0"` 是 cantor 的中心模型层，原 `levelsOf` 直接拒绝；改为忽略 0 层，新增回归测试。否则导入的 7 条 cantor 拓扑视图全部不可读。
+- [x] 真实数据演练：源为 cantor MySQL 数据卷的**副本**（原卷未修改），目标为 `ongrid` 库。dry-run 与正式导入均通过；正式导入 47 张表、约 26.8 万行，逐表 `source == imported`，live 数与源 `deleted=0` 一致。主要行数：CIs 2795、relations 3573、records 85633、attribute histories 136730、ADC exec histories 20701、IPAM scan histories 900、DCIM histories 101、topology views 7。创建 7 个 disabled IAM 身份（4 个被数据引用的源用户 + 3 个占位；源库中未被任何 CMDB 行引用的 2 个用户不导入），源 uid 1 映射到现有管理员。
+- [x] 跳过并在报告中列出：`c_c_d` 9、`c_cfp` 1、`c_dashboard` 1、`c_kv` 5、`c_sc` 3；`c_ad_counter` 由目标实时计数；ACL/legacy 表不导入。`choice_web_hook`/trigger 凭据按不透明密文复制；文件本体不复制。
+- [x] 文档：`docs/install/cmdb-service.md` 新增迁移/演练/用户/密文/跳过表/验收/回滚/限制；`Makefile` 新增 `run-cmdb-migrate`。
+- [x] 服务重建并实测：无 `fields` 的实例列表返回完整 values；`/api/v1/cmdb/topology-views`、`/groups`、`/7/graph`、`/4/graph` 均 200；preferences/tree-levels、IPAM/DCIM tree、relations、ADC pool/counter/exec histories、operation history 均返回迁移数据；历史 password/file 值显示 `******`。
+- [ ] 真实浏览器验收与 `gh pr checks`（GitHub API 仍被本机网络拒绝时无法查询）。
+- 验收：`ONGRID_TEST_MYSQL_DSN=... go test -race ./internal/cmdb/data/cantorimport ./internal/cmdb/biz/ci ./internal/cmdb/biz/topology ./cmd/ongrid-cmdb` 通过；`go test ./...`（含 MySQL env）exit 0；`go vet ./internal/cmdb/... ./cmd/ongrid-cmdb` 通过；`go-arch-lint` v1.19.0 `OK - No warnings found`。
+
 ## 每个 PR 的完成定义
 
 - 行为有测试；测试先失败再通过（纯配置/文档变更除外，需在 PR 说明）。

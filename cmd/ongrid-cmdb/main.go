@@ -38,6 +38,13 @@ const (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "migrate-cantor" {
+		if err := migrateCantor(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":

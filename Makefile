@@ -260,7 +260,7 @@ compose-down: ## 本地 docker compose 停止
 # run
 # ----------------------------------------------------------------------------
 
-.PHONY: run-ongrid run-ongrid-cmdb run-ongrid-edge
+.PHONY: run-ongrid run-ongrid-cmdb run-cmdb-migrate run-ongrid-edge
 run-ongrid: ## 本地直接跑 ongrid
 	go run ./cmd/ongrid
 
@@ -268,6 +268,13 @@ run-ongrid-cmdb: ## 本地直接跑 CMDB 独立服务
 	ONGRID_HTTP_ADDR=$${ONGRID_CMDB_HTTP_ADDR:-:8082} \
 	ONGRID_METRICS_ADDR=$${ONGRID_CMDB_METRICS_ADDR:-:9102} \
 	go run ./cmd/ongrid-cmdb
+
+run-cmdb-migrate: ## 从 nexus-cantor 导入 CMDB 数据（需 ONGRID_CANTOR_DSN 与 ONGRID_DB_DSN）
+	@test -n "$${ONGRID_CANTOR_DSN}" || (echo "ONGRID_CANTOR_DSN is required" >&2; exit 1)
+	@test -n "$${ONGRID_DB_DSN}" || (echo "ONGRID_DB_DSN is required" >&2; exit 1)
+	go run ./cmd/ongrid-cmdb migrate-cantor \
+		--source-dsn "$${ONGRID_CANTOR_DSN}" \
+		--target-dsn "$${ONGRID_DB_DSN}"
 
 run-ongrid-edge: ## 本地直接跑 ongrid-edge
 	go run ./cmd/ongrid-edge
