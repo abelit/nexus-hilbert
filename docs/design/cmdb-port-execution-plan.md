@@ -286,10 +286,11 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - [x] 导入实例读取：cantor 导入的 `c_cis.props_json` 为空；`ListByType` 在没有字段投影时也要对空快照回退到值表，否则资源数据页所有列都显示为空。新增 `TestListByTypeFallsBackWhenSnapshotsAreEmpty`，并用本地导入的 `product` 模型验证 80 条实例返回 `values`。
 - [x] 运行时修复：自定义图标加载失败回退到中性图标并固定尺寸；`Chip` 改为 `forwardRef` 以配合 Tooltip/Base UI；属性视图返回 `re_check`/`option`；`is_attached` 注释纠正为 cantor 的陈旧标志。
 - [x] 属性展示：参考 [model_attribute_management_apple_liquid_glass.html](./cmdb/model_attribute_management_apple_liquid_glass.html)，模型详情属性页使用 scoped `.cmdb-liquid` 玻璃面板：分区玻璃卡、表格/网格切换、属性/类型/索引/配置策略/来源信息、搜索、只看必填/只看继承、分组折叠、统计摘要和空态；操作保留编辑/解绑及行内必填/默认显示开关。桌面默认表格，1280 以下默认网格；只采用参考的视觉方向，不引入 CDN、Font Awesome、全局 Tailwind 配置或新主题。
+- [x] 资源数据布局：参考 [cmdb_instance_data_apple_liquid_glass.html](./cmdb/cmdb_instance_data_apple_liquid_glass.html)，资源数据页增加模型侧栏、本页 KPI、环境/等级筛选、列表/网格切换、玻璃表头与实例卡片；保留订阅列、分页、编辑/删除和实例抽屉。1280 以下默认网格，桌面默认表格；同样只使用 `.cmdb-liquid` 作用域视觉。
 - [x] 表格响应式：`DataTable` 的操作列表头与操作单元格一起 `sticky right-0`，避免横向滚动时被覆盖列的表头从按钮上方透出；模型列表在 `sm` 以下把编辑/启停/删除收进“更多操作”菜单，避免固定操作列遮挡模型名。
 - [x] 测试：后端 citype 的 show_key 创建/更新/清空、继承替换/保留/清空、自引用 400、HTTP DTO；前端 `Models`/`ModelDetail`/`Instances`/`ModelTree`/`AttributeForm`/`AttributeDictionary` 及关系映射；新增两条真实 Chromium 断言（1280 操作列表头固定、390 操作菜单压缩）。
-- 验收：`go test -race ./internal/cmdb/biz/citype ./internal/cmdb/data/citype/store ./internal/cmdb/server/citype`；`go test ./...`；`go vet ./...`；`make arch-lint`（`go-arch-lint` v1.19.0，`OK - No warnings found`）；CMDB Vitest **34 文件 / 187 tests**；`npm run build`；`npm run lint`（0 errors / 44 既有 warnings）；新增 Playwright 2 tests 通过。
-- 真实浏览器：模型列表 390/768/1280/1920，模型详情 390/768/1280/1920，liquid-glass 属性视图 390/768/1280/1920（zh/en、light/dark；桌面表格、1280 以下默认网格），属性字典和属性表单 390。所有页面 `documentElement` 无横向溢出，密集表格只在自身容器滚动；移动端操作列不再遮挡模型名。
+- 验收：`go test -race ./internal/cmdb/biz/citype ./internal/cmdb/data/citype/store ./internal/cmdb/server/citype`；`go test ./...`；`go vet ./...`；`make arch-lint`（`go-arch-lint` v1.19.0，`OK - No warnings found`）；CMDB Vitest **34 文件 / 188 tests**；`npm run build`；`npm run lint`（0 errors / 44 既有 warnings）；新增 Playwright 2 tests 通过。
+- 真实浏览器：模型列表 390/768/1280/1920，模型详情 390/768/1280/1920，liquid-glass 属性视图与资源数据页 390/768/1280/1440/1920（zh/en、light/dark；桌面表格、1280 以下默认网格），属性字典和属性表单 390。所有页面 `documentElement` 无横向溢出，密集表格只在自身容器滚动；移动端操作列不再遮挡模型名。
 - 已知限制：前端没有全局 ErrorBoundary；渲染期异常会卸载整个 SPA（本次关系契约错误因此表现为空白页）。本次已修复触发错误，路由级错误边界建议作为独立改进。
 - 已知限制：完整前端套件以 2 个 worker 运行（118 文件/685 tests）时仅 `src/api/skills.test.ts` 1 项失败，原因是实现已改用 `device_id` 而测试仍断言 `edge_id`，属于分支基线既有问题；其余 117 文件/684 tests 通过。默认并发下另有 7 个测试文件因超时失败，单独运行均通过，是资源争用而非本次回归。P1 的模型组拖拽、触发器日期/过滤/通知投递、模型级自动发现、快捷启停开关和更完整的 choice webhook/脚本编辑器不在本次范围。cantor 数据迁移在独立的 `feat/cmdb-cantor-data-migration` 分支处理，不在本分支混入。
 

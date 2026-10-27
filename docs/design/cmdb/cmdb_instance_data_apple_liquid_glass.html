@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>资源数据 · 产品 (CMDB 实例管理) - Apple Liquid Glass</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Font Awesome 6 Pro / Free CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <!-- Inter & SF Pro Standard Web Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Text', 'Inter', 'sans-serif'],
+            mono: ['SF Mono', 'Fira Code', 'Menlo', 'monospace'],
+          },
+          colors: {
+            glass: {
+              light: 'rgba(255, 255, 255, 0.65)',
+              'light-hover': 'rgba(255, 255, 255, 0.85)',
+              dark: 'rgba(18, 22, 36, 0.65)',
+              'dark-hover': 'rgba(28, 34, 54, 0.8)',
+              border: 'rgba(255, 255, 255, 0.25)',
+              'border-dark': 'rgba(255, 255, 255, 0.08)',
+            },
+            apple: {
+              blue: '#007AFF',
+              purple: '#5E5CE6',
+              cyan: '#32ADE6',
+              green: '#34C759',
+              orange: '#FF9500',
+              pink: '#FF2D55',
+              red: '#FF3B30',
+            }
+          },
+          boxShadow: {
+            'liquid': '0 20px 50px rgba(0, 0, 0, 0.12), 0 10px 20px rgba(0, 0, 0, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.4)',
+            'liquid-dark': '0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.12)',
+            'glow-blue': '0 0 25px rgba(0, 122, 255, 0.4)',
+          },
+          animation: {
+            'blob': 'blob 14s infinite alternate ease-in-out',
+            'blob-reverse': 'blob-reverse 18s infinite alternate ease-in-out',
+          },
+          keyframes: {
+            blob: {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '50%': { transform: 'translate(50px, -30px) scale(1.12)' },
+              '100%': { transform: 'translate(-40px, 40px) scale(0.95)' },
+            },
+            'blob-reverse': {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '50%': { transform: 'translate(-60px, 50px) scale(1.08)' },
+              '100%': { transform: 'translate(30px, -20px) scale(0.92)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Custom Apple Liquid Glass Style Tokens */
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.6);
+      backdrop-filter: blur(28px) saturate(190%);
+      -webkit-backdrop-filter: blur(28px) saturate(190%);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      box-shadow: 0 16px 40px rgba(31, 38, 135, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    }
+    
+    .dark .glass-panel {
+      background: rgba(18, 22, 36, 0.65);
+      backdrop-filter: blur(30px) saturate(180%);
+      -webkit-backdrop-filter: blur(30px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    .glass-input {
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+    }
+    .dark .glass-input {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .glass-button-primary {
+      background: linear-gradient(135deg, rgba(0, 122, 255, 0.95), rgba(94, 92, 230, 0.95));
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 24px rgba(0, 122, 255, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.5);
+    }
+    .glass-button-primary:hover {
+      background: linear-gradient(135deg, rgba(0, 122, 255, 1), rgba(94, 92, 230, 1));
+      box-shadow: 0 10px 28px rgba(0, 122, 255, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.7);
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(140, 140, 140, 0.3); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(140, 140, 140, 0.5); }
+  </style>
+</head>
+
+<body class="min-h-screen text-slate-800 dark:text-slate-100 transition-colors duration-300 relative overflow-x-hidden bg-slate-100 dark:bg-slate-950 font-sans">
+
+  <!-- Ambient Organic Mesh Background (Liquid Glass Light Spheres) -->
+  <div class="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+    <div class="absolute -top-40 -left-40 w-[600px] h-[600px] bg-gradient-to-tr from-blue-600/25 to-indigo-500/25 dark:from-blue-700/20 dark:to-indigo-900/20 rounded-full blur-3xl animate-blob"></div>
+    <div class="absolute top-1/3 -right-40 w-[650px] h-[650px] bg-gradient-to-br from-purple-500/20 to-pink-500/20 dark:from-purple-900/20 dark:to-pink-900/15 rounded-full blur-3xl animate-blob-reverse"></div>
+    <div class="absolute -bottom-40 left-1/3 w-[550px] h-[550px] bg-gradient-to-t from-cyan-400/20 to-teal-400/20 dark:from-cyan-900/20 dark:to-teal-900/15 rounded-full blur-3xl animate-blob"></div>
+  </div>
+
+  <!-- App Wrapper Structure -->
+  <div class="relative z-10 flex flex-col min-h-screen">
+
+    <!-- Sticky Top Navigation Glass Header -->
+    <header class="sticky top-0 z-40 px-4 sm:px-6 py-3">
+      <div class="max-w-[1600px] mx-auto glass-panel rounded-2xl px-5 py-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        
+        <!-- Breadcrumbs & Title -->
+        <div class="flex items-center space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-500 to-cyan-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+            <i class="fa-solid fa-cube text-lg"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-blue-600 dark:text-blue-400 tracking-wide uppercase">CMDB 资源实例</span>
+              <span class="text-xs text-slate-400 dark:text-slate-600">/</span>
+              <span class="text-base font-bold text-slate-900 dark:text-white tracking-tight">产品 (Product Instance)</span>
+            </div>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">一个模型下的实例。表单由模型属性生成，支持敏捷治理与全生命周期审计</p>
+          </div>
+        </div>
+
+        <!-- Global Quick Actions Bar -->
+        <div class="flex items-center space-x-3 self-end md:self-auto">
+          <!-- Dark/Light Theme Toggle -->
+          <button onclick="toggleTheme()" class="w-9 h-9 rounded-xl glass-panel flex items-center justify-center text-slate-700 dark:text-slate-200 hover:scale-105 active:scale-95 transition" title="切换显示模式">
+            <i class="fa-solid fa-moon dark:hidden text-indigo-600"></i>
+            <i class="fa-solid fa-sun hidden dark:block text-amber-400"></i>
+          </button>
+
+          <button onclick="showToast('数据实时刷成功！')" class="px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 glass-panel rounded-xl hover:bg-white/40 dark:hover:bg-white/10 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-rotate text-slate-400"></i>
+            <span>刷新</span>
+          </button>
+
+          <button onclick="showToast('打开批量导入界面')" class="px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 glass-panel rounded-xl hover:bg-white/40 dark:hover:bg-white/10 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-file-import text-slate-400"></i>
+            <span>批量导入</span>
+          </button>
+
+          <button onclick="openDrawer('新建实例', 'product')" class="px-4 py-2 text-xs font-semibold text-white glass-button-primary rounded-xl transition flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98]">
+            <i class="fa-solid fa-plus text-xs"></i>
+            <span>新建实例</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace (Sidebar + Main Data Area) -->
+    <div class="max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-4 flex-1 flex flex-col lg:flex-row gap-5">
+
+      <!-- LEFT SIDEBAR: Asset Models / Objects Selector -->
+      <aside class="w-full lg:w-64 shrink-0 space-y-4">
+        <div class="glass-panel p-4 rounded-2xl space-y-3">
+          
+          <div class="flex items-center justify-between px-1">
+            <h3 class="text-xs font-bold text-slate-400 dark:text-slate-400 tracking-wider uppercase">模型对象选择</h3>
+            <span class="text-[11px] text-blue-500 font-semibold cursor-pointer hover:underline" onclick="showToast('跳转至高级高级检索模型')">高级查询</span>
+          </div>
+
+          <!-- Model Search Box -->
+          <div class="relative">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-slate-400"></i>
+            <input type="text" id="modelSearchInput" onkeyup="filterModels()" placeholder="搜索模型 (物理机/产品...)" class="w-full glass-input pl-8 pr-3 py-1.5 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 text-slate-800 dark:text-slate-100 placeholder-slate-400">
+          </div>
+
+          <!-- Model Class List Pill Buttons -->
+          <nav class="space-y-1 max-h-[calc(100vh-280px)] overflow-y-auto pr-1" id="modelList">
+            
+            <a href="#" class="model-item flex items-center justify-between px-3 py-2.5 rounded-xl bg-blue-600/90 text-white shadow-md shadow-blue-500/20 font-medium text-xs transition">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-box-archive text-xs"></i>
+                <span class="font-semibold">产品</span>
+              </div>
+              <span class="bg-white/20 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">80</span>
+            </a>
+
+            <a href="#" class="model-item flex items-center justify-between px-3 py-2.5 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-server text-slate-400 text-xs"></i>
+                <span>物理机</span>
+              </div>
+              <span class="bg-slate-200/60 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-full">142</span>
+            </a>
+
+            <a href="#" class="model-item flex items-center justify-between px-3 py-2.5 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-cloud text-slate-400 text-xs"></i>
+                <span>虚拟机</span>
+              </div>
+              <span class="bg-slate-200/60 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-full">850</span>
+            </a>
+
+            <a href="#" class="model-item flex items-center justify-between px-3 py-2.5 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-memory text-slate-400 text-xs"></i>
+                <span>内存</span>
+              </div>
+              <span class="bg-slate-200/60 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-full">3,200</span>
+            </a>
+
+            <a href="#" class="model-item flex items-center justify-between px-3 py-2.5 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-hard-drive text-slate-400 text-xs"></i>
+                <span>硬盘</span>
+              </div>
+              <span class="bg-slate-200/60 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-full">1,120</span>
+            </a>
+
+            <a href="#" class="model-item flex items-center justify-between px-3 py-2.5 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-network-wired text-slate-400 text-xs"></i>
+                <span>网卡 / 接口</span>
+              </div>
+              <span class="bg-slate-200/60 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-full">640</span>
+            </a>
+
+            <a href="#" class="model-item flex items-center justify-between px-3 py-2.5 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-diagram-next text-slate-400 text-xs"></i>
+                <span>交换机</span>
+              </div>
+              <span class="bg-slate-200/60 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-full">48</span>
+            </a>
+
+            <a href="#" class="model-item flex items-center justify-between px-3 py-2.5 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-shield-halved text-slate-400 text-xs"></i>
+                <span>防火墙</span>
+              </div>
+              <span class="bg-slate-200/60 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-full">16</span>
+            </a>
+
+          </nav>
+        </div>
+      </aside>
+
+      <!-- RIGHT MAIN CONTENT AREA -->
+      <main class="flex-1 space-y-4 overflow-hidden">
+
+        <!-- Top Overview Glass KPI Cards Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="glass-panel p-3.5 rounded-2xl flex items-center justify-between">
+            <div>
+              <p class="text-[11px] font-medium text-slate-500 dark:text-slate-400">实例总数</p>
+              <h4 class="text-xl font-bold text-slate-900 dark:text-white mt-0.5">80 <span class="text-xs font-normal text-slate-400">个</span></h4>
+            </div>
+            <div class="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
+              <i class="fa-solid fa-boxes-stacked text-sm"></i>
+            </div>
+          </div>
+
+          <div class="glass-panel p-3.5 rounded-2xl flex items-center justify-between">
+            <div>
+              <p class="text-[11px] font-medium text-slate-500 dark:text-slate-400">运行状态 (Active)</p>
+              <h4 class="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">98.5%</h4>
+            </div>
+            <div class="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+              <i class="fa-solid fa-chart-line text-sm"></i>
+            </div>
+          </div>
+
+          <div class="glass-panel p-3.5 rounded-2xl flex items-center justify-between">
+            <div>
+              <p class="text-[11px] font-medium text-slate-500 dark:text-slate-400">生产环境 (Prod)</p>
+              <h4 class="text-xl font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">64 <span class="text-xs font-normal text-slate-400">个</span></h4>
+            </div>
+            <div class="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+              <i class="fa-solid fa-server text-sm"></i>
+            </div>
+          </div>
+
+          <div class="glass-panel p-3.5 rounded-2xl flex items-center justify-between">
+            <div>
+              <p class="text-[11px] font-medium text-slate-500 dark:text-slate-400">SLA 达标率</p>
+              <h4 class="text-xl font-bold text-cyan-600 dark:text-cyan-400 mt-0.5">99.99%</h4>
+            </div>
+            <div class="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center">
+              <i class="fa-solid fa-shield-check text-sm"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filter & Control Toolbar Bar -->
+        <div class="glass-panel p-3 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <!-- Filter Tags / Pill Selectors -->
+          <div class="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 custom-scrollbar">
+            <span class="text-xs font-semibold text-slate-400 shrink-0">筛选:</span>
+            
+            <button onclick="filterEnv('all')" class="env-pill px-3 py-1 rounded-xl bg-blue-600 text-white font-medium text-xs shadow-sm whitespace-nowrap">全部环境</button>
+            <button onclick="filterEnv('prod')" class="env-pill px-3 py-1 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition whitespace-nowrap">PROD 生产</button>
+            <button onclick="filterEnv('test')" class="env-pill px-3 py-1 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-white/40 dark:hover:bg-white/5 font-medium text-xs transition whitespace-nowrap">TEST 测试</button>
+
+            <span class="h-4 w-[1px] bg-slate-300 dark:bg-slate-700 mx-1"></span>
+
+            <button onclick="filterLevel('critical')" class="px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-medium border border-rose-500/20 whitespace-nowrap hover:scale-105 transition">Critical 极高</button>
+            <button onclick="filterLevel('important')" class="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-medium border border-amber-500/20 whitespace-nowrap hover:scale-105 transition">Important 重要</button>
+          </div>
+
+          <!-- Search & View Layout Switcher -->
+          <div class="flex items-center gap-3">
+            <div class="relative w-full sm:w-64">
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-slate-400"></i>
+              <input type="text" id="tableSearchInput" onkeyup="handleTableSearch()" placeholder="搜索名称、代码或别名..." class="w-full glass-input pl-8 pr-3 py-1.5 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 text-slate-800 dark:text-slate-100 placeholder-slate-400">
+            </div>
+
+            <!-- View Switcher Toggle -->
+            <div class="flex glass-panel p-1 rounded-xl text-xs shrink-0">
+              <button id="btnTableView" onclick="toggleViewMode('table')" class="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 font-semibold shadow-sm transition">
+                <i class="fa-solid fa-table-list"></i>
+              </button>
+              <button id="btnCardView" onclick="toggleViewMode('card')" class="px-2.5 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition">
+                <i class="fa-solid fa-border-all"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MAIN TABLE VIEW CONTAINER -->
+        <div id="tableView" class="glass-panel rounded-2xl overflow-hidden transition-all duration-300">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-500/5 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-200/50 dark:border-slate-800/50">
+                <tr>
+                  <th class="py-3 px-4">代码标识</th>
+                  <th class="py-3 px-4">产品实例名称 / 别名</th>
+                  <th class="py-3 px-3">等级</th>
+                  <th class="py-3 px-3">SLA</th>
+                  <th class="py-3 px-3">环境</th>
+                  <th class="py-3 px-3">数据状态</th>
+                  <th class="py-3 px-4">干系责任人 (维护/治理/研发)</th>
+                  <th class="py-3 px-4 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200/40 dark:divide-white/5 font-medium" id="instanceTableBody">
+                
+                <!-- Row 1 -->
+                <tr class="data-row hover:bg-white/40 dark:hover:bg-white/5 transition cursor-pointer" data-env="prod" data-level="normal" onclick="openDrawer('AI 运维智能体', 'prdt-20260618-0001')">
+                  <td class="py-3.5 px-4 font-mono text-slate-500 dark:text-slate-400">prdt-20260618-0001</td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                      <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">AI 运维智能体</span>
+                      <span class="text-slate-400 text-[11px]">(AI 运维智能体)</span>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-semibold">normal</span></td>
+                  <td class="py-3.5 px-3 font-mono text-slate-600 dark:text-slate-300">2353</td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold border border-emerald-500/20">prod</span></td>
+                  <td class="py-3.5 px-3"><span class="text-emerald-500 font-semibold"><i class="fa-solid fa-circle text-[8px] mr-1"></i>active</span></td>
+                  <td class="py-3.5 px-4">
+                    <!-- Avatars Stack -->
+                    <div class="flex items-center -space-x-2">
+                      <div class="w-6 h-6 rounded-full bg-blue-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="资产维护人: 张三(369)">369</div>
+                      <div class="w-6 h-6 rounded-full bg-purple-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="运维负责人: 李四(369)">369</div>
+                      <div class="w-6 h-6 rounded-full bg-indigo-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="研发负责人: 王五(369)">369</div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4 text-right space-x-2" onclick="event.stopPropagation()">
+                    <button onclick="openDrawer('AI 运维智能体', 'prdt-20260618-0001')" class="text-blue-500 hover:underline"><i class="fa-solid fa-pen-to-square"></i> 编辑</button>
+                    <button onclick="confirmDelete('AI 运维智能体')" class="text-rose-500 hover:underline"><i class="fa-solid fa-trash-can"></i> 删除</button>
+                  </td>
+                </tr>
+
+                <!-- Row 2 -->
+                <tr class="data-row hover:bg-white/40 dark:hover:bg-white/5 transition cursor-pointer" data-env="prod" data-level="normal" onclick="openDrawer('自研多彩门户系统', 'prdt-20260617-0028')">
+                  <td class="py-3.5 px-4 font-mono text-slate-500 dark:text-slate-400">prdt-20260617-0028</td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                      <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">自研多彩门户系统</span>
+                      <span class="text-slate-400 text-[11px]">(自研多彩门户系统)</span>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-semibold">normal</span></td>
+                  <td class="py-3.5 px-3 font-mono text-slate-600 dark:text-slate-300">2353</td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold border border-emerald-500/20">prod</span></td>
+                  <td class="py-3.5 px-3"><span class="text-emerald-500 font-semibold"><i class="fa-solid fa-circle text-[8px] mr-1"></i>active</span></td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center -space-x-2">
+                      <div class="w-6 h-6 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="维护人: 374">374</div>
+                      <div class="w-6 h-6 rounded-full bg-amber-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="产品负责人: 387">387</div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4 text-right space-x-2" onclick="event.stopPropagation()">
+                    <button onclick="openDrawer('自研多彩门户系统', 'prdt-20260617-0028')" class="text-blue-500 hover:underline"><i class="fa-solid fa-pen-to-square"></i> 编辑</button>
+                    <button onclick="confirmDelete('自研多彩门户系统')" class="text-rose-500 hover:underline"><i class="fa-solid fa-trash-can"></i> 删除</button>
+                  </td>
+                </tr>
+
+                <!-- Row 3 (Critical) -->
+                <tr class="data-row hover:bg-white/40 dark:hover:bg-white/5 transition cursor-pointer" data-env="prod" data-level="critical" onclick="openDrawer('公有云资源管理产品', 'prdt-20260617-0011')">
+                  <td class="py-3.5 px-4 font-mono text-slate-500 dark:text-slate-400">prdt-20260617-0011</td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
+                      <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">公有云资源管理产品</span>
+                      <span class="text-slate-400 text-[11px]">(公有云资源管理)</span>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-600 dark:text-rose-400 text-[11px] font-bold border border-rose-500/30">critical</span></td>
+                  <td class="py-3.5 px-3 font-mono text-slate-600 dark:text-slate-300">2351</td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold border border-emerald-500/20">prod</span></td>
+                  <td class="py-3.5 px-3"><span class="text-emerald-500 font-semibold"><i class="fa-solid fa-circle text-[8px] mr-1"></i>active</span></td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center -space-x-2">
+                      <div class="w-6 h-6 rounded-full bg-cyan-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="维护人: 371">371</div>
+                      <div class="w-6 h-6 rounded-full bg-pink-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="治理负责人: 371">371</div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4 text-right space-x-2" onclick="event.stopPropagation()">
+                    <button onclick="openDrawer('公有云资源管理产品', 'prdt-20260617-0011')" class="text-blue-500 hover:underline"><i class="fa-solid fa-pen-to-square"></i> 编辑</button>
+                    <button onclick="confirmDelete('公有云资源管理产品')" class="text-rose-500 hover:underline"><i class="fa-solid fa-trash-can"></i> 删除</button>
+                  </td>
+                </tr>
+
+                <!-- Row 4 (Important) -->
+                <tr class="data-row hover:bg-white/40 dark:hover:bg-white/5 transition cursor-pointer" data-env="prod" data-level="important" onclick="openDrawer('基础软件及中间件产品', 'prdt-20260617-0007')">
+                  <td class="py-3.5 px-4 font-mono text-slate-500 dark:text-slate-400">prdt-20260617-0007</td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                      <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">基础软件及中间件产品</span>
+                      <span class="text-slate-400 text-[11px]">(中间件)</span>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[11px] font-bold border border-amber-500/30">important</span></td>
+                  <td class="py-3.5 px-3 font-mono text-slate-600 dark:text-slate-300">2352</td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold border border-emerald-500/20">prod</span></td>
+                  <td class="py-3.5 px-3"><span class="text-emerald-500 font-semibold"><i class="fa-solid fa-circle text-[8px] mr-1"></i>active</span></td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center -space-x-2">
+                      <div class="w-6 h-6 rounded-full bg-blue-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="维护人: 369">369</div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4 text-right space-x-2" onclick="event.stopPropagation()">
+                    <button onclick="openDrawer('基础软件及中间件产品', 'prdt-20260617-0007')" class="text-blue-500 hover:underline"><i class="fa-solid fa-pen-to-square"></i> 编辑</button>
+                    <button onclick="confirmDelete('基础软件及中间件产品')" class="text-rose-500 hover:underline"><i class="fa-solid fa-trash-can"></i> 删除</button>
+                  </td>
+                </tr>
+
+                <!-- Row 5 (Test env) -->
+                <tr class="data-row hover:bg-white/40 dark:hover:bg-white/5 transition cursor-pointer" data-env="test" data-level="normal" onclick="openDrawer('生产数据查询应用系统', 'prdt-20260529-0001')">
+                  <td class="py-3.5 px-4 font-mono text-slate-500 dark:text-slate-400">prdt-20260529-0001</td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2 h-2 rounded-full bg-slate-400"></div>
+                      <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">生产数据查询应用系统</span>
+                      <span class="text-slate-400 text-[11px]">(数据查询系统)</span>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-semibold">normal</span></td>
+                  <td class="py-3.5 px-3 font-mono text-slate-600 dark:text-slate-300">2355</td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[11px] font-semibold border border-purple-500/20">test</span></td>
+                  <td class="py-3.5 px-3"><span class="text-emerald-500 font-semibold"><i class="fa-solid fa-circle text-[8px] mr-1"></i>active</span></td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center -space-x-2">
+                      <div class="w-6 h-6 rounded-full bg-teal-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="维护人: 373">373</div>
+                      <div class="w-6 h-6 rounded-full bg-purple-500 text-white text-[10px] flex items-center justify-center font-bold ring-2 ring-white dark:ring-slate-900" title="研发负责人: 403">403</div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4 text-right space-x-2" onclick="event.stopPropagation()">
+                    <button onclick="openDrawer('生产数据查询应用系统', 'prdt-20260529-0001')" class="text-blue-500 hover:underline"><i class="fa-solid fa-pen-to-square"></i> 编辑</button>
+                    <button onclick="confirmDelete('生产数据查询应用系统')" class="text-rose-500 hover:underline"><i class="fa-solid fa-trash-can"></i> 删除</button>
+                  </td>
+                </tr>
+
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Glass Table Footer & Pagination -->
+          <div class="px-6 py-3 bg-white/40 dark:bg-white/5 border-t border-slate-200/40 dark:border-white/5 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+            <div>显示 1 - 20 项，共 <b class="text-slate-800 dark:text-slate-200">80</b> 条记录</div>
+            <div class="flex items-center gap-2">
+              <button class="px-3 py-1 rounded-lg glass-panel hover:bg-white/50 text-slate-400 cursor-not-allowed" disabled>上一页</button>
+              <button class="w-7 h-7 rounded-lg bg-blue-600 text-white font-bold flex items-center justify-center shadow-sm">1</button>
+              <button class="w-7 h-7 rounded-lg glass-panel hover:bg-white/50 flex items-center justify-center">2</button>
+              <button class="w-7 h-7 rounded-lg glass-panel hover:bg-white/50 flex items-center justify-center">3</button>
+              <button class="px-3 py-1 rounded-lg glass-panel hover:bg-white/50 text-slate-700 dark:text-slate-200">下一页</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- GRID CARD VIEW (Hidden by default) -->
+        <div id="cardView" class="hidden grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <!-- Card 1 -->
+          <div class="glass-panel p-4 rounded-2xl hover:border-blue-500/40 transition group cursor-pointer" onclick="openDrawer('AI 运维智能体', 'prdt-20260618-0001')">
+            <div class="flex items-start justify-between">
+              <div>
+                <span class="text-[10px] font-mono text-slate-400">prdt-20260618-0001</span>
+                <h4 class="text-base font-bold text-slate-900 dark:text-white mt-0.5">AI 运维智能体</h4>
+              </div>
+              <span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 text-[11px] font-semibold">prod</span>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-200/40 dark:border-white/10 flex items-center justify-between text-xs">
+              <span class="text-slate-400">等级: <b class="text-blue-500">Normal</b></span>
+              <span class="text-slate-400">SLA: <b class="text-slate-700 dark:text-slate-200">2353</b></span>
+            </div>
+          </div>
+        </div>
+
+      </main>
+
+    </div>
+
+    <!-- RIGHT SLIDE-OVER DRAWER (Asset Instance Liquid Glass Panel) -->
+    <div id="detailDrawer" class="fixed inset-0 bg-slate-950/40 backdrop-blur-md flex justify-end hidden z-50 transition-opacity duration-300">
+      <div class="glass-panel w-full max-w-xl h-full p-6 shadow-2xl flex flex-col justify-between border-l border-white/30 dark:border-white/10 transform translate-x-full transition-transform duration-300" id="drawerContainer">
+        
+        <!-- Drawer Header -->
+        <div>
+          <div class="flex items-center justify-between pb-4 border-b border-slate-200/40 dark:border-white/10">
+            <div>
+              <span class="text-xs font-mono text-blue-500 font-semibold" id="drawerCode">prdt-20260618-0001</span>
+              <h3 class="text-lg font-bold text-slate-900 dark:text-white" id="drawerTitle">实例详情</h3>
+            </div>
+            <button onclick="closeDrawer()" class="w-8 h-8 rounded-full glass-panel flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <!-- Drawer Body Content Tabs -->
+          <div class="mt-4 space-y-4 text-xs overflow-y-auto max-h-[calc(100vh-180px)] pr-1">
+            
+            <!-- Metadata Grid -->
+            <div class="glass-panel p-4 rounded-xl space-y-3">
+              <h4 class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <i class="fa-solid fa-circle-info text-blue-500"></i>
+                基本配置参数
+              </h4>
+              <div class="grid grid-cols-2 gap-3 text-slate-600 dark:text-slate-300">
+                <div><span class="text-slate-400">环境类型:</span> <b class="text-slate-800 dark:text-slate-100">PROD 生产环境</b></div>
+                <div><span class="text-slate-400">SLA 级别:</span> <b class="text-slate-800 dark:text-slate-100">2353 (99.99%)</b></div>
+                <div><span class="text-slate-400">等级划分:</span> <b class="text-blue-500">Normal 普通级</b></div>
+                <div><span class="text-slate-400">资质分类:</span> <b>3785 (通用)</b></div>
+                <div><span class="text-slate-400">AI 读写权限:</span> <b class="text-emerald-500">RW 读写开放</b></div>
+                <div><span class="text-slate-400">数据状态:</span> <b class="text-emerald-500">Active 活动中</b></div>
+              </div>
+            </div>
+
+            <!-- Governance Personnel Roles -->
+            <div class="glass-panel p-4 rounded-xl space-y-3">
+              <h4 class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <i class="fa-solid fa-users-gear text-purple-500"></i>
+                干系治理责任人
+              </h4>
+              <div class="space-y-2">
+                <div class="flex items-center justify-between p-2 rounded-lg bg-white/30 dark:bg-white/5">
+                  <span class="text-slate-500">资产维护人</span>
+                  <span class="font-semibold text-slate-800 dark:text-slate-200">张三 (ID: 369)</span>
+                </div>
+                <div class="flex items-center justify-between p-2 rounded-lg bg-white/30 dark:bg-white/5">
+                  <span class="text-slate-500">运维负责人</span>
+                  <span class="font-semibold text-slate-800 dark:text-slate-200">李四 (ID: 369)</span>
+                </div>
+                <div class="flex items-center justify-between p-2 rounded-lg bg-white/30 dark:bg-white/5">
+                  <span class="text-slate-500">研发负责人</span>
+                  <span class="font-semibold text-slate-800 dark:text-slate-200">王五 (ID: 369)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Audit Trail -->
+            <div class="glass-panel p-4 rounded-xl space-y-2">
+              <h4 class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <i class="fa-solid fa-clock-rotate-left text-amber-500"></i>
+                审计变更记录
+              </h4>
+              <p class="text-slate-400 text-[11px]">最后修改人: admin_user (2026-10-25 14:32:00)</p>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Drawer Footer Buttons -->
+        <div class="pt-4 border-t border-slate-200/40 dark:border-white/10 flex items-center justify-end gap-3">
+          <button onclick="closeDrawer()" class="px-4 py-2 rounded-xl glass-panel text-slate-600 dark:text-slate-300 font-medium hover:bg-white/40 transition">关闭</button>
+          <button onclick="showToast('保存设置已生效');closeDrawer();" class="px-5 py-2 rounded-xl glass-button-primary text-white font-semibold transition hover:scale-105 active:scale-95 shadow-md">保存变更</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Liquid Toast Message Notification -->
+    <div id="toast" class="fixed bottom-6 right-6 glass-panel px-5 py-3 rounded-2xl shadow-liquid dark:shadow-liquid-dark text-xs flex items-center gap-3 border border-white/50 dark:border-white/10 transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+      <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center">
+        <i class="fa-solid fa-circle-check text-xs"></i>
+      </div>
+      <span id="toastMsg" class="font-medium text-slate-800 dark:text-slate-100">操作成功</span>
+    </div>
+
+  </div>
+
+  <!-- Interactive JavaScript -->
+  <script>
+    // Dark / Light Mode Switcher
+    function toggleTheme() {
+      const html = document.documentElement;
+      if (html.classList.contains('dark')) {
+        html.classList.remove('dark');
+        showToast('已切换至 Apple Liquid 浅色模式');
+      } else {
+        html.classList.add('dark');
+        showToast('已切换至 Apple Liquid 深色模式');
+      }
+    }
+
+    // Toggle View Mode (Table vs Card Grid)
+    function toggleViewMode(mode) {
+      const table = document.getElementById('tableView');
+      const card = document.getElementById('cardView');
+      const btnTable = document.getElementById('btnTableView');
+      const btnCard = document.getElementById('btnCardView');
+
+      if (mode === 'table') {
+        table.classList.remove('hidden');
+        card.classList.add('hidden');
+        btnTable.className = "px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 font-semibold shadow-sm transition";
+        btnCard.className = "px-2.5 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition";
+      } else {
+        card.classList.remove('hidden');
+        table.classList.add('hidden');
+        btnCard.className = "px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 font-semibold shadow-sm transition";
+        btnTable.className = "px-2.5 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition";
+      }
+    }
+
+    // Slide-Over Drawer Controls
+    function openDrawer(title, code) {
+      const drawer = document.getElementById('detailDrawer');
+      const container = document.getElementById('drawerContainer');
+      document.getElementById('drawerTitle').innerText = title;
+      document.getElementById('drawerCode').innerText = code;
+      
+      drawer.classList.remove('hidden');
+      setTimeout(() => {
+        container.classList.remove('translate-x-full');
+      }, 10);
+    }
+
+    function closeDrawer() {
+      const drawer = document.getElementById('detailDrawer');
+      const container = document.getElementById('drawerContainer');
+      container.classList.add('translate-x-full');
+      setTimeout(() => {
+        drawer.classList.add('hidden');
+      }, 300);
+    }
+
+    // Toast Notification logic
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toastMsg').innerText = msg;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 2500);
+    }
+
+    // Table Real-Time Search
+    function handleTableSearch() {
+      const query = document.getElementById('tableSearchInput').value.toLowerCase();
+      const rows = document.querySelectorAll('.data-row');
+      rows.forEach(r => {
+        const text = r.innerText.toLowerCase();
+        r.style.display = text.includes(query) ? '' : 'none';
+      });
+    }
+
+    // Filter by Environment
+    function filterEnv(env) {
+      const rows = document.querySelectorAll('.data-row');
+      rows.forEach(r => {
+        if (env === 'all' || r.getAttribute('data-env') === env) {
+          r.style.display = '';
+        } else {
+          r.style.display = 'none';
+        }
+      });
+    }
+
+    // Filter by Level
+    function filterLevel(level) {
+      const rows = document.querySelectorAll('.data-row');
+      rows.forEach(r => {
+        if (r.getAttribute('data-level') === level) {
+          r.style.display = '';
+        } else {
+          r.style.display = 'none';
+        }
+      });
+    }
+
+    // Filter Sidebar Models
+    function filterModels() {
+      const q = document.getElementById('modelSearchInput').value.toLowerCase();
+      const items = document.querySelectorAll('.model-item');
+      items.forEach(item => {
+        item.style.display = item.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    function confirmDelete(name) {
+      showToast(`已发起删除逻辑校验: ${name}`);
+    }
+  </script>
+</body>
+</html>

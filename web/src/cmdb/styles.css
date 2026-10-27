@@ -409,3 +409,71 @@ html.dark .cmdb-liquid-policy.is-shown {
     height: 280px;
   }
 }
+
+.cmdb-liquid-model-item {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: 0.7rem;
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  color: rgb(var(--text-muted));
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.cmdb-liquid-model-item:hover {
+  background: var(--liquid-row-hover);
+  color: rgb(var(--text));
+}
+
+.cmdb-liquid-model-item.is-active {
+  background: linear-gradient(135deg, #0a84ff, #5e5ce6);
+  color: #fff;
+  box-shadow: 0 8px 20px rgb(0 122 255 / 0.22);
+}
+
+.cmdb-liquid-model-item.is-active .cmdb-liquid-model-key {
+  color: rgb(255 255 255 / 0.72);
+}
+
+.cmdb-liquid-model-key {
+  margin-top: 0.1rem;
+  color: rgb(var(--text-faint));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
+
+.cmdb-liquid-pill {
+  height: 1.75rem;
+  border: 1px solid var(--liquid-border-soft);
+  border-radius: 0.6rem;
+  background: transparent;
+  padding: 0 0.65rem;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgb(var(--text-muted));
+}
+
+.cmdb-liquid-pill:hover:not(:disabled) {
+  background: var(--liquid-row-hover);
+  color: rgb(var(--text));
+}
+
+.cmdb-liquid-pill.is-active {
+  border-color: transparent;
+  background: linear-gradient(135deg, #0a84ff, #5e5ce6);
+  color: #fff;
+  box-shadow: 0 5px 14px rgb(0 122 255 / 0.24);
+}
+
+.cmdb-liquid .cmdb-liquid-page-footer {
+  background: transparent;
+  border-color: var(--liquid-border-soft);
+  color: rgb(var(--text-muted));
+}
+
+.cmdb-liquid .cmdb-liquid-page-footer > span {
+  color: rgb(var(--text-faint));
+}

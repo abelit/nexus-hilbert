@@ -99,6 +99,36 @@ describe('the list', () => {
     expect(screen.queryByRole('columnheader', { name: 'root_password' })).not.toBeInTheDocument();
   });
 
+  it('filters by environment and switches to the card grid', async () => {
+    const user = userEvent.setup();
+    handlers([
+      { ci_id: 5, type_id: 1, values: { hostname: 'web-01', environment: 'prod', level: 'critical' } },
+      { ci_id: 6, type_id: 1, values: { hostname: 'web-02', environment: 'test', level: 'normal' } },
+    ]);
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/host/attributes', () =>
+        HttpResponse.json({
+          type_id: 1,
+          unique_id: 10,
+          unique: 'hostname',
+          attributes: [...attributes, attribute(13, 'environment'), attribute(14, 'level')],
+        }),
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByText('web-01')).toBeInTheDocument();
+    expect(screen.getByText('web-02')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'PROD' }));
+    expect(screen.queryByText('web-02')).not.toBeInTheDocument();
+    expect(screen.getByText('web-01')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '网格' }));
+    expect(await screen.findByRole('heading', { name: 'web-01' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '编辑实例 5' })).toBeInTheDocument();
+  });
+
   it('says when a model cannot hold instances', async () => {
     // NO ROWS, so the empty state is what draws — and it has to explain the
     // model rather than say "no data".
