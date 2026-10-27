@@ -360,14 +360,19 @@ export function listRelations(): Promise<ModelRelation[]> {
   return cmdbGet<ListResponse<ModelRelation>>('/ci-type-relations').then((got) => got.items ?? []);
 }
 
-export function relationChildren(ref: string | number): Promise<ModelRelation[]> {
-  return cmdbGet<ListResponse<ModelRelation>>(`/ci-types/${encodeURIComponent(String(ref))}/relation-children`).then(
+// THE PER-MODEL READS RETURN THE OTHER END, NOT A PAIR. Only the global
+// /ci-type-relations list wraps both ends in parent/child; these two endpoints
+// return the related model on the far side of each edge. Typing them as
+// ModelRelation[] made the relations tab dereference `relation.child.type` on
+// a one-sided object and blank the page.
+export function relationChildren(ref: string | number): Promise<RelatedType[]> {
+  return cmdbGet<ListResponse<RelatedType>>(`/ci-types/${encodeURIComponent(String(ref))}/relation-children`).then(
     (got) => got.items ?? [],
   );
 }
 
-export function relationParents(ref: string | number): Promise<ModelRelation[]> {
-  return cmdbGet<ListResponse<ModelRelation>>(`/ci-types/${encodeURIComponent(String(ref))}/relation-parents`).then(
+export function relationParents(ref: string | number): Promise<RelatedType[]> {
+  return cmdbGet<ListResponse<RelatedType>>(`/ci-types/${encodeURIComponent(String(ref))}/relation-parents`).then(
     (got) => got.items ?? [],
   );
 }

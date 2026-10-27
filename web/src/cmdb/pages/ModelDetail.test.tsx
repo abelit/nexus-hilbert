@@ -164,21 +164,22 @@ describe('the other tabs', () => {
     const user = userEvent.setup();
     baseHandlers();
     server.use(
+      // THE CHILDREN ENDPOINT RETURNS THE OTHER END, NOT A parent/child PAIR.
+      // The global /ci-type-relations list is the only API that returns both
+      // ends; using its shape here made the tab crash as soon as a model had
+      // one child.
       http.get('/api/v1/cmdb/ci-types/1/relation-children', () =>
         HttpResponse.json({
           items: [
             {
-              id: 7,
-              parent: { ctr_id: 7, type: model, attributes: [], relation_type: { id: 1, name: '包含', color: '#6366f1' }, constraint: '0', parent_attr_ids: [], child_attr_ids: [] },
-              child: {
-                ctr_id: 7,
-                type: { ...model, id: 2, name: 'disk', alias: '磁盘' },
-                attributes: [],
-                relation_type: { id: 1, name: '包含', color: '#6366f1' },
-                constraint: '0',
-                parent_attr_ids: [],
-                child_attr_ids: [],
-              },
+              ctr_id: 7,
+              type: { ...model, id: 2, name: 'disk', alias: '磁盘' },
+              show_key: 'name',
+              attributes: [],
+              relation_type: { id: 1, name: '包含', color: '#6366f1' },
+              constraint: '0',
+              parent_attr_ids: [],
+              child_attr_ids: [],
             },
           ],
           total: 1,
@@ -193,6 +194,46 @@ describe('the other tabs', () => {
     expect(await screen.findByRole('link', { name: '磁盘' })).toBeInTheDocument();
     expect(screen.getByText('子模型')).toBeInTheDocument();
     expect(screen.getByText('1-N')).toBeInTheDocument();
+  });
+
+  it('shows parent relations and deletes them by the edge id', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    let deleted = '';
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-parents', () =>
+        HttpResponse.json({
+          items: [
+            {
+              ctr_id: 88,
+              type: { ...model, id: 3, name: 'rack', alias: '机柜' },
+              show_key: 'name',
+              attributes: [],
+              relation_type: { id: 2, name: '属于', color: '#f59e0b' },
+              constraint: '1',
+              parent_attr_ids: [],
+              child_attr_ids: [],
+            },
+          ],
+          total: 1,
+        }),
+      ),
+      http.delete('/api/v1/cmdb/ci-type-relations/:id', ({ params }) => {
+        deleted = String(params.id);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '模型关系' }));
+    expect(await screen.findByRole('link', { name: '机柜' })).toBeInTheDocument();
+    expect(screen.getByText('父模型')).toBeInTheDocument();
+    expect(screen.getByText('1-1')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '删除与 rack 的关系' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '确认' }));
+    await waitFor(() => expect(deleted).toBe('88'));
   });
 
   it('creates a relation with the wire cardinality code', async () => {

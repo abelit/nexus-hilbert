@@ -31,7 +31,7 @@ import {
   saveRelation,
   updateTrigger,
   type CIType,
-  type ModelRelation,
+  type RelatedType,
   type Trigger,
   type TypeAttribute,
   type UniqueConstraint,
@@ -67,8 +67,8 @@ export function RelationsTab({
   const { tr } = useI18n();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
-  const [children, setChildren] = useState<ModelRelation[]>([]);
-  const [parents, setParents] = useState<ModelRelation[]>([]);
+  const [children, setChildren] = useState<RelatedType[]>([]);
+  const [parents, setParents] = useState<RelatedType[]>([]);
   const [models, setModels] = useState<CIType[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState<Direction | null>(null);
@@ -97,8 +97,8 @@ export function RelationsTab({
     void load();
   }, [load]);
 
-  const remove = async (relation: ModelRelation) => {
-    const other = relation.parent.type.id === Number(modelRef) ? relation.child.type : relation.parent.type;
+  const remove = async (relation: RelatedType) => {
+    const other = relation.type;
     const ok = await confirmAction(
       tr(
         `删除与「${other.alias || other.name}」的模型关系？已经存在的实例关系不会被删除。`,
@@ -107,7 +107,7 @@ export function RelationsTab({
     );
     if (!ok) return;
     try {
-      await deleteRelationById(relation.id);
+      await deleteRelationById(relation.ctr_id);
       toast.success(tr('已删除', 'Deleted'));
       await load();
     } catch (error) {
@@ -115,18 +115,20 @@ export function RelationsTab({
     }
   };
 
-  const rows: Array<{ direction: Direction; relation: ModelRelation; other: CIType; show: string }> = [
+  // Both reads return the model on the far side of the edge, so the direction
+  // is the only difference between the two row sets.
+  const rows: Array<{ direction: Direction; relation: RelatedType; other: CIType; show: string }> = [
     ...children.map((relation) => ({
       direction: 'children' as const,
       relation,
-      other: relation.child.type,
-      show: relation.child.show_key ?? '',
+      other: relation.type,
+      show: relation.show_key ?? '',
     })),
     ...parents.map((relation) => ({
       direction: 'parents' as const,
       relation,
-      other: relation.parent.type,
-      show: relation.parent.show_key ?? '',
+      other: relation.type,
+      show: relation.show_key ?? '',
     })),
   ];
 
@@ -157,7 +159,7 @@ export function RelationsTab({
       key: 'type',
       header: tr('关系类型', 'Relation type'),
       cell: (row) => {
-        const type = row.direction === 'children' ? row.relation.child.relation_type : row.relation.parent.relation_type;
+        const type = row.relation.relation_type;
         return (
           <span className="flex items-center gap-1.5">
             <span
@@ -175,9 +177,7 @@ export function RelationsTab({
       header: tr('基数', 'Cardinality'),
       cell: (row) => (
         <code className="font-mono text-[11px] text-text-muted">
-          {relationConstraintLabel(
-            row.direction === 'children' ? row.relation.child.constraint : row.relation.parent.constraint,
-          )}
+          {relationConstraintLabel(row.relation.constraint)}
         </code>
       ),
     },
@@ -215,7 +215,7 @@ export function RelationsTab({
         <DataTable
           columns={columns}
           rows={rows}
-          rowKey={(row) => row.relation.id}
+          rowKey={(row) => row.relation.ctr_id}
           loading={loading}
           error={err}
           onRetry={() => void load()}
