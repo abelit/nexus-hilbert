@@ -105,11 +105,11 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - `bash scripts/test-compose-release-package.sh` 通过（含新增的 uninstall 镜像断言）；`docker compose -f deploy/docker-compose.yml config` 通过。
 - 合并 `origin/main` 后重新验证：`go test ./...`、`go vet ./...`、`make test-race`（193 包）、`make test-integration`、前端 170 tests、`typecheck`、`build`、Playwright 144、release-package 脚本、`docker compose config` 全部通过。
 - `git diff --check` 通过；人工 import 边界核对通过（`cmdb/biz`→`cmdb/data`/其它 BC、`cmdb/server`→`cmdb/data`、`pkg`→BC、`cmd/ongrid`→`cmdb` 均为空）。
-- `make arch-lint` 仍未运行：本机无工具，且 `scripts/agent-observability/README.md:107` 已记录该配置在 go-arch-lint 1.12.0 下校验失败，属既有问题；不能记为通过。
+- `make arch-lint`：已用 `go-arch-lint` v1.19.0（临时安装在 `/tmp/cmdb-tools`）运行通过（`OK - No warnings found`）。配置为 main 的 v1.19 + CMDB 组件，并排除本机 `web/node_modules` 中的第三方 Go 文件。
 
 ## 已知限制（不要误判为已通过）
 
-- `make arch-lint` 未运行：本机缺少 `go-arch-lint`，且 Makefile 的 skip 分支仍会执行下一行。`scripts/agent-observability/README.md:107` 记录该配置在 go-arch-lint 1.12.0 下本身校验失败（缺 `internal/edgeagent/data/**`、空依赖项），属既有问题。PR 描述必须写“未运行”，不能写通过。
+- `make arch-lint` 需要 PATH 中有 `go-arch-lint`（CI 应安装 v1.19.0）。本机已临时安装 v1.19.0 并运行通过；`scripts/agent-observability/README.md:107` 的旧 1.12.0 校验失败记录不再适用于当前配置。
 - `make test-e2e` 在当前环境无法全绿：失败集中在未改动的 `tests/e2e/assistant_chat_test.go`（fake LLM/capture），且套件会超时；验收时按“未运行/未通过”记录。
 - `make test-release-workflow` 未运行：本机缺少 Ruby，Docker Hub 拉取 ruby 镜像超时；已用 Python 解析 `release.yml` 核对 job/needs/condition。
 - `npm run lint` 有 9 个既有错误，位于未触及文件；本次改动未新增 lint 错误。

@@ -146,3 +146,8 @@ commonComponents: []
 # 包内测试允许组装真实存储/跨域 fixture；生产文件仍严格执行分层。
 excludeFiles:
   - "_test\\.go$"
+
+# Installed web dependencies are not project Go code. Without this, a local
+# `npm install` makes the scan report node_modules' Go files as unattached.
+exclude:
+  - web/node_modules
