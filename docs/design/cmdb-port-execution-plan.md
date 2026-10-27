@@ -103,6 +103,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
 - 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
 - `bash scripts/test-compose-release-package.sh` 通过（含新增的 uninstall 镜像断言）；`docker compose -f deploy/docker-compose.yml config` 通过。
+- 组合栈：`deploy/docker-compose.yml`（project `deploy`）运行中；`/cmdb-readyz` 200、认证后 `/api/v1/cmdb/health` 200、`/api/v1/cmdb/ci-types` 200，容器 `--healthcheck` exit 0。
 - 合并 `origin/main` 后重新验证：`go test ./...`、`go vet ./...`、`make test-race`（193 包）、`make test-integration`、前端 170 tests、`typecheck`、`build`、Playwright 144、release-package 脚本、`docker compose config` 全部通过。
 - `git diff --check` 通过；人工 import 边界核对通过（`cmdb/biz`→`cmdb/data`/其它 BC、`cmdb/server`→`cmdb/data`、`pkg`→BC、`cmd/ongrid`→`cmdb` 均为空）。
 - `make arch-lint`：已用 `go-arch-lint` v1.19.0（临时安装在 `/tmp/cmdb-tools`）运行通过（`OK - No warnings found`）。配置为 main 的 v1.19 + CMDB 组件，并排除本机 `web/node_modules` 中的第三方 Go 文件。
@@ -113,7 +114,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - `make test-e2e` 在当前环境无法全绿：失败集中在未改动的 `tests/e2e/assistant_chat_test.go`（fake LLM/capture），且套件会超时；验收时按“未运行/未通过”记录。
 - `make test-release-workflow` 未运行：本机缺少 Ruby，Docker Hub 拉取 ruby 镜像超时；已用 Python 解析 `release.yml` 核对 job/needs/condition。
 - `npm run lint` 有 9 个既有错误，位于未触及文件；本次改动未新增 lint 错误。
-- CMDB 镜像已通过 `RUNTIME_IMAGE` 覆盖在无 gcr.io 访问的构建机上构建成功（`9063f79`）；`deploy/docker-compose.yml` 原样启动仍未执行，SQLite 端到端和 MySQL gated 锁测试已覆盖核心路径。
+- `deploy/docker-compose.yml` 的原样栈已在本机运行（project `deploy`），认证后 CMDB 健康与实例接口 200；停止 CMDB 的网关隔离早前实测为 504（不是 502；Docker 停止容器的 IP 仍被 nginx 缓存），本轮未重复停服。
 - 发布前必须同时替换 `ongrid` 与 `ongrid-cmdb`；旧 manager 仍挂载 CMDB 路由。
 - ADC 关系装配的 peer 查找受 CMDB 最大分页限制（`MaxInstancePageSize`，当前 500）：一个字段匹配超过 500 个实例时，尾部的关系边不会写入；实例本身仍会接受。
 - 清空某个模型的执行日志当前仅要求登录，没有 admin gate；cantor 也没有更细的权限，ACL Epic 再补。
@@ -267,7 +268,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
   - 停 CMDB：`/api/v1/cmdb/health` 返回网关错误（本机为 **504**，不是 502；Docker 停止的容器 IP 仍被 nginx 缓存，表现为 connect timeout）、`/api/v1/version` 仍 200；重启 CMDB 后 `/cmdb-readyz` 恢复 200。
 - [x] 更新本文件；ADR/安装文档已在 PR1/PR2 覆盖，本轮无需改动。
 - 验收：全量 `go test ./...`、`go vet ./...`；CMDB 前端 29 文件/161 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint`；Playwright 144 tests。
-- [ ] 未运行 `deploy/docker-compose.yml` 原样启动：本机 dockerd 未配置代理、无法直连 gcr.io，阿里云镜像对 `golang:1.25-alpine` 也返回 403；已从 `gcr.m.daocloud.io`/`docker.m.daocloud.io` 拉取基础镜像并打本地 tag，`make docker-ongrid-cmdb` 构建通过（`ongrid-cmdb:v0.18.2`）。Dockerfile/Makefile/开发 compose 增加 `RUNTIME_IMAGE` 覆盖（提交 `9063f79`）。compose 原样启动仍未执行，PR 描述必须写明。
+- [x] `deploy/docker-compose.yml` 原样栈已在本机运行（project `deploy`：`ongrid`、`ongrid-cmdb`、`ongrid-nginx`、`ongrid-frontier`）。验收：`/cmdb-readyz` 200、`/healthz` 200、未认证 `/api/v1/version` 401、认证后 `/api/v1/cmdb/health` 200（`{"generation":"fresh","origin":"mysql","fresh":true}`）、`/api/v1/cmdb/ci-types` 200、`docker exec ongrid-cmdb /ongrid-cmdb --healthcheck` exit 0。CMDB 镜像通过 `RUNTIME_IMAGE` 覆盖构建（提交 `9063f79`）。停止 CMDB 的网关隔离早前实测为 504，本轮未重复停服。
 - [ ] 未创建/推送 PR；`gh pr checks` 未运行。
 
 ## 每个 PR 的完成定义
