@@ -98,7 +98,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 
 - Go：`go test ./...` 通过；`make test-race`（`go test -race ./...`）在合并 main 后通过（193 个 ok 包，exit 0，无 DATA RACE）；`go vet ./...` 通过。
 - `make test-integration`：通过（exit 0）。
-- `make test-e2e`：本环境未通过。首次失败是 Docker Hub 拉取 `mysql:8.0` 超时；用本地 `mysql:8.0.46` 打 `mysql:8.0` 标签重跑后，`tests/e2e/assistant_chat_test.go` 的 fake LLM/capture 用例失败，并在 O32 用例超时（10m）。该目录在本分支无改动，也不含 CMDB 引用，不是本分支回归；但 e2e 不能记为通过。
+- `make test-e2e`：全量套件在本机仍不通过（首次是 Docker Hub 拉取 `mysql:8.0` 超时；重跑后 assistant-chat 用例在套件中失败、O32 挂起 10m）。但同一 `TestAssistantChat_UserVisibleLoop` 在 `origin/main` 临时 worktree 和本分支上单独运行均通过（20.6s / 15.4s），说明是全量 e2e 的测试间状态干扰/挂起，不是 CMDB 回归；该目录本分支未改动、无 CMDB 引用，仍不能记为通过。
 - 前端：`make test-web-ci-cmdb` 31 文件 / **170 tests**；`npm run typecheck`、`npm run build` 通过；改动文件 `eslint` 0 错误（`FacetTree` 有 1 条既有的 exhaustive-deps warning）。
 - 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
 - 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
@@ -112,7 +112,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 ## 已知限制（不要误判为已通过）
 
 - `make arch-lint` 需要 PATH 中有 `go-arch-lint`（CI 应安装 v1.19.0）。本机已临时安装 v1.19.0 并运行通过；`scripts/agent-observability/README.md:107` 的旧 1.12.0 校验失败记录不再适用于当前配置。
-- `make test-e2e` 在当前环境无法全绿：失败集中在未改动的 `tests/e2e/assistant_chat_test.go`（fake LLM/capture），且套件会超时；验收时按“未运行/未通过”记录。
+- `make test-e2e` 在当前环境无法全绿：全量套件中的 assistant-chat 用例失败、O32 超时；但该用例在 `origin/main` 和本分支单独运行均通过，属于测试间状态干扰/挂起，验收时按“未通过”记录。
 - `make test-release-workflow` 已用临时解包的 Ruby 3.4.10（`/tmp/ruby-root`，未安装到系统）运行通过：release workflow 断言、`test-fetch-obi.sh`、`test-fetch-embedding-model.sh` 全过；本机默认 PATH 仍无 Ruby，CI 需自带 Ruby。
 - `npm run lint` 有 9 个既有错误，位于未触及文件；本次改动未新增 lint 错误。
 - `deploy/docker-compose.yml` 的原样栈已在本机运行（project `deploy`），认证后 CMDB 健康与实例接口 200；停止 CMDB 的网关隔离早前实测为 504（不是 502；Docker 停止容器的 IP 仍被 nginx 缓存），本轮未重复停服。
