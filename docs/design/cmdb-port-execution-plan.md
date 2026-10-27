@@ -1,6 +1,6 @@
 # CMDB 移植与独立服务实施计划
 
-- 状态：PR #553 已推送并等待评审；模型配置增量待提交/PR
+- 状态：PR #553 已推送并等待评审；模型配置增量已推送（`487395e`…`826cb43`），PR 尚未创建（`api.github.com` 连接被拒绝）
 - 分支：`feat/cmdb-standalone-service`；增量分支 `feat/cmdb-model-config-ux`（基于 `193dad3`）
 - 基线：`main` @ `fe0a108`
 - 关联：[ADR-035](../../docs/adr/ADR-035-cmdb-standalone-service.md)、[CMDB 服务部署说明](../install/cmdb-service.md)
