@@ -287,7 +287,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - [x] 测试：后端 citype 的 show_key 创建/更新/清空、继承替换/保留/清空、自引用 400、HTTP DTO；前端 `Models`/`ModelDetail`/`Instances`/`ModelTree`/`AttributeForm`/`AttributeDictionary` 及关系映射；新增两条真实 Chromium 断言（1280 操作列表头固定、390 操作菜单压缩）。
 - 验收：`go test -race ./internal/cmdb/biz/citype ./internal/cmdb/data/citype/store ./internal/cmdb/server/citype`；`go test ./...`；`go vet ./...`；`make arch-lint`（`go-arch-lint` v1.19.0，`OK - No warnings found`）；CMDB Vitest **34 文件 / 183 tests**；`npm run build`；`npm run lint`（0 errors / 44 既有 warnings）；新增 Playwright 2 tests 通过。
 - 真实浏览器：模型列表 390/768/1280/1920，模型详情 390/768/1280/1920，属性字典和属性表单 390；覆盖 zh/en 与 light/dark 的关键组合。所有页面 `documentElement` 无横向溢出，密集表格只在自身容器滚动；移动端操作列不再遮挡模型名。
-- 已知限制：完整前端套件（118 文件/684 tests）中 `src/api/skills.test.ts` 仍失败，原因是实现已改用 `device_id` 而测试仍断言 `edge_id`，属于分支基线既有问题；其余 7 个失败文件单独运行均通过，是全量并发超时，不是本次回归。P1 的模型组拖拽、触发器日期/过滤/通知投递、模型级自动发现、快捷启停开关和更完整的 choice webhook/脚本编辑器不在本次范围。cantor 数据迁移在独立的 `feat/cmdb-cantor-data-migration` 分支处理，不在本分支混入。
+- 已知限制：完整前端套件以 2 个 worker 运行（118 文件/685 tests）时仅 `src/api/skills.test.ts` 1 项失败，原因是实现已改用 `device_id` 而测试仍断言 `edge_id`，属于分支基线既有问题；其余 117 文件/684 tests 通过。默认并发下另有 7 个测试文件因超时失败，单独运行均通过，是资源争用而非本次回归。P1 的模型组拖拽、触发器日期/过滤/通知投递、模型级自动发现、快捷启停开关和更完整的 choice webhook/脚本编辑器不在本次范围。cantor 数据迁移在独立的 `feat/cmdb-cantor-data-migration` 分支处理，不在本分支混入。
 
 ## 每个 PR 的完成定义
 
