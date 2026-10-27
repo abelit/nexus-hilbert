@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>模型与资产属性管理 - Apple Liquid Glass</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome Icons CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Inter & SF Pro Standard Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Text', 'Inter', 'sans-serif'],
+            mono: ['SF Mono', 'Fira Code', 'Menlo', 'monospace'],
+          },
+          colors: {
+            glass: {
+              light: 'rgba(255, 255, 255, 0.65)',
+              'light-hover': 'rgba(255, 255, 255, 0.8)',
+              dark: 'rgba(20, 24, 38, 0.6)',
+              'dark-hover': 'rgba(30, 36, 56, 0.75)',
+              border: 'rgba(255, 255, 255, 0.2)',
+              'border-dark': 'rgba(255, 255, 255, 0.08)',
+            },
+            apple: {
+              blue: '#007AFF',
+              purple: '#5E5CE6',
+              cyan: '#32ADE6',
+              green: '#34C759',
+              orange: '#FF9500',
+              pink: '#FF2D55',
+            }
+          },
+          boxShadow: {
+            'liquid': '0 20px 50px rgba(0, 0, 0, 0.12), 0 10px 20px rgba(0, 0, 0, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.3)',
+            'liquid-dark': '0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.1)',
+            'glow-blue': '0 0 25px rgba(0, 122, 255, 0.4)',
+          },
+          animation: {
+            'blob': 'blob 12s infinite alternate ease-in-out',
+            'blob-reverse': 'blob-reverse 15s infinite alternate ease-in-out',
+          },
+          keyframes: {
+            blob: {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '50%': { transform: 'translate(60px, -40px) scale(1.15)' },
+              '100%': { transform: 'translate(-30px, 50px) scale(0.95)' },
+            },
+            'blob-reverse': {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '50%': { transform: 'translate(-50px, 60px) scale(1.1)' },
+              '100%': { transform: 'translate(40px, -30px) scale(0.9)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Liquid Glass Custom Styles */
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.6);
+      backdrop-filter: blur(24px) saturate(190%);
+      -webkit-backdrop-filter: blur(24px) saturate(190%);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      box-shadow: 0 12px 40px rgba(31, 38, 135, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    }
+    
+    .dark .glass-panel {
+      background: rgba(18, 22, 36, 0.65);
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 16px 45px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    .glass-input {
+      background: rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+    }
+    .dark .glass-input {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .glass-button-primary {
+      background: linear-gradient(135deg, rgba(0, 122, 255, 0.9), rgba(94, 92, 230, 0.9));
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 20px rgba(0, 122, 255, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+    }
+    .glass-button-primary:hover {
+      background: linear-gradient(135deg, rgba(0, 122, 255, 1), rgba(94, 92, 230, 1));
+      box-shadow: 0 10px 25px rgba(0, 122, 255, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+    }
+
+    /* Modern Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(150, 150, 150, 0.3); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(150, 150, 150, 0.5); }
+  </style>
+</head>
+
+<body class="min-h-screen text-slate-800 dark:text-slate-100 transition-colors duration-300 relative overflow-x-hidden bg-slate-100 dark:bg-slate-950">
+
+  <!-- Liquid Background Gradients Blobs (Apple Ambient Motion) -->
+  <div class="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+    <div class="absolute -top-32 -left-32 w-[550px] h-[550px] bg-gradient-to-tr from-blue-500/30 to-purple-500/30 dark:from-blue-600/20 dark:to-purple-800/20 rounded-full blur-3xl animate-blob"></div>
+    <div class="absolute top-1/3 -right-32 w-[600px] h-[600px] bg-gradient-to-br from-indigo-400/25 to-pink-500/25 dark:from-indigo-900/20 dark:to-pink-900/20 rounded-full blur-3xl animate-blob-reverse"></div>
+    <div class="absolute -bottom-40 left-1/4 w-[500px] h-[500px] bg-gradient-to-t from-cyan-400/20 to-emerald-400/20 dark:from-cyan-900/20 dark:to-emerald-900/15 rounded-full blur-3xl animate-blob"></div>
+  </div>
+
+  <!-- App Wrapper -->
+  <div class="relative z-10 flex flex-col min-h-screen">
+
+    <!-- Header Navigation (Apple Liquid Glass Header) -->
+    <header class="sticky top-0 z-40 px-4 sm:px-8 py-3">
+      <div class="max-w-7xl mx-auto glass-panel rounded-2xl px-5 py-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        
+        <!-- Left Title & Meta -->
+        <div class="flex items-center space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/30">
+            <i class="fa-solid fa-cubes text-lg"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-blue-600 dark:text-blue-400 tracking-wide uppercase">CMDB 资产模型</span>
+              <span class="text-xs text-slate-400 dark:text-slate-600">/</span>
+              <span class="text-base font-bold text-slate-900 dark:text-white tracking-tight">服务器资产模型 (Server)</span>
+            </div>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">多维模型绑定属性、字段校验与继承策略管理</p>
+          </div>
+        </div>
+
+        <!-- Right Header Actions & Theme Toggle -->
+        <div class="flex items-center space-x-3 self-end md:self-auto">
+          <!-- Dark/Light Theme Toggle -->
+          <button onclick="toggleTheme()" class="w-9 h-9 rounded-xl glass-panel flex items-center justify-center text-slate-700 dark:text-slate-200 hover:scale-105 active:scale-95 transition" title="切换主题">
+            <i class="fa-solid fa-moon dark:hidden text-indigo-600"></i>
+            <i class="fa-solid fa-sun hidden dark:block text-amber-400"></i>
+          </button>
+
+          <button onclick="showToast('已打开属性字典数据源')" class="px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 glass-panel rounded-xl hover:bg-white/40 dark:hover:bg-white/10 transition flex items-center gap-2">
+            <i class="fa-solid fa-book-bookmark text-slate-400"></i>
+            <span>属性字典</span>
+          </button>
+
+          <button onclick="openModal()" class="px-4 py-2 text-xs font-semibold text-white glass-button-primary rounded-xl transition flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98]">
+            <i class="fa-solid fa-plus text-xs"></i>
+            <span>绑定属性</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Segmented Control Glass Tabs -->
+      <div class="max-w-7xl mx-auto mt-3">
+        <div class="glass-panel p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto custom-scrollbar">
+          <button class="px-4 py-2 rounded-xl bg-blue-600 text-white font-medium text-xs shadow-md shadow-blue-500/20 flex items-center gap-2 whitespace-nowrap">
+            <i class="fa-solid fa-sliders text-xs"></i>
+            <span>属性</span>
+            <span class="bg-white/20 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">20</span>
+          </button>
+          <button class="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 font-medium text-xs transition whitespace-nowrap flex items-center gap-1.5">
+            <i class="fa-solid fa-layer-group text-slate-400"></i>
+            <span>表单分组</span>
+            <span class="bg-slate-200/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] px-1.5 py-0.5 rounded-full">3</span>
+          </button>
+          <button class="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 font-medium text-xs transition whitespace-nowrap">模型关系</button>
+          <button class="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 font-medium text-xs transition whitespace-nowrap">唯一约束</button>
+          <button class="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 font-medium text-xs transition whitespace-nowrap">触发器</button>
+          <button class="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-white/30 dark:hover:bg-white/5 font-medium text-xs transition whitespace-nowrap">自动发现</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-8 py-4 flex-1 w-full space-y-4">
+
+      <!-- Top Info Glass Bar & Filter -->
+      <div class="glass-panel rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <!-- Info Alert Notice -->
+        <div class="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-300">
+          <div class="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-lightbulb"></i>
+          </div>
+          <span>属性优先存在于<b>属性字典</b>中，绑定至模型后独立生效；相同属性可在不同模型中灵活配置。</span>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="flex items-center gap-3 flex-wrap">
+          <!-- Checkbox Filter -->
+          <label class="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer select-none px-3 py-1.5 rounded-xl hover:bg-white/30 dark:hover:bg-white/5 transition">
+            <input type="checkbox" id="onlyRequired" onchange="filterRequired(this)" class="rounded text-blue-600 focus:ring-blue-500/20 h-4 w-4 border-slate-300 dark:border-slate-700 dark:bg-slate-800">
+            <span>只看必填属性</span>
+          </label>
+
+          <!-- Glass Search Box -->
+          <div class="relative w-60">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-slate-400"></i>
+            <input type="text" id="searchInput" onkeyup="handleSearch()" placeholder="搜索属性名或 Key..." class="w-full glass-input pl-8 pr-3 py-1.5 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 text-slate-800 dark:text-slate-100 placeholder-slate-400 transition">
+          </div>
+
+          <!-- View Switcher -->
+          <div class="flex glass-panel p-1 rounded-xl text-xs">
+            <button id="btnTable" onclick="switchView('table')" class="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 font-semibold shadow-sm transition flex items-center gap-1.5">
+              <i class="fa-solid fa-table-cells text-xs"></i> 列表
+            </button>
+            <button id="btnCard" onclick="switchView('card')" class="px-3 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition flex items-center gap-1.5">
+              <i class="fa-solid fa-grid-2 text-xs"></i> 网格
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Bar -->
+      <div class="flex items-center justify-between text-xs px-2 text-slate-500 dark:text-slate-400 font-medium">
+        <div class="flex items-center gap-2">
+          <span>模型共有 <b class="text-slate-800 dark:text-slate-100" id="attrTotalCount">20</b> 个属性</span>
+          <span class="inline-block w-1 h-1 rounded-full bg-slate-400"></span>
+          <span class="text-amber-600 dark:text-amber-400 font-semibold">1 个必填项</span>
+          <span class="inline-block w-1 h-1 rounded-full bg-slate-400"></span>
+          <span class="text-blue-600 dark:text-blue-400">18 个继承基础数据</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <button onclick="toggleGroups(true)" class="hover:text-blue-500 transition"><i class="fa-solid fa-angles-down mr-1"></i>展开全部分组</button>
+          <span>/</span>
+          <button onclick="toggleGroups(false)" class="hover:text-blue-500 transition"><i class="fa-solid fa-angles-up mr-1"></i>收起全部分组</button>
+        </div>
+      </div>
+
+      <!-- PROPERTY GROUP 1: 基本信息 -->
+      <section class="group-section glass-panel rounded-2xl overflow-hidden transition-all duration-300" id="group-base">
+        <!-- Group Header -->
+        <div class="px-6 py-4 bg-white/40 dark:bg-white/5 border-b border-white/30 dark:border-white/5 flex items-center justify-between cursor-pointer select-none" onclick="toggleSingleGroup('group-base')">
+          <div class="flex items-center space-x-3">
+            <div class="w-6 h-6 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center text-xs group-arrow transition-transform">
+              <i class="fa-solid fa-chevron-down"></i>
+            </div>
+            <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight">基本信息</h3>
+            <span class="bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold text-[11px] px-2.5 py-0.5 rounded-full border border-blue-500/20">7 项</span>
+            
+            <span class="hidden sm:inline-flex items-center gap-1.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs px-3 py-0.5 rounded-lg border border-indigo-500/20 font-medium">
+              <i class="fa-solid fa-diagram-project text-[10px]"></i>
+              继承自 基础扩展模型 (监控参数)
+            </span>
+          </div>
+          <div class="text-xs text-slate-400 font-medium">点击折叠</div>
+        </div>
+
+        <!-- Table View Layout -->
+        <div class="view-table overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-500/5 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-200/50 dark:border-slate-800/50">
+              <tr>
+                <th class="py-3 px-6">属性名称 / 标识符 Key</th>
+                <th class="py-3 px-4">数据类型</th>
+                <th class="py-3 px-4">检索索引</th>
+                <th class="py-3 px-4">配置策略</th>
+                <th class="py-3 px-4">来源模型</th>
+                <th class="py-3 px-6 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200/40 dark:divide-white/5 font-medium">
+
+              <!-- Item 1 -->
+              <tr class="attr-item hover:bg-white/40 dark:hover:bg-white/5 transition" data-required="true" data-name="ID uuid">
+                <td class="py-3.5 px-6">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">ID</span>
+                    <span class="text-slate-400 text-[11px] font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">uuid</span>
+                  </div>
+                </td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700">文本 (String)</span></td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium border border-emerald-500/20">可检索</span></td>
+                <td class="py-3.5 px-4">
+                  <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-[11px] font-semibold"><i class="fa-solid fa-asterisk text-[8px] mr-1"></i>必填</span>
+                    <span class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-[11px]">默认显示</span>
+                  </div>
+                </td>
+                <td class="py-3.5 px-4 text-slate-500 dark:text-slate-400">基础扩展模型</td>
+                <td class="py-3.5 px-6 text-right space-x-3">
+                  <button onclick="editAttr('uuid')" class="text-blue-600 dark:text-blue-400 hover:underline"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                  <button onclick="unbindAttr('uuid')" class="text-rose-500 hover:underline"><i class="fa-solid fa-link-slash mr-1"></i>解绑</button>
+                </td>
+              </tr>
+
+              <!-- Item 2 -->
+              <tr class="attr-item hover:bg-white/40 dark:hover:bg-white/5 transition" data-required="false" data-name="代码 code">
+                <td class="py-3.5 px-6">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">代码</span>
+                    <span class="text-slate-400 text-[11px] font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">code</span>
+                  </div>
+                </td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700">文本 (String)</span></td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium border border-emerald-500/20">可检索</span></td>
+                <td class="py-3.5 px-4">
+                  <span class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-[11px]">默认显示</span>
+                </td>
+                <td class="py-3.5 px-4 text-slate-500 dark:text-slate-400">基础扩展模型</td>
+                <td class="py-3.5 px-6 text-right space-x-3">
+                  <button onclick="editAttr('code')" class="text-blue-600 dark:text-blue-400 hover:underline"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                  <button onclick="unbindAttr('code')" class="text-rose-500 hover:underline"><i class="fa-solid fa-link-slash mr-1"></i>解绑</button>
+                </td>
+              </tr>
+
+              <!-- Item 3 -->
+              <tr class="attr-item hover:bg-white/40 dark:hover:bg-white/5 transition" data-required="false" data-name="名称 name">
+                <td class="py-3.5 px-6">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">名称</span>
+                    <span class="text-slate-400 text-[11px] font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">name</span>
+                  </div>
+                </td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700">文本 (String)</span></td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium border border-emerald-500/20">可检索</span></td>
+                <td class="py-3.5 px-4">
+                  <span class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-[11px]">默认显示</span>
+                </td>
+                <td class="py-3.5 px-4 text-slate-400">本模型独立属性</td>
+                <td class="py-3.5 px-6 text-right space-x-3">
+                  <button onclick="editAttr('name')" class="text-blue-600 dark:text-blue-400 hover:underline"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                  <button onclick="unbindAttr('name')" class="text-rose-500 hover:underline"><i class="fa-solid fa-link-slash mr-1"></i>解绑</button>
+                </td>
+              </tr>
+
+              <!-- Item 4 -->
+              <tr class="attr-item hover:bg-white/40 dark:hover:bg-white/5 transition" data-required="false" data-name="描述 description">
+                <td class="py-3.5 px-6">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">描述</span>
+                    <span class="text-slate-400 text-[11px] font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">description</span>
+                  </div>
+                </td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700">长文本 (Text)</span></td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-medium border border-cyan-500/20">单索引</span></td>
+                <td class="py-3.5 px-4 text-slate-400">-</td>
+                <td class="py-3.5 px-4 text-slate-500 dark:text-slate-400">基础扩展模型</td>
+                <td class="py-3.5 px-6 text-right space-x-3">
+                  <button onclick="editAttr('description')" class="text-blue-600 dark:text-blue-400 hover:underline"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                  <button onclick="unbindAttr('description')" class="text-rose-500 hover:underline"><i class="fa-solid fa-link-slash mr-1"></i>解绑</button>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Grid View Layout (Hidden by default) -->
+        <div class="view-card hidden p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <!-- Grid Card 1 -->
+          <div class="glass-panel p-4 rounded-xl hover:shadow-lg hover:border-blue-500/30 transition group flex flex-col justify-between">
+            <div>
+              <div class="flex items-start justify-between">
+                <div>
+                  <h4 class="text-base font-bold text-slate-900 dark:text-white">ID</h4>
+                  <p class="text-xs text-slate-400 font-mono mt-0.5">uuid</p>
+                </div>
+                <span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-medium">可检索</span>
+              </div>
+              <div class="mt-4 flex flex-wrap gap-1.5">
+                <span class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px]">文本</span>
+                <span class="px-2 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[11px] font-semibold">必填</span>
+                <span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px]">默认显示</span>
+              </div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-200/50 dark:border-white/10 flex items-center justify-between text-xs">
+              <span class="text-slate-400 text-[11px]">继承自基础模型</span>
+              <div class="space-x-2">
+                <button onclick="editAttr('uuid')" class="text-blue-500 hover:underline">编辑</button>
+                <button onclick="unbindAttr('uuid')" class="text-rose-500 hover:underline">解绑</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Grid Card 2 -->
+          <div class="glass-panel p-4 rounded-xl hover:shadow-lg hover:border-blue-500/30 transition group flex flex-col justify-between">
+            <div>
+              <div class="flex items-start justify-between">
+                <div>
+                  <h4 class="text-base font-bold text-slate-900 dark:text-white">代码</h4>
+                  <p class="text-xs text-slate-400 font-mono mt-0.5">code</p>
+                </div>
+                <span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-medium">可检索</span>
+              </div>
+              <div class="mt-4 flex flex-wrap gap-1.5">
+                <span class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px]">文本</span>
+                <span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px]">默认显示</span>
+              </div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-200/50 dark:border-white/10 flex items-center justify-between text-xs">
+              <span class="text-slate-400 text-[11px]">继承自基础模型</span>
+              <div class="space-x-2">
+                <button onclick="editAttr('code')" class="text-blue-500 hover:underline">编辑</button>
+                <button onclick="unbindAttr('code')" class="text-rose-500 hover:underline">解绑</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROPERTY GROUP 2: 监控控制 -->
+      <section class="group-section glass-panel rounded-2xl overflow-hidden transition-all duration-300" id="group-mon">
+        <!-- Group Header -->
+        <div class="px-6 py-4 bg-white/40 dark:bg-white/5 border-b border-white/30 dark:border-white/5 flex items-center justify-between cursor-pointer select-none" onclick="toggleSingleGroup('group-mon')">
+          <div class="flex items-center space-x-3">
+            <div class="w-6 h-6 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center text-xs group-arrow transition-transform">
+              <i class="fa-solid fa-chevron-down"></i>
+            </div>
+            <h3 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight">监控与告警配置</h3>
+            <span class="bg-purple-500/10 text-purple-600 dark:text-purple-400 font-semibold text-[11px] px-2.5 py-0.5 rounded-full border border-purple-500/20">7 项</span>
+            
+            <span class="hidden sm:inline-flex items-center gap-1.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs px-3 py-0.5 rounded-lg border border-indigo-500/20 font-medium">
+              <i class="fa-solid fa-diagram-project text-[10px]"></i>
+              继承自 基础扩展模型 (监控参数)
+            </span>
+          </div>
+          <div class="text-xs text-slate-400 font-medium">点击折叠</div>
+        </div>
+
+        <!-- Table View Layout -->
+        <div class="view-table overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-500/5 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-200/50 dark:border-slate-800/50">
+              <tr>
+                <th class="py-3 px-6">属性名称 / 标识符 Key</th>
+                <th class="py-3 px-4">数据类型</th>
+                <th class="py-3 px-4">检索索引</th>
+                <th class="py-3 px-4">配置策略</th>
+                <th class="py-3 px-4">来源模型</th>
+                <th class="py-3 px-6 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200/40 dark:divide-white/5 font-medium">
+
+              <!-- Item 1 -->
+              <tr class="attr-item hover:bg-white/40 dark:hover:bg-white/5 transition" data-required="false" data-name="是否安装监控 mon_installed">
+                <td class="py-3.5 px-6">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">是否安装监控</span>
+                    <span class="text-slate-400 text-[11px] font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">mon_installed</span>
+                  </div>
+                </td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 font-mono text-[11px] border border-purple-500/20">布尔 (Boolean)</span></td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium border border-emerald-500/20">可检索</span></td>
+                <td class="py-3.5 px-4">
+                  <span class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-[11px]">默认显示</span>
+                </td>
+                <td class="py-3.5 px-4 text-slate-500 dark:text-slate-400">基础扩展模型</td>
+                <td class="py-3.5 px-6 text-right space-x-3">
+                  <button onclick="editAttr('mon_installed')" class="text-blue-600 dark:text-blue-400 hover:underline"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                  <button onclick="unbindAttr('mon_installed')" class="text-rose-500 hover:underline"><i class="fa-solid fa-link-slash mr-1"></i>解绑</button>
+                </td>
+              </tr>
+
+              <!-- Item 2 -->
+              <tr class="attr-item hover:bg-white/40 dark:hover:bg-white/5 transition" data-required="false" data-name="监控URL mon_url">
+                <td class="py-3.5 px-6">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">监控 URL</span>
+                    <span class="text-slate-400 text-[11px] font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">mon_url</span>
+                  </div>
+                </td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700">文本 (String)</span></td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-medium border border-cyan-500/20">单索引</span></td>
+                <td class="py-3.5 px-4 text-slate-400">-</td>
+                <td class="py-3.5 px-4 text-slate-500 dark:text-slate-400">基础扩展模型</td>
+                <td class="py-3.5 px-6 text-right space-x-3">
+                  <button onclick="editAttr('mon_url')" class="text-blue-600 dark:text-blue-400 hover:underline"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                  <button onclick="unbindAttr('mon_url')" class="text-rose-500 hover:underline"><i class="fa-solid fa-link-slash mr-1"></i>解绑</button>
+                </td>
+              </tr>
+
+              <!-- Item 3 -->
+              <tr class="attr-item hover:bg-white/40 dark:hover:bg-white/5 transition" data-required="false" data-name="启用监控 mon_enabled">
+                <td class="py-3.5 px-6">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 dark:text-slate-100 text-sm">启用监控</span>
+                    <span class="text-slate-400 text-[11px] font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">mon_enabled</span>
+                  </div>
+                </td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 font-mono text-[11px] border border-purple-500/20">布尔 (Boolean)</span></td>
+                <td class="py-3.5 px-4"><span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium border border-emerald-500/20">可检索</span></td>
+                <td class="py-3.5 px-4 text-slate-400">-</td>
+                <td class="py-3.5 px-4 text-slate-500 dark:text-slate-400">基础扩展模型</td>
+                <td class="py-3.5 px-6 text-right space-x-3">
+                  <button onclick="editAttr('mon_enabled')" class="text-blue-600 dark:text-blue-400 hover:underline"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                  <button onclick="unbindAttr('mon_enabled')" class="text-rose-500 hover:underline"><i class="fa-solid fa-link-slash mr-1"></i>解绑</button>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Grid View Layout (Hidden by default) -->
+        <div class="view-card hidden p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div class="glass-panel p-4 rounded-xl hover:shadow-lg transition flex flex-col justify-between">
+            <div>
+              <div class="flex items-start justify-between">
+                <div>
+                  <h4 class="text-base font-bold text-slate-900 dark:text-white">是否安装监控</h4>
+                  <p class="text-xs text-slate-400 font-mono mt-0.5">mon_installed</p>
+                </div>
+                <span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 text-[11px]">可检索</span>
+              </div>
+              <div class="mt-4 flex flex-wrap gap-1.5">
+                <span class="px-2 py-0.5 rounded bg-purple-500/10 text-purple-600 text-[11px]">布尔</span>
+                <span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 text-[11px]">默认显示</span>
+              </div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-200/50 dark:border-white/10 flex items-center justify-between text-xs">
+              <span class="text-slate-400 text-[11px]">继承自基础模型</span>
+              <div class="space-x-2">
+                <button onclick="editAttr('mon_installed')" class="text-blue-500 hover:underline">编辑</button>
+                <button onclick="unbindAttr('mon_installed')" class="text-rose-500 hover:underline">解绑</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Glass Modal Drawer (+ 绑定属性) -->
+    <div id="bindModal" class="fixed inset-0 bg-slate-950/40 backdrop-blur-md flex items-center justify-center hidden z-50 p-4">
+      <div class="glass-panel w-full max-w-lg rounded-3xl p-6 shadow-2xl transform transition-all scale-95 opacity-0 border border-white/40 dark:border-white/10" id="modalContent">
+        <!-- Modal Title -->
+        <div class="flex items-center justify-between pb-4 border-b border-slate-200/40 dark:border-white/10">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-500 flex items-center justify-center">
+              <i class="fa-solid fa-link text-sm"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-900 dark:text-white">绑定新属性到模型</h3>
+          </div>
+          <button onclick="closeModal()" class="w-8 h-8 rounded-full glass-panel flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <!-- Form Body -->
+        <div class="py-5 space-y-4 text-xs">
+          <div>
+            <label class="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">选择公共属性字典项</label>
+            <select class="w-full glass-input p-2.5 rounded-xl text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500/30 outline-none">
+              <option value="" class="bg-white dark:bg-slate-900">搜索并选择属性...</option>
+              <option value="ip" class="bg-white dark:bg-slate-900">IP 地址 (ip_address) - [文本]</option>
+              <option value="mac" class="bg-white dark:bg-slate-900">MAC 地址 (mac_address) - [文本]</option>
+              <option value="os" class="bg-white dark:bg-slate-900">操作系统版本 (os_version) - [下拉选择]</option>
+              <option value="cpu" class="bg-white dark:bg-slate-900">CPU 核数 (cpu_cores) - [数字]</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">绑定至表单分组</label>
+            <select class="w-full glass-input p-2.5 rounded-xl text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500/30 outline-none">
+              <option class="bg-white dark:bg-slate-900">基本信息</option>
+              <option class="bg-white dark:bg-slate-900">监控与告警配置</option>
+              <option class="bg-white dark:bg-slate-900">网络与访问控制</option>
+            </select>
+          </div>
+
+          <div class="pt-2 flex items-center gap-6">
+            <label class="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+              <input type="checkbox" class="rounded text-blue-600 focus:ring-blue-500/20 h-4 w-4 border-slate-300 dark:border-slate-700 dark:bg-slate-800">
+              <span>设置为必填项</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+              <input type="checkbox" checked class="rounded text-blue-600 focus:ring-blue-500/20 h-4 w-4 border-slate-300 dark:border-slate-700 dark:bg-slate-800">
+              <span>资产列表中默认显示</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Modal Actions -->
+        <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200/40 dark:border-white/10">
+          <button onclick="closeModal()" class="px-4 py-2 rounded-xl glass-panel text-slate-600 dark:text-slate-300 font-medium hover:bg-white/40 transition">取消</button>
+          <button onclick="saveBind()" class="px-5 py-2 rounded-xl glass-button-primary text-white font-semibold transition hover:scale-105 active:scale-95 shadow-md">确认绑定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Liquid Toast Notification -->
+    <div id="toast" class="fixed bottom-6 right-6 glass-panel px-5 py-3 rounded-2xl shadow-liquid dark:shadow-liquid-dark text-xs flex items-center gap-3 border border-white/50 dark:border-white/10 transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+      <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center">
+        <i class="fa-solid fa-check text-xs"></i>
+      </div>
+      <span id="toastMsg" class="font-medium text-slate-800 dark:text-slate-100">操作成功</span>
+    </div>
+
+  </div>
+
+  <!-- Interactive JavaScript Logic -->
+  <script>
+    let currentView = 'table';
+
+    // Theme Switcher Logic
+    function toggleTheme() {
+      const html = document.documentElement;
+      if (html.classList.contains('dark')) {
+        html.classList.remove('dark');
+        showToast('已切换至 Apple Liquid 浅色模式');
+      } else {
+        html.classList.add('dark');
+        showToast('已切换至 Apple Liquid 深色模式');
+      }
+    }
+
+    // Switch Table / Grid View
+    function switchView(type) {
+      currentView = type;
+      const btnTable = document.getElementById('btnTable');
+      const btnCard = document.getElementById('btnCard');
+      const tables = document.querySelectorAll('.view-table');
+      const cards = document.querySelectorAll('.view-card');
+
+      if (type === 'table') {
+        btnTable.className = "px-3 py-1 rounded-lg bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 font-semibold shadow-sm transition flex items-center gap-1.5";
+        btnCard.className = "px-3 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition flex items-center gap-1.5";
+        tables.forEach(t => t.classList.remove('hidden'));
+        cards.forEach(c => c.classList.add('hidden'));
+      } else {
+        btnCard.className = "px-3 py-1 rounded-lg bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 font-semibold shadow-sm transition flex items-center gap-1.5";
+        btnTable.className = "px-3 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition flex items-center gap-1.5";
+        tables.forEach(t => t.classList.add('hidden'));
+        cards.forEach(c => c.classList.remove('hidden'));
+      }
+    }
+
+    // Toggle Single Group Collapse
+    function toggleSingleGroup(groupId) {
+      const group = document.getElementById(groupId);
+      const arrow = group.querySelector('.group-arrow');
+      const table = group.querySelector('.view-table');
+      const card = group.querySelector('.view-card');
+
+      const isHidden = table.classList.contains('hidden') && card.classList.contains('hidden');
+
+      if (isHidden) {
+        arrow.style.transform = 'rotate(0deg)';
+        if (currentView === 'table') table.classList.remove('hidden');
+        else card.classList.remove('hidden');
+      } else {
+        arrow.style.transform = 'rotate(-90deg)';
+        table.classList.add('hidden');
+        card.classList.add('hidden');
+      }
+    }
+
+    // Toggle All Groups
+    function toggleGroups(expand) {
+      const groups = document.querySelectorAll('.group-section');
+      groups.forEach(g => {
+        const arrow = g.querySelector('.group-arrow');
+        const table = g.querySelector('.view-table');
+        const card = g.querySelector('.view-card');
+
+        if (expand) {
+          arrow.style.transform = 'rotate(0deg)';
+          if (currentView === 'table') table.classList.remove('hidden');
+          else card.classList.remove('hidden');
+        } else {
+          arrow.style.transform = 'rotate(-90deg)';
+          table.classList.add('hidden');
+          card.classList.add('hidden');
+        }
+      });
+    }
+
+    // Search Filter
+    function handleSearch() {
+      const val = document.getElementById('searchInput').value.toLowerCase();
+      const rows = document.querySelectorAll('.attr-item');
+      rows.forEach(row => {
+        const name = row.getAttribute('data-name').toLowerCase();
+        if (name.includes(val)) {
+          row.style.display = '';
+        } else {
+          row.style.display = 'none';
+        }
+      });
+    }
+
+    // Filter Only Required Items
+    function filterRequired(cb) {
+      const rows = document.querySelectorAll('.attr-item');
+      rows.forEach(row => {
+        const isReq = row.getAttribute('data-required') === 'true';
+        if (cb.checked) {
+          row.style.display = isReq ? '' : 'none';
+        } else {
+          row.style.display = '';
+        }
+      });
+    }
+
+    // Toast Alert
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toastMsg').innerText = msg;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 2500);
+    }
+
+    // Modal Drawer Control
+    function openModal() {
+      const modal = document.getElementById('bindModal');
+      const modalContent = document.getElementById('modalContent');
+      modal.classList.remove('hidden');
+      setTimeout(() => {
+        modalContent.classList.remove('scale-95', 'opacity-0');
+        modalContent.classList.add('scale-100', 'opacity-100');
+      }, 10);
+    }
+
+    function closeModal() {
+      const modal = document.getElementById('bindModal');
+      const modalContent = document.getElementById('modalContent');
+      modalContent.classList.remove('scale-100', 'opacity-100');
+      modalContent.classList.add('scale-95', 'opacity-0');
+      setTimeout(() => {
+        modal.classList.add('hidden');
+      }, 200);
+    }
+
+    function saveBind() {
+      closeModal();
+      showToast('已成功绑定新属性至服务器资产模型！');
+    }
+
+    function editAttr(key) {
+      showToast(`正在编辑属性配置: [${key}]`);
+    }
+
+    function unbindAttr(key) {
+      showToast(`已成功解绑属性: [${key}]`);
+    }
+  </script>
+</body>
+</html>

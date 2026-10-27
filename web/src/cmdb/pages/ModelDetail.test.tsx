@@ -147,6 +147,24 @@ describe('the attribute tab', () => {
     expect(screen.getByText('序列号')).toBeInTheDocument();
   });
 
+  it('switches between the table and grid views and filters required attributes', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    renderPage();
+
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '网格' }));
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '主机名' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '列表' }));
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: '只看必填属性' }));
+    expect(screen.getByText('主机名')).toBeInTheDocument();
+    expect(screen.queryByText('序列号')).not.toBeInTheDocument();
+  });
+
   it('refuses to unbind an inherited attribute', async () => {
     baseHandlers();
     renderPage();
