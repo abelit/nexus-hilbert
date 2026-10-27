@@ -103,6 +103,50 @@ describe('the attribute tab', () => {
     expect(screen.getByText('继承自 资产')).toBeInTheDocument();
   });
 
+  it('groups attributes into their form sections and filters them', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/attribute-groups', () =>
+        HttpResponse.json([
+          {
+            id: 5,
+            name: '基本信息',
+            type_id: 1,
+            order: 0,
+            inherited: false,
+            is_other: false,
+            attributes: [{ ...ownAttribute }],
+          },
+          {
+            id: 0,
+            name: '',
+            type_id: 1,
+            order: 0,
+            inherited: false,
+            is_other: true,
+            attributes: [{ ...inheritedAttribute }],
+          },
+        ]),
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: '基本信息' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '其他' })).toBeInTheDocument();
+    expect(screen.getByText('2 个属性')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('搜索属性'), 'serial');
+    expect(screen.queryByText('主机名')).not.toBeInTheDocument();
+    expect(screen.getByText('序列号')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '基本信息' })).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('搜索属性'));
+    await user.click(screen.getByRole('checkbox', { name: '只看继承' }));
+    expect(screen.queryByText('主机名')).not.toBeInTheDocument();
+    expect(screen.getByText('序列号')).toBeInTheDocument();
+  });
+
   it('refuses to unbind an inherited attribute', async () => {
     baseHandlers();
     renderPage();

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { ChevronLeft, Pencil, Plus, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -42,7 +42,7 @@ import { ModelConfigShell } from '../components/ModelConfigShell';
 import { useModelTreeRefresh } from '../components/model-tree-context';
 import { AttributeForm } from '../components/AttributeForm';
 import { CMDBIcon } from '../components/CMDBIcon';
-import { DataTable, type Column } from '../components/DataTable';
+import { ModelAttributesPanel } from '../components/ModelAttributesPanel';
 import { ModelForm } from './Models';
 import { ConstraintsTab, RelationsTab, TriggersTab } from '../components/ModelRuleTabs';
 import { useToast } from '../components/Toast';
@@ -260,8 +260,9 @@ export default function ModelDetailPage() {
           </TabsList>
 
           <TabsContent value="attributes">
-            <AttributesTab
+            <ModelAttributesPanel
               rows={attributes}
+              groups={groups}
               loading={loading}
               isAdmin={isAdmin}
               adminTip={adminTip}
@@ -375,170 +376,6 @@ export default function ModelDetailPage() {
       {dialog}
     </div>
     </ModelConfigShell>
-  );
-}
-
-// --- the attribute tab ---
-
-function AttributesTab({
-  rows,
-  loading,
-  isAdmin,
-  adminTip,
-  onBind,
-  onEdit,
-  onUnbind,
-  onFlag,
-  onOpenDictionary,
-}: {
-  rows: TypeAttribute[];
-  loading: boolean;
-  isAdmin: boolean;
-  adminTip?: string;
-  onBind(): void;
-  onEdit(row: TypeAttribute): void;
-  onUnbind(row: TypeAttribute): void;
-  onFlag(row: TypeAttribute, patch: { is_required?: boolean; default_show?: boolean }): void;
-  onOpenDictionary(): void;
-}) {
-  const { tr } = useI18n();
-
-  const columns: Column<TypeAttribute>[] = [
-    {
-      key: 'name',
-      header: tr('属性', 'Attribute'),
-      width: 'w-full',
-      cell: (row) => (
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate font-medium text-text">{row.alias || row.name}</span>
-            {row.inherited && (
-              // AN INHERITED ROW IS NOT BOUND HERE, so it cannot be unbound here.
-              // Saying where it comes from is the whole reason the flag exists.
-              <Chip tone="info">{tr(`继承自 ${row.inherited_from}`, `from ${row.inherited_from}`)}</Chip>
-            )}
-          </div>
-          <div className="truncate font-mono text-[11px] text-text-faint">{row.name}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'type',
-      header: tr('类型', 'Type'),
-      cell: (row) => {
-        const label = isValueTypeCode(row.value_type) ? VALUE_TYPE_LABELS[row.value_type] : null;
-        return (
-          <span className="flex flex-wrap items-center gap-1">
-            <Chip>{label ? tr(label[0], label[1]) : row.value_type}</Chip>
-            {row.is_list && <Chip>{tr('多值', 'Multi')}</Chip>}
-            {row.is_password && <Chip tone="warning">{tr('密码', 'Secret')}</Chip>}
-            {row.is_reference && <Chip tone="info">{tr('引用', 'Reference')}</Chip>}
-          </span>
-        );
-      },
-    },
-    {
-      key: 'searchable',
-      header: tr('可检索', 'Searchable'),
-      hideable: true,
-      cell: (row) => (
-        <Hint content={`${row.storage_table}`}>
-          <Chip tone={row.is_indexed ? 'success' : 'default'}>{row.is_indexed ? tr('是', 'Yes') : tr('否', 'No')}</Chip>
-        </Hint>
-      ),
-    },
-    {
-      key: 'required',
-      header: tr('必填', 'Required'),
-      cell: (row) => (
-        <Checkbox
-          checked={row.is_required}
-          disabled={!isAdmin}
-          aria-label={tr(`${row.name} 必填`, `${row.name} required`)}
-          onCheckedChange={(next) => onFlag(row, { is_required: next === true })}
-        />
-      ),
-    },
-    {
-      key: 'show',
-      header: tr('默认显示', 'Shown by default'),
-      hideable: true,
-      cell: (row) => (
-        <Checkbox
-          checked={row.default_show}
-          disabled={!isAdmin}
-          aria-label={tr(`${row.name} 默认显示`, `${row.name} shown by default`)}
-          onCheckedChange={(next) => onFlag(row, { default_show: next === true })}
-        />
-      ),
-    },
-  ];
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-text-muted">
-          {tr(
-            '属性先存在于字典里，再绑定到模型上；同名属性可以在多个模型上使用，每个模型的绑定设置各自独立。',
-            'An attribute exists in the dictionary first and is then bound to a model. One attribute can be on several models, and each binding has its own settings.',
-          )}
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" type="button" onClick={onOpenDictionary} className="inline-flex items-center gap-1.5">
-            {tr('属性字典', 'Attribute dictionary')}
-          </Button>
-          <Button variant="primary" size="sm" type="button" onClick={onBind} disabled={!isAdmin} className="inline-flex items-center gap-1.5">
-            <Plus size={12} aria-hidden="true" />
-            {tr('绑定属性', 'Bind attributes')}
-          </Button>
-        </div>
-      </div>
-
-      <Card>
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={(row) => row.id}
-          loading={loading}
-          storageKey="model-attributes"
-          empty={
-            tr('还没有属性', 'No attributes yet')
-          }
-          actions={(row) => (
-            <>
-              <Hint content={row.inherited ? tr('这个属性来自父模型，请到父模型上编辑', 'It comes from a parent model; edit it there') : adminTip}>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  type="button"
-                  onClick={() => onEdit(row)}
-                  disabled={!isAdmin || row.inherited}
-                  aria-label={tr(`编辑 ${row.name}`, `Edit ${row.name}`)}
-                  className="inline-flex items-center gap-1"
-                >
-                  <Pencil size={12} aria-hidden="true" />
-                  {tr('编辑', 'Edit')}
-                </Button>
-              </Hint>
-              <Hint content={row.inherited ? tr('这个属性来自父模型，请到父模型上解绑', 'It comes from a parent model; unbind it there') : adminTip}>
-                <Button
-                  variant="dangerGhost"
-                  size="sm"
-                  type="button"
-                  onClick={() => onUnbind(row)}
-                  disabled={!isAdmin || row.inherited}
-                  aria-label={tr(`解绑 ${row.name}`, `Unbind ${row.name}`)}
-                  className="inline-flex items-center gap-1"
-                >
-                  <Trash2 size={12} aria-hidden="true" />
-                  {tr('解绑', 'Unbind')}
-                </Button>
-              </Hint>
-            </>
-          )}
-        />
-      </Card>
-    </div>
   );
 }
 
