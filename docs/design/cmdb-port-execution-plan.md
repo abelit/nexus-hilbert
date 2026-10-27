@@ -103,7 +103,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
 - 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
 - `bash scripts/test-compose-release-package.sh` 通过（含新增的 uninstall 镜像断言）；`docker compose -f deploy/docker-compose.yml config` 通过。
-- `make test-release-package` 通过（含 `test-upgrade-data-permissions.sh`、`test-compose-release-package.sh`）；`test-release-manifest-filter`、`test-release-image-publish`、`verify-compose-images` 通过。`test-upgrade-data-permissions.sh` 的断言已与新 CMDB 健康消息对齐。
+- `make test-release-workflow` 通过（临时 Ruby 3.4.10）；`make test-release-package` 通过（含 `test-upgrade-data-permissions.sh`、`test-compose-release-package.sh`）；`test-release-manifest-filter`、`test-release-image-publish`、`verify-compose-images` 通过。`test-upgrade-data-permissions.sh` 的断言已与新 CMDB 健康消息对齐。
 - 组合栈：`deploy/docker-compose.yml`（project `deploy`）运行中；`/cmdb-readyz` 200、认证后 `/api/v1/cmdb/health` 200、`/api/v1/cmdb/ci-types` 200，容器 `--healthcheck` exit 0。
 - 合并 `origin/main` 后重新验证：`go test ./...`、`go vet ./...`、`make test-race`（193 包）、`make test-integration`、前端 170 tests、`typecheck`、`build`、Playwright 144、release-package 脚本、`docker compose config` 全部通过。
 - `git diff --check` 通过；人工 import 边界核对通过（`cmdb/biz`→`cmdb/data`/其它 BC、`cmdb/server`→`cmdb/data`、`pkg`→BC、`cmd/ongrid`→`cmdb` 均为空）。
@@ -113,7 +113,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 
 - `make arch-lint` 需要 PATH 中有 `go-arch-lint`（CI 应安装 v1.19.0）。本机已临时安装 v1.19.0 并运行通过；`scripts/agent-observability/README.md:107` 的旧 1.12.0 校验失败记录不再适用于当前配置。
 - `make test-e2e` 在当前环境无法全绿：失败集中在未改动的 `tests/e2e/assistant_chat_test.go`（fake LLM/capture），且套件会超时；验收时按“未运行/未通过”记录。
-- `make test-release-workflow` 未运行：本机缺少 Ruby，Docker Hub 拉取 ruby 镜像超时；已用 Python 解析 `release.yml` 核对 job/needs/condition。
+- `make test-release-workflow` 已用临时解包的 Ruby 3.4.10（`/tmp/ruby-root`，未安装到系统）运行通过：release workflow 断言、`test-fetch-obi.sh`、`test-fetch-embedding-model.sh` 全过；本机默认 PATH 仍无 Ruby，CI 需自带 Ruby。
 - `npm run lint` 有 9 个既有错误，位于未触及文件；本次改动未新增 lint 错误。
 - `deploy/docker-compose.yml` 的原样栈已在本机运行（project `deploy`），认证后 CMDB 健康与实例接口 200；停止 CMDB 的网关隔离早前实测为 504（不是 502；Docker 停止容器的 IP 仍被 nginx 缓存），本轮未重复停服。
 - 发布前必须同时替换 `ongrid` 与 `ongrid-cmdb`；旧 manager 仍挂载 CMDB 路由。
