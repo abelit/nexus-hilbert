@@ -133,7 +133,7 @@ export function InstanceOverview({
         ))
       )}
 
-      <InstanceRelations ciID={instance.ci_id} modelRef={model.name} />
+      <InstanceRelations ciID={instance.ci_id} modelRef={model.name} models={models} />
     </div>
   );
 }

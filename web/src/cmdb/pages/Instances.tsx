@@ -99,7 +99,12 @@ export default function InstancesPage() {
     window.matchMedia?.('(max-width: 1279px)')?.matches ? 'grid' : 'table',
   );
   const [editing, setEditing] = useState<{ mode: 'create' } | { mode: 'edit'; id: number } | null>(null);
-  const [viewing, setViewing] = useState<{ id: number; tab: 'overview' | 'topology' } | null>(null);
+  // `?ci=` opens one instance after a jump from a related-resource row. The
+  // link uses a document reload, so the query is available on first render.
+  const [viewing, setViewing] = useState<{ id: number; tab: 'overview' | 'topology' } | null>(() => {
+    const ci = Number(params.get('ci'));
+    return Number.isSafeInteger(ci) && ci > 0 ? { id: ci, tab: 'overview' } : null;
+  });
 
   // The model rail loads once. It must not refetch on every model switch: the
   // list is the navigation, not the selected model's data.

@@ -907,6 +907,23 @@ test('resource detail shows its values, topology, change history and trigger rec
   await relations.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('resource-detail-relations-1440-light-zh-CN.png') });
 
+  const stickyTabs = await drawer.evaluate((dialog) => {
+    const scroller = dialog.querySelector('.overflow-y-auto');
+    const tabs = dialog.querySelector('[role="tablist"]');
+    if (!scroller || !tabs) return null;
+    scroller.scrollTop = 140;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const tabsRect = tabs.getBoundingClientRect();
+    const top = document.elementFromPoint(tabsRect.left + 20, scrollerRect.top + 5);
+    return {
+      gap: Math.round(tabsRect.top - scrollerRect.top),
+      coversPadding: top === tabs || tabs.contains(top),
+    };
+  });
+  expect(stickyTabs).not.toBeNull();
+  expect(Math.abs(stickyTabs?.gap ?? 99)).toBeLessThanOrEqual(1);
+  expect(stickyTabs?.coversPadding).toBe(true);
+
   await drawer.getByRole('tab', { name: '拓扑' }).click();
   await expect(page.locator('.react-flow')).toBeVisible();
   await expect(drawer.getByText('rack-01')).toBeVisible();

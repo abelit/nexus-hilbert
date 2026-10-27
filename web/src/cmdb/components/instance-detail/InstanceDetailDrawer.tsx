@@ -51,7 +51,8 @@ export function InstanceDetailDrawer({
   instanceID: number;
   initialTab?: TabKey;
   onClose(): void;
-  onEdit(instanceID: number): void;
+  /** Omit for a read-only peek opened from another resource. */
+  onEdit?(instanceID: number): void;
 }) {
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
@@ -183,40 +184,46 @@ export function InstanceDetailDrawer({
         </header>
       }
       footer={
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[11px] text-text-faint">
-            {tr('只读视图；编辑会打开表单并保留当前列表。', 'Read-only view; Edit opens the form without losing the list.')}
-          </span>
-          <Button variant="primary" type="button" onClick={() => onEdit(instanceID)} className="inline-flex items-center gap-1.5">
-            <Pencil size={12} aria-hidden="true" />
-            {tr('编辑', 'Edit')}
-          </Button>
-        </div>
+        onEdit ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] text-text-faint">
+              {tr('只读视图；编辑会打开表单并保留当前列表。', 'Read-only view; Edit opens the form without losing the list.')}
+            </span>
+            <Button variant="primary" type="button" onClick={() => onEdit(instanceID)} className="inline-flex items-center gap-1.5">
+              <Pencil size={12} aria-hidden="true" />
+              {tr('编辑', 'Edit')}
+            </Button>
+          </div>
+        ) : undefined
       }
     >
       <Tabs value={tab} onValueChange={(next) => setTab(next as TabKey)}>
         <div ref={topRef} />
-        <TabsList
-          aria-label={tr('资源详情视图', 'Resource detail views')}
-          className="cmdb-instance-drawer-tabs sticky top-0 z-10 mb-4 bg-card"
-        >
-          <TabsTrigger value="overview">
-            <Info size={14} aria-hidden="true" />
-            {tr('详情', 'Details')}
-          </TabsTrigger>
-          <TabsTrigger value="topology">
-            <Network size={14} aria-hidden="true" />
-            {tr('拓扑', 'Topology')}
-          </TabsTrigger>
-          <TabsTrigger value="history">
-            <History size={14} aria-hidden="true" />
-            {tr('变更历史', 'History')}
-          </TabsTrigger>
-          <TabsTrigger value="triggers">
-            <Zap size={14} aria-hidden="true" />
-            {tr('触发记录', 'Triggers')}
-          </TabsTrigger>
-        </TabsList>
+        {/* Sticky as a wrapper: the body's 1rem top padding must sit inside
+            the opaque surface, or scrolled content peeks above the tabs. */}
+        <div className="sticky -top-4 z-10 -mt-4 mb-4 bg-card">
+          <TabsList
+            aria-label={tr('资源详情视图', 'Resource detail views')}
+            className="cmdb-instance-drawer-tabs bg-card pt-4"
+          >
+            <TabsTrigger value="overview">
+              <Info size={14} aria-hidden="true" />
+              {tr('详情', 'Details')}
+            </TabsTrigger>
+            <TabsTrigger value="topology">
+              <Network size={14} aria-hidden="true" />
+              {tr('拓扑', 'Topology')}
+            </TabsTrigger>
+            <TabsTrigger value="history">
+              <History size={14} aria-hidden="true" />
+              {tr('变更历史', 'History')}
+            </TabsTrigger>
+            <TabsTrigger value="triggers">
+              <Zap size={14} aria-hidden="true" />
+              {tr('触发记录', 'Triggers')}
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="mt-4">
           {tab === 'overview' && (

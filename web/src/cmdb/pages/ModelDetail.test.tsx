@@ -147,6 +147,25 @@ describe('the attribute tab', () => {
     expect(screen.getByText('序列号')).toBeInTheDocument();
   });
 
+  it('shows only the types in use and exposes the rest through more types', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    renderPage();
+
+    await screen.findByText('主机名');
+    expect(screen.getByRole('button', { name: '短文本' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '整数' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '更多类型' }));
+    await user.click(screen.getByRole('checkbox', { name: '筛选整数' }));
+    expect(screen.getByRole('button', { name: '整数' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByText('没有匹配的属性')).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    await user.click(screen.getAllByRole('button', { name: '清除筛选' })[0]);
+    expect(within(await screen.findByRole('table')).getByText('主机名')).toBeInTheDocument();
+  });
+
   it('switches between the table and grid views and filters required attributes', async () => {
     const user = userEvent.setup();
     baseHandlers();

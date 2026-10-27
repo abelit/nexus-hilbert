@@ -152,6 +152,22 @@ export function searchInstances(params: SearchParams, signal?: AbortSignal): Pro
 
 // --- the relation graph between instances ---
 
+/**
+ * Relates two instances.
+ *
+ * The pair is ordered (first, second): a parent group adds the related instance
+ * as the parent of the current one, and a child group the other way round. The
+ * relation type is derived from the two models when omitted; callers that
+ * already have the model's rule pass its id.
+ */
+export function addRelation(
+  first: number,
+  second: number,
+  input: { relation_type_id?: number; ancestor_ids?: string } = {},
+): Promise<{ cr_id: number }> {
+  return cmdbPost<{ cr_id: number }>(`/ci-relations/${first}/${second}`, input);
+}
+
 export type InstanceRelation = {
   id: number;
   first_ci_id: number;

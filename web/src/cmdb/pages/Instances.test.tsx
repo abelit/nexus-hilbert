@@ -56,9 +56,9 @@ const attributes = [
 
 const switchModel = { ...model, id: 2, name: 'switch', alias: '交换机' };
 
-function renderPage() {
+function renderPage(path = '/cmdb/instances?type=host') {
   return render(
-    <MemoryRouter initialEntries={['/cmdb/instances?type=host']}>
+    <MemoryRouter initialEntries={[path]}>
       <ToastProvider>
         <InstancesPage />
       </ToastProvider>
@@ -515,6 +515,26 @@ describe('the detail drawer', () => {
     const drawer = await screen.findByRole('dialog');
     expect(within(drawer).getByText('UUID: e0eddc0a-cc2a-4fee-9f19-aac7a1f7e664')).toBeInTheDocument();
     expect(within(drawer).queryByText(/^ID: e0eddc0a/)).not.toBeInTheDocument();
+  });
+});
+
+describe('the detail drawer deep link', () => {
+  it('opens an instance directly from a ci query parameter', async () => {
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01' } }]);
+    server.use(
+      http.get('/api/v1/cmdb/instances/5', () =>
+        HttpResponse.json({ ci_id: 5, type_id: 1, values: { hostname: 'web-01' } }),
+      ),
+      http.get('/api/v1/cmdb/ci-types/host/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/host/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-relations/search', () =>
+        HttpResponse.json({ numfound: 0, total: 0, page: 1, result: [] }),
+      ),
+    );
+    renderPage('/cmdb/instances?type=host&ci=5');
+
+    const drawer = await screen.findByRole('dialog');
+    expect(await within(drawer).findAllByText('web-01')).not.toHaveLength(0);
   });
 });
 

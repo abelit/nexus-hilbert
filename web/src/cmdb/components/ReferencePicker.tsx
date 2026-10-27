@@ -9,6 +9,7 @@ import type { CIType, TypeAttribute } from '../api/citype';
 import { describeError } from '../api/http';
 import { searchInstances, type SearchRow } from '../api/instance';
 import type { ReferenceLabels } from '../lib/reference-labels';
+import { instanceSearchQuery } from '../lib/instance-search';
 import { referenceID, referenceLabel } from '../lib/reference-labels';
 import { displayValue, isEmptyValue } from '../lib/valuetype';
 
@@ -27,16 +28,6 @@ function selectedIDs(value: unknown): number[] {
   return values
     .map((item) => referenceID(item))
     .filter((id): id is number => id !== null);
-}
-
-function queryFor(typeID: number, needle: string): string {
-  const text = needle
-    .trim()
-    // A comma separates terms and a trailing backslash escapes one; the
-    // picker's text is a value, not an expression.
-    .replace(/\\/g, '\\\\')
-    .replace(/,/g, '\\,');
-  return text ? `_type:${typeID},*${text}*` : `_type:${typeID}`;
 }
 
 function optionFromHit(hit: SearchRow, model: CIType): Option {
@@ -100,7 +91,7 @@ export function ReferencePicker({
     setError(null);
     const timer = window.setTimeout(() => {
       void searchInstances(
-        { q: queryFor(Number(target.id), search), count: PAGE_SIZE, page: 1 },
+        { q: instanceSearchQuery(Number(target.id), search), count: PAGE_SIZE, page: 1 },
         controller.signal,
       )
         .then((page) => {

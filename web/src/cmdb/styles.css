@@ -534,3 +534,106 @@ html.dark .cmdb-instance-drawer-tabs .og-tabs-trigger[data-active] {
     align-items: stretch;
   }
 }
+
+/* The attribute workspace's compact header and dense table. Scope the row
+   spacing here: other CMDB tables keep the shared .75rem rhythm. */
+.cmdb-attribute-workspace .cmdb-attribute-table .og-resource-table thead {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.cmdb-attribute-workspace .cmdb-attribute-table .og-resource-table th {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.cmdb-attribute-workspace .cmdb-attribute-table .og-resource-table td {
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+.cmdb-attribute-workspace .cmdb-liquid-group-header {
+  padding-top: 0.6rem;
+  padding-bottom: 0.6rem;
+}
+
+.cmdb-attribute-workspace .cmdb-liquid-group-header [data-slot='checkbox'] {
+  width: 14px;
+  height: 14px;
+}
+
+.cmdb-attribute-workspace .cmdb-attr-type-count {
+  border-radius: 0.25rem;
+  background: rgb(var(--text) / 0.05);
+  padding: 1px 4px;
+  color: rgb(var(--text-faint));
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.cmdb-attribute-workspace .cmdb-liquid-type-filter.is-active .cmdb-attr-type-count {
+  background: rgb(59 130 246 / 0.12);
+  color: rgb(37 99 235);
+}
+
+html.dark .cmdb-attribute-workspace .cmdb-liquid-type-filter.is-active .cmdb-attr-type-count {
+  background: rgb(56 189 248 / 0.14);
+  color: rgb(125 211 252);
+}
+
+.cmdb-attribute-workspace .cmdb-liquid-policy.is-inherited {
+  border-color: rgb(139 92 246 / 0.3);
+  background: rgb(139 92 246 / 0.1);
+  color: rgb(109 40 217);
+}
+
+html.dark .cmdb-attribute-workspace .cmdb-liquid-policy.is-inherited {
+  color: rgb(196 181 253);
+}
+
+/* Actions are secondary in this workspace. The data tables elsewhere keep the
+   accent colours they already use. */
+.cmdb-attribute-workspace .cmdb-liquid-action-edit {
+  color: rgb(var(--text-muted));
+}
+
+.cmdb-attribute-workspace .cmdb-liquid-action-danger {
+  color: rgb(var(--text-faint));
+}
+
+.cmdb-attribute-workspace .cmdb-liquid-action-edit:hover:not(:disabled) {
+  color: rgb(37 99 235);
+}
+
+.cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabled) {
+  color: rgb(225 29 72);
+}
+
+html.dark .cmdb-attribute-workspace .cmdb-liquid-action-edit:hover:not(:disabled) {
+  color: rgb(125 211 252);
+}
+
+html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabled) {
+  color: rgb(251 113 133);
+}
+
+/* The related-resource table shows a resource identity, two operational fields
+   and row actions. Keep its rows compact so the sidebar and the table read as
+   one unit inside the instance drawer. */
+.cmdb-relation-table .og-resource-table thead {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.cmdb-relation-table .og-resource-table th {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+.cmdb-relation-table .og-resource-table td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}

@@ -8,7 +8,6 @@ import {
   GitBranch,
   Hash,
   LayoutGrid,
-  Lightbulb,
   Pencil,
   Plus,
   Search,
@@ -23,6 +22,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Hint } from '@/components/ui/Tooltip';
 import { Input } from '@/components/ui/Input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 
@@ -55,6 +55,8 @@ type Section = {
   inherited: boolean;
   rows: TypeAttribute[];
 };
+
+const MAX_PRIMARY_TYPES = 5;
 
 const GROUP_TONES = [
   'bg-sky-500/10 text-sky-500',
@@ -152,6 +154,29 @@ export function ModelAttributesPanel({
 
   const requiredCount = rows.filter((row) => row.is_required).length;
   const inheritedCount = rows.filter((row) => row.inherited).length;
+  const typeCounts = useMemo(() => {
+    const counts = new Map<AttributeDisplayType, number>();
+    for (const row of rows) {
+      const type = attributeDisplayType(row);
+      if (!type) continue;
+      counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+    return counts;
+  }, [rows]);
+  const usedTypes = useMemo(
+    () => ATTRIBUTE_DISPLAY_TYPE_ORDER.filter((type) => (typeCounts.get(type) ?? 0) > 0),
+    [typeCounts],
+  );
+  // The first five used types are visible; a type selected from the menu is
+  // appended so its active state can be turned off without reopening the menu.
+  const primaryTypes = useMemo(() => {
+    const shown = usedTypes.slice(0, MAX_PRIMARY_TYPES);
+    for (const type of ATTRIBUTE_DISPLAY_TYPE_ORDER) {
+      if (types.includes(type) && !shown.includes(type)) shown.push(type);
+    }
+    return shown;
+  }, [usedTypes, types]);
+  const moreTypeCount = ATTRIBUTE_DISPLAY_TYPE_ORDER.length - primaryTypes.length;
 
   const clearFilters = () => {
     setQuery('');
@@ -246,21 +271,32 @@ export function ModelAttributesPanel({
   ];
 
   return (
-    <div className="cmdb-liquid relative min-w-0 overflow-hidden">
+    <div className="cmdb-attribute-workspace cmdb-liquid relative min-w-0 overflow-hidden">
       <div className="cmdb-liquid-blobs" aria-hidden="true">
         <span className="cmdb-liquid-blob cmdb-liquid-blob-a" />
         <span className="cmdb-liquid-blob cmdb-liquid-blob-b" />
         <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
       </div>
 
-      <div className="cmdb-liquid-content relative flex flex-col gap-4">
-        <div className="cmdb-liquid-panel rounded-2xl p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-3 text-xs text-text-muted">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-500">
-                <Lightbulb size={14} aria-hidden="true" />
-              </span>
-              <p className="leading-5">
+      <div className="cmdb-liquid-content relative flex flex-col gap-3">
+        <div className="cmdb-liquid-panel rounded-2xl px-4 py-3.5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <h2 className="text-sm font-bold tracking-tight text-text">{tr('属性', 'Attributes')}</h2>
+                <span className="rounded-md bg-text/5 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
+                  {tr(`${rows.length} 个属性`, `${rows.length} attributes`)}
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-text-muted">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                  {tr('必填', 'Required')} <span className="font-medium text-text">{requiredCount}</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-text-muted">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky-500" aria-hidden="true" />
+                  {tr('继承', 'Inherited')} <span className="font-medium text-text">{inheritedCount}</span>
+                </span>
+              </div>
+              <p className="mt-1.5 max-w-3xl text-[11px] leading-5 text-text-muted">
                 {tr(
                   '属性优先存在于属性字典中，绑定至模型后独立生效；相同属性可在不同模型中灵活配置。',
                   'Attributes live in the dictionary first and take effect per model once bound; the same attribute can be configured differently on each model.',
@@ -292,143 +328,198 @@ export function ModelAttributesPanel({
           </div>
 
           <div className="cmdb-liquid-divider mt-3 border-t pt-3">
-            <div
-              role="group"
-              aria-label={tr('按数据类型筛选', 'Filter by data type')}
-              className="flex flex-wrap items-center gap-1"
-            >
-              {ATTRIBUTE_DISPLAY_TYPE_ORDER.map((type) => {
-                const meta = ATTRIBUTE_TYPE_META[type];
-                const Icon = meta.icon;
-                const active = types.includes(type);
-                const label = tr(meta.label[0], meta.label[1]);
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => toggleType(type)}
-                    title={tr(`只看${meta.label[0]}`, `Show ${meta.label[1]} only`)}
-                    className={cn('cmdb-liquid-type-filter inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]', active && 'is-active')}
+            <div className="flex flex-col gap-2.5 min-[1360px]:flex-row min-[1360px]:items-center min-[1360px]:justify-between">
+              <div
+                role="group"
+                aria-label={tr('按数据类型筛选', 'Filter by data type')}
+                className="flex min-w-0 flex-wrap items-center gap-1"
+              >
+                <button
+                  type="button"
+                  aria-label={tr('全部类型', 'All types')}
+                  aria-pressed={types.length === 0}
+                  onClick={() => setTypes([])}
+                  className={cn('cmdb-liquid-type-filter inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]', types.length === 0 && 'is-active')}
+                >
+                  {tr('全部', 'All')}
+                  <span aria-hidden="true" className="cmdb-attr-type-count">{rows.length}</span>
+                </button>
+                {primaryTypes.map((type) => {
+                  const meta = ATTRIBUTE_TYPE_META[type];
+                  const Icon = meta.icon;
+                  const active = types.includes(type);
+                  const label = tr(meta.label[0], meta.label[1]);
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      aria-label={label}
+                      aria-pressed={active}
+                      onClick={() => toggleType(type)}
+                      title={tr(`只看${meta.label[0]}`, `Show ${meta.label[1]} only`)}
+                      className={cn('cmdb-liquid-type-filter inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]', active && 'is-active')}
+                    >
+                      <Icon size={13} aria-hidden="true" />
+                      {label}
+                      <span aria-hidden="true" className="cmdb-attr-type-count">{typeCounts.get(type) ?? 0}</span>
+                    </button>
+                  );
+                })}
+                <Popover>
+                  <PopoverTrigger
+                    aria-label={tr('更多类型', 'More types')}
+                    className="cmdb-liquid-type-filter inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]"
                   >
-                    <Icon size={13} aria-hidden="true" />
-                    {label}
-                  </button>
-                );
-              })}
+                    <ChevronDown size={12} aria-hidden="true" />
+                    {tr('更多类型', 'More types')}
+                    {moreTypeCount > 0 && (
+                      <span aria-hidden="true" className="cmdb-attr-type-count">{moreTypeCount}</span>
+                    )}
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 max-w-[calc(100vw-2rem)] p-2" aria-label={tr('全部数据类型', 'All data types')}>
+                    <div className="mb-1 flex items-center justify-between gap-2 px-1">
+                      <span className="text-[11px] font-medium text-text">{tr('全部数据类型', 'All data types')}</span>
+                      {types.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setTypes([])}
+                          className="text-[10px] text-text-faint hover:text-text"
+                        >
+                          {tr('清除', 'Clear')}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
+                      {ATTRIBUTE_DISPLAY_TYPE_ORDER.map((type) => {
+                        const meta = ATTRIBUTE_TYPE_META[type];
+                        const Icon = meta.icon;
+                        const label = tr(meta.label[0], meta.label[1]);
+                        return (
+                          <label
+                            key={type}
+                            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-text-muted hover:bg-text/5"
+                          >
+                            <Checkbox
+                              checked={types.includes(type)}
+                              onCheckedChange={() => toggleType(type)}
+                              aria-label={tr(`筛选${label}`, `Filter ${label}`)}
+                            />
+                            <Icon size={13} aria-hidden="true" />
+                            <span className="min-w-0 flex-1 truncate">{label}</span>
+                            <span className="font-mono text-[10px] text-text-faint">{typeCounts.get(type) ?? 0}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 min-[1360px]:justify-end">
+                <div className="relative w-full min-w-0 sm:w-56">
+                  <Search
+                    size={13}
+                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    type="search"
+                    aria-label={tr('搜索属性', 'Search attributes')}
+                    placeholder={tr('搜索属性名、Key 或别名…', 'Search name, key or alias…')}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    className="w-full pl-7 text-xs"
+                  />
+                </div>
+                <div className="cmdb-liquid-segment flex shrink-0 items-center gap-1 p-1">
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    aria-pressed={view === 'table'}
+                    onClick={() => setView('table')}
+                    className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'table' && 'is-active')}
+                  >
+                    <Table2 size={12} aria-hidden="true" />
+                    {tr('列表', 'List')}
+                  </Button>
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    aria-pressed={view === 'grid'}
+                    onClick={() => setView('grid')}
+                    className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'grid' && 'is-active')}
+                  >
+                    <LayoutGrid size={12} aria-hidden="true" />
+                    {tr('网格', 'Grid')}
+                  </Button>
+                </div>
+              </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 sm:w-auto">
-                <label className="cmdb-liquid-filter inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className={cn('cmdb-liquid-policy cursor-pointer', onlyRequired && 'is-required')}>
                   <Checkbox
                     checked={onlyRequired}
                     onCheckedChange={(next) => setOnlyRequired(next === true)}
                     aria-label={tr('只看必填属性', 'Required only')}
                   />
-                  {tr('只看必填属性', 'Required only')}
+                  {tr('只看必填', 'Required')}
                 </label>
-                <label className="cmdb-liquid-filter inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
+                <label className={cn('cmdb-liquid-policy cursor-pointer', onlyInherited && 'is-inherited')}>
                   <Checkbox
                     checked={onlyInherited}
                     onCheckedChange={(next) => setOnlyInherited(next === true)}
                     aria-label={tr('只看继承', 'Inherited only')}
                   />
-                  {tr('只看继承', 'Inherited only')}
+                  {tr('只看继承', 'Inherited')}
                 </label>
+                {filtering ? (
+                  <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-text-faint">
+                    {tr(`显示 ${filtered.length} / ${rows.length}`, `showing ${filtered.length} of ${rows.length}`)}
+                    <Button
+                      variant="plain"
+                      size="sm"
+                      type="button"
+                      onClick={clearFilters}
+                      className="cmdb-liquid-plain-action text-[10px]"
+                    >
+                      {tr('清除筛选', 'Clear filters')}
+                    </Button>
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-text-faint">
+                    {tr(`${sections.length} 个分组`, `${sections.length} sections`)}
+                  </span>
+                )}
               </div>
-              <div className="relative w-full min-w-0 sm:w-60">
-                <Search
-                  size={13}
-                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
-                  aria-hidden="true"
-                />
-                <Input
-                  type="search"
-                  aria-label={tr('搜索属性', 'Search attributes')}
-                  placeholder={tr('搜索属性名或 Key…', 'Search name or key…')}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  className="w-full pl-7 text-xs"
-                />
-              </div>
-              <div className="cmdb-liquid-segment ms-auto flex shrink-0 items-center gap-1 p-1">
+              <div className="flex items-center gap-1.5">
                 <Button
                   variant="plain"
                   size="sm"
                   type="button"
-                  aria-pressed={view === 'table'}
-                  onClick={() => setView('table')}
-                  className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'table' && 'is-active')}
+                  onClick={() => setAllCollapsed(false)}
+                  className="cmdb-liquid-plain-action inline-flex items-center gap-1 text-[10px]"
                 >
-                  <Table2 size={12} aria-hidden="true" />
-                  {tr('列表', 'List')}
+                  <ChevronDown size={12} aria-hidden="true" />
+                  {tr('展开全部分组', 'Expand all')}
                 </Button>
+                <span className="text-text-faint" aria-hidden="true">/</span>
                 <Button
                   variant="plain"
                   size="sm"
                   type="button"
-                  aria-pressed={view === 'grid'}
-                  onClick={() => setView('grid')}
-                  className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'grid' && 'is-active')}
+                  onClick={() => setAllCollapsed(true)}
+                  disabled={allCollapsed}
+                  className="cmdb-liquid-plain-action inline-flex items-center gap-1 text-[10px]"
                 >
-                  <LayoutGrid size={12} aria-hidden="true" />
-                  {tr('网格', 'Grid')}
+                  <ChevronUp size={12} aria-hidden="true" />
+                  {tr('收起全部分组', 'Collapse all')}
                 </Button>
               </div>
             </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-text-muted">
-          <div className="flex flex-wrap items-center gap-2">
-            <span>{tr('模型共有', 'Model has')}</span>
-            <span className="font-medium text-text">{tr(`${rows.length} 个属性`, `${rows.length} attributes`)}</span>
-            <span className="text-text-faint" aria-hidden="true">·</span>
-            <span className="font-medium text-amber-500">{tr(`必填 ${requiredCount}`, `${requiredCount} required`)}</span>
-            <span className="text-text-faint" aria-hidden="true">·</span>
-            <span className="font-medium text-sky-500">{tr(`继承 ${inheritedCount}`, `${inheritedCount} inherited`)}</span>
-            {filtering && (
-              <>
-                <span className="text-text-faint" aria-hidden="true">·</span>
-                <span className="text-text-faint">
-                  {tr(`显示 ${filtered.length} / ${rows.length}`, `showing ${filtered.length} of ${rows.length}`)}
-                </span>
-                <Button
-                  variant="plain"
-                  size="sm"
-                  type="button"
-                  onClick={clearFilters}
-                  className="cmdb-liquid-plain-action text-[11px]"
-                >
-                  {tr('清除筛选', 'Clear filters')}
-                </Button>
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="plain"
-              size="sm"
-              type="button"
-              onClick={() => setAllCollapsed(false)}
-              className="cmdb-liquid-plain-action inline-flex items-center gap-1"
-            >
-              <ChevronDown size={12} aria-hidden="true" />
-              {tr('展开全部分组', 'Expand all')}
-            </Button>
-            <span className="text-text-faint" aria-hidden="true">/</span>
-            <Button
-              variant="plain"
-              size="sm"
-              type="button"
-              onClick={() => setAllCollapsed(true)}
-              disabled={allCollapsed}
-              className="cmdb-liquid-plain-action inline-flex items-center gap-1"
-            >
-              <ChevronUp size={12} aria-hidden="true" />
-              {tr('收起全部分组', 'Collapse all')}
-            </Button>
           </div>
         </div>
 
@@ -520,21 +611,23 @@ export function ModelAttributesPanel({
                   {open && (
                     <div id={contentID} className="cmdb-liquid-group-body">
                       {view === 'table' ? (
-                        <DataTable
-                          columns={columns}
-                          rows={section.rows}
-                          rowKey={(row) => row.id}
-                          actionsHeader={tr('操作', 'Actions')}
-                          actions={(row) => (
-                            <ActionButtons
-                              row={row}
-                              isAdmin={isAdmin}
-                              adminTip={adminTip}
-                              onEdit={onEdit}
-                              onUnbind={onUnbind}
-                            />
-                          )}
-                        />
+                        <div className="cmdb-attribute-table">
+                          <DataTable
+                            columns={columns}
+                            rows={section.rows}
+                            rowKey={(row) => row.id}
+                            actionsHeader={tr('操作', 'Actions')}
+                            actions={(row) => (
+                              <ActionButtons
+                                row={row}
+                                isAdmin={isAdmin}
+                                adminTip={adminTip}
+                                onEdit={onEdit}
+                                onUnbind={onUnbind}
+                              />
+                            )}
+                          />
+                        </div>
                       ) : (
                         <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                           {section.rows.map((row) => (
