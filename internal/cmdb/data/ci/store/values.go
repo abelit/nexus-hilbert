@@ -62,6 +62,13 @@ func (r *Repo) CreateCIWithValues(ctx context.Context, in cibiz.CreateInput) (*c
 // transaction, together with the unique-value lookup and the per-model lock.
 // Two transactions would leave the gap that the lock exists to close.
 func insertCIWithValues(tx *gorm.DB, ci *cimodel.CI, specs map[cmdbmodel.ID]cibiz.AttributeSpec, values map[cmdbmodel.ID]any, audit cibiz.AuditInfo) error {
+	// The CI carries the same audit label as an update, so the detail header can
+	// name the creator before the first edit. A system write (import, discovery)
+	// has no email and leaves the column empty, which the console hides.
+	if audit.ActorEmail != "" {
+		email := audit.ActorEmail
+		ci.UpdatedBy = &email
+	}
 	// The CI must exist before values can reference it, so the plan is built
 	// with the assigned id rather than a placeholder.
 	if err := tx.Create(ci).Error; err != nil {
@@ -152,8 +159,14 @@ func applyValues(tx *gorm.DB, ciID, typeID cmdbmodel.ID, specs map[cmdbmodel.ID]
 		if err != nil {
 			return nil, err
 		}
+		// updated_by travels with the document write: the column exists for
+		// exactly this, and GORM's map form also refreshes updated_at.
+		updates := map[string]any{"props_json": doc}
+		if audit.ActorEmail != "" {
+			updates["updated_by"] = audit.ActorEmail
+		}
 		if err := tx.Model(&cimodel.CI{}).Where("id = ?", ciID).
-			Update("props_json", doc).Error; err != nil {
+			Updates(updates).Error; err != nil {
 			return nil, fmt.Errorf("write CI document: %w", err)
 		}
 

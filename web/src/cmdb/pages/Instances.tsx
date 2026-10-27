@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Boxes,
+  ChevronDown,
   Eye,
   FileUp,
+  Folder,
   LayoutGrid,
   Network,
   Pencil,
@@ -42,16 +44,18 @@ import {
   updateInstance,
   type Instance,
 } from '../api/instance';
-import { getShowFields } from '../api/preferences';
+import { getShowFields, listModelGroups, type ModelGroup } from '../api/preferences';
 import { AttributeControl, AttributeValue } from '../components/AttributeControl';
 import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { Drawer } from '../components/Drawer';
 import { InstanceDetailDrawer } from '../components/instance-detail/InstanceDetailDrawer';
+import { InstanceFieldsDialog } from '../components/InstanceFieldsDialog';
 import { ReferencePicker } from '../components/ReferencePicker';
 import { useToast } from '../components/Toast';
 import { attributeSections } from '../lib/attribute-sections';
 import { choiceText } from '../lib/choice-labels';
+import { groupModels } from '../lib/model-groups';
 import { referenceRawText, referenceText, useReferenceLabels, type ReferenceLabels } from '../lib/reference-labels';
 import { displayValue, isValueTypeCode } from '../lib/valuetype';
 
@@ -81,6 +85,13 @@ export default function InstancesPage() {
 
   const [models, setModels] = useState<CIType[]>([]);
   const [modelsErr, setModelsErr] = useState<string | null>(null);
+  // Groups are a separate snapshot, exactly as on the 模型配置 page: a group
+  // failure must not blank the rail, it only leaves it flat.
+  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
+  const [modelGroupsErr, setModelGroupsErr] = useState<string | null>(null);
+  // Collapsed groups are a view preference, not persisted state: the selected
+  // model's group reopens automatically, and a reload starts from a full rail.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [typeRef, setTypeRef] = useState<string>(params.get('type') ?? '');
   const [attributes, setAttributes] = useState<TypeAttribute[]>([]);
   const [groups, setGroups] = useState<AttributeGroup[]>([]);
@@ -106,10 +117,22 @@ export default function InstancesPage() {
     return Number.isSafeInteger(ci) && ci > 0 ? { id: ci, tab: 'overview' } : null;
   });
 
+  const loadModelGroups = useCallback(async () => {
+    try {
+      setModelGroups(await listModelGroups());
+      setModelGroupsErr(null);
+    } catch (error) {
+      // The flat list stays usable; the rail says why it is not grouped instead
+      // of pretending the deployment has no groups.
+      setModelGroupsErr(describeError(error, tr('无法读取模型分组', 'Could not load the model groups')));
+    }
+  }, [tr]);
+
   // The model rail loads once. It must not refetch on every model switch: the
   // list is the navigation, not the selected model's data.
   const loadModels = useCallback(async () => {
     setModelsErr(null);
+    void loadModelGroups();
     try {
       const all = await listCITypes();
       setModels(all);
@@ -117,7 +140,7 @@ export default function InstancesPage() {
     } catch (error) {
       setModelsErr(describeError(error, tr('无法读取模型', 'Could not load models')));
     }
-  }, [tr]);
+  }, [loadModelGroups, tr]);
 
   useEffect(() => {
     void loadModels();
@@ -125,7 +148,7 @@ export default function InstancesPage() {
 
   useEffect(() => {
     selectedRailRef.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [typeRef, models]);
+  }, [collapsedGroups, typeRef, models, modelGroups]);
 
   const model = useMemo(
     () => models.find((item) => item.name === typeRef || String(item.id) === typeRef),
@@ -299,11 +322,79 @@ export default function InstancesPage() {
     return models.filter((item) => `${item.alias} ${item.name}`.toLowerCase().includes(needle));
   }, [models, modelQuery]);
 
+  // The rail mirrors 模型配置's grouping: groups come from c_ci_type_groups,
+  // the model order inside them is the same, and the trailing 其他 bucket
+  // collects every model no group claims. Searching narrows each section.
+  const modelSections = useMemo(
+    () =>
+      groupModels(filteredModels, modelGroups, {
+        other: tr('其他', 'Other'),
+        all: tr('全部模型', 'All models'),
+        unnamed: tr('未命名分组', 'Untitled group'),
+      }),
+    [filteredModels, modelGroups, tr],
+  );
+  const groupedRail = modelGroups.some((group) => !group.is_other);
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // The selected model must stay visible: a deep link or a model switch reopens
+  // the group that holds it. A manual collapse of the current group sticks,
+  // because this effect does not depend on `collapsedGroups`.
+  useEffect(() => {
+    if (!groupedRail || !typeRef) return;
+    const section = modelSections.find((candidate) =>
+      candidate.rows.some((item) => item.name === typeRef || String(item.id) === typeRef),
+    );
+    if (!section) return;
+    setCollapsedGroups((current) => {
+      if (!current.has(section.key)) return current;
+      const next = new Set(current);
+      next.delete(section.key);
+      return next;
+    });
+  }, [groupedRail, modelSections, typeRef]);
+
   const filtering = filter.trim().length > 0 || envFilter !== 'all' || levelFilter !== 'all';
   const clearFilters = () => {
     setFilter('');
     setEnvFilter('all');
     setLevelFilter('all');
+  };
+
+  // One rail row, shared by the flat and grouped renders so the two modes
+  // cannot drift in height, colour or accessible name.
+  const renderModelButton = (item: CIType) => {
+    const selected = item.name === typeRef || String(item.id) === typeRef;
+    return (
+      <button
+        key={item.id}
+        ref={selected ? selectedRailRef : undefined}
+        type="button"
+        onClick={() => chooseModel(item.name)}
+        aria-pressed={selected}
+        aria-label={item.alias || item.name}
+        title={item.alias || item.name}
+        className={cn(
+          'flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500',
+          selected ? 'bg-indigo-500/15 text-text' : 'text-text-muted hover:bg-card hover:text-text',
+        )}
+      >
+        <CMDBIcon value={item.icon} size={14} label={item.alias || item.name} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{item.alias || item.name}</span>
+          <span className="block truncate font-mono text-[10px] text-text-faint">{item.name}</span>
+        </span>
+        {!item.enabled && <Chip dense>{tr('停用', 'Off')}</Chip>}
+      </button>
+    );
   };
 
   const tableColumns: Column<Instance>[] = columns.map((attribute) => ({
@@ -366,6 +457,23 @@ export default function InstancesPage() {
           </div>
 
           <nav className="min-h-0 flex-1 overflow-y-auto p-2" aria-label={tr('模型对象', 'Model objects')}>
+            {modelGroupsErr && (
+              <div
+                role="status"
+                className="mx-1 mb-2 flex flex-wrap items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300"
+              >
+                <span className="min-w-0 flex-1" title={modelGroupsErr}>
+                  {tr('模型分组加载失败，已按平铺显示。', 'Model groups are unavailable; showing a flat list.')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void loadModelGroups()}
+                  className="underline underline-offset-2 hover:text-amber-900 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-500 dark:hover:text-amber-200"
+                >
+                  {tr('重试', 'Retry')}
+                </button>
+              </div>
+            )}
             {modelsErr ? (
               <div role="alert" className="flex flex-col items-center gap-2 px-2 py-6 text-center">
                 <p className="text-xs text-red-600 dark:text-red-300">
@@ -380,34 +488,48 @@ export default function InstancesPage() {
               <p className="px-2 py-6 text-center text-[11px] text-text-faint">
                 {tr('没有匹配的模型', 'No models match')}
               </p>
-            ) : (
-              <div className="flex flex-col gap-0.5">
-                {filteredModels.map((item) => {
-                  const selected = item.name === typeRef || String(item.id) === typeRef;
+            ) : groupedRail ? (
+              <div className="flex flex-col gap-1">
+                {modelSections.map((section) => {
+                  const headingID = `cmdb-rail-group-${section.key}`;
+                  const bodyID = `cmdb-rail-group-body-${section.key}`;
+                  const collapsed = collapsedGroups.has(section.key);
                   return (
-                    <button
-                      key={item.id}
-                      ref={selected ? selectedRailRef : undefined}
-                      type="button"
-                      onClick={() => chooseModel(item.name)}
-                      aria-pressed={selected}
-                      aria-label={item.alias || item.name}
-                      title={item.alias || item.name}
-                      className={cn(
-                        'flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500',
-                        selected ? 'bg-indigo-500/15 text-text' : 'text-text-muted hover:bg-card hover:text-text',
-                      )}
-                    >
-                      <CMDBIcon value={item.icon} size={14} label={item.alias || item.name} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate">{item.alias || item.name}</span>
-                        <span className="block truncate font-mono text-[10px] text-text-faint">{item.name}</span>
-                      </span>
-                      {!item.enabled && <Chip dense>{tr('停用', 'Off')}</Chip>}
-                    </button>
+                    <section key={section.key} aria-labelledby={headingID} className="flex flex-col gap-0.5">
+                      <h3 id={headingID} className="min-w-0 text-[10px] font-medium text-text-faint">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(section.key)}
+                          aria-expanded={!collapsed}
+                          aria-controls={bodyID}
+                          className="flex w-full min-w-0 items-center gap-1 rounded-md px-2 py-1 text-left hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+                        >
+                          <ChevronDown
+                            size={11}
+                            className={cn('shrink-0 transition-transform motion-reduce:transition-none', collapsed && '-rotate-90')}
+                            aria-hidden="true"
+                          />
+                          <Folder size={10} className="shrink-0 text-indigo-400" aria-hidden="true" />
+                          <span className="min-w-0 flex-1 truncate" title={section.name}>
+                            {section.name}
+                          </span>
+                          <span className="shrink-0 font-mono">{section.rows.length}</span>
+                        </button>
+                      </h3>
+                      {/* Conditional rendering, not the `hidden` attribute or
+                          a display class: Tailwind's `flex` overrides the UA
+                          `[hidden]` rule, and jsdom has no Tailwind at all. */}
+                      <div id={bodyID}>
+                        {!collapsed && (
+                          <div className="flex flex-col gap-0.5">{section.rows.map(renderModelButton)}</div>
+                        )}
+                      </div>
+                    </section>
                   );
                 })}
               </div>
+            ) : (
+              <div className="flex flex-col gap-0.5">{filteredModels.map(renderModelButton)}</div>
             )}
           </nav>
 
@@ -650,6 +772,14 @@ export default function InstancesPage() {
                         className="w-full pl-7 text-xs"
                       />
                     </div>
+                    {model && (
+                      <InstanceFieldsDialog
+                        model={model}
+                        attributes={attributes}
+                        columns={columns}
+                        onSaved={setColumns}
+                      />
+                    )}
                     <div
                       className="cmdb-liquid-segment flex shrink-0 items-center gap-1 p-1"
                       role="group"
@@ -858,6 +988,7 @@ export default function InstancesPage() {
             setViewing(null);
             setEditing({ mode: 'edit', id });
           }}
+          onInstanceSaved={() => void load(true)}
         />
       )}
 

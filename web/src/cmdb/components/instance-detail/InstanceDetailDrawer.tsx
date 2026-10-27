@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { History, Info, Network, Pencil, X, Zap } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Clock3, Fingerprint, Hash, History, Info, Network, Pencil, UserRound, X, Zap } from 'lucide-react';
 
 import { Button } from '@/components/ui';
+import { Chip } from '@/components/ui/Chip';
 import { DialogDescription, DialogTitle } from '@/components/ui/Dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { listUsers, type User } from '@/api/users';
@@ -10,11 +11,14 @@ import { cn } from '@/lib/cn';
 import { usePermissions } from '@/store/me';
 
 import type { AttributeGroup, CIType, TypeAttribute } from '../../api/citype';
+import { listAttributeGroups, listCITypes, listTypeAttributes } from '../../api/citype';
 import { describeError } from '../../api/http';
-import { getInstance, type Instance } from '../../api/instance';
+import { getInstance, updateInstance, type Instance } from '../../api/instance';
 import { choiceText } from '../../lib/choice-labels';
 import { displayValue } from '../../lib/valuetype';
+import { CMDBIcon } from '../CMDBIcon';
 import { Drawer } from '../Drawer';
+import { useToast } from '../Toast';
 import { InstanceHistory } from './InstanceHistory';
 import { InstanceOverview } from './InstanceOverview';
 import { InstanceTopology } from './InstanceTopology';
@@ -34,6 +38,18 @@ import { InstanceTriggers } from './InstanceTriggers';
 
 type TabKey = 'overview' | 'topology' | 'history' | 'triggers';
 
+// A topology node opened from the drawer becomes the drawer's new subject.
+// Cantor switched the whole detail panel to the double-clicked CI and kept the
+// topology tab active; the same switch happens here, resolving the target
+// model's metadata on first visit so a cross-model jump still has labels and
+// form sections.
+type Subject = {
+  id: number;
+  model: CIType;
+  attributes: TypeAttribute[];
+  groups: AttributeGroup[];
+};
+
 export function InstanceDetailDrawer({
   model,
   models,
@@ -43,6 +59,7 @@ export function InstanceDetailDrawer({
   initialTab = 'overview',
   onClose,
   onEdit,
+  onInstanceSaved,
 }: {
   model: CIType;
   models: CIType[];
@@ -53,11 +70,22 @@ export function InstanceDetailDrawer({
   onClose(): void;
   /** Omit for a read-only peek opened from another resource. */
   onEdit?(instanceID: number): void;
+  /** Lets the list or relation table behind the drawer refresh after an edit. */
+  onInstanceSaved?(instanceID: number): void;
 }) {
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
+  const toast = useToast();
   const [tab, setTab] = useState<TabKey>(initialTab);
-  const [instance, setInstance] = useState<Instance | null>(null);
+  // `nav` holds a subject opened from the topology; until then the props are
+  // authoritative. The effect clears it when a different row/model is opened.
+  const [nav, setNav] = useState<Subject | null>(null);
+  const [navError, setNavError] = useState<string | null>(null);
+  const metaCache = useRef(new Map<number, { attributes: TypeAttribute[]; groups: AttributeGroup[] }>());
+  const navSeq = useRef(0);
+  // The loaded instance is tagged with the subject it belongs to, so a switch
+  // never paints the previous resource's values under the new title.
+  const [loaded, setLoaded] = useState<{ id: number; instance: Instance } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
@@ -65,13 +93,24 @@ export function InstanceDetailDrawer({
   const topRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    setNav(null);
+    setNavError(null);
+  }, [instanceID, model.id]);
+
+  const subject = useMemo<Subject>(
+    () => nav ?? { id: instanceID, model, attributes, groups },
+    [nav, instanceID, model, attributes, groups],
+  );
+  const instance = loaded?.id === subject.id ? loaded.instance : null;
+
+  useEffect(() => {
     let live = true;
+    const id = subject.id;
     setLoading(true);
     setError(null);
-    setInstance(null);
-    void getInstance(instanceID)
+    void getInstance(id)
       .then((got) => {
-        if (live) setInstance(got);
+        if (live) setLoaded({ id, instance: got });
       })
       .catch((err) => {
         if (live) setError(describeError(err, tr('无法读取实例', 'Could not load the instance')));
@@ -82,12 +121,86 @@ export function InstanceDetailDrawer({
     return () => {
       live = false;
     };
-  }, [instanceID, retryKey, tr]);
+  }, [subject.id, retryKey, tr]);
+
+  // Same-model targets reuse the metadata already on screen; a cross-model
+  // jump fetches the target's attributes and sections once per drawer.
+  const openNode = useCallback(
+    async (target: { ciID: number; typeID: number }) => {
+      if (Number(target.ciID) === Number(subject.id)) return;
+      const seq = ++navSeq.current;
+      setNavError(null);
+      if (Number(target.typeID) === Number(subject.model.id)) {
+        setNav({ id: target.ciID, model: subject.model, attributes: subject.attributes, groups: subject.groups });
+        setTab('topology');
+        return;
+      }
+      try {
+        const found = models.find((item) => Number(item.id) === Number(target.typeID))
+          ?? (await listCITypes({ ids: String(target.typeID) })).find(
+            (item) => Number(item.id) === Number(target.typeID),
+          );
+        if (!found) {
+          if (navSeq.current === seq) {
+            setNavError(tr('找不到目标模型，无法切换资源。', 'The target model could not be found.'));
+          }
+          return;
+        }
+        let meta = metaCache.current.get(found.id);
+        if (!meta) {
+          const [attrs, sections] = await Promise.all([
+            listTypeAttributes(found.name),
+            listAttributeGroups(found.name, false).catch(() => [] as AttributeGroup[]),
+          ]);
+          meta = { attributes: attrs.attributes ?? [], groups: sections };
+          metaCache.current.set(found.id, meta);
+        }
+        if (navSeq.current !== seq) return;
+        setNav({ id: target.ciID, model: found, attributes: meta.attributes, groups: meta.groups });
+        setTab('topology');
+      } catch (err) {
+        if (navSeq.current === seq) {
+          setNavError(describeError(err, tr('无法打开关联资源', 'Could not open the related resource')));
+        }
+      }
+    },
+    [models, subject, tr],
+  );
+
+  // An inline save writes ONE attribute; the usecase normalises only the keys
+  // supplied, so the rest of the instance is untouched. The local value updates
+  // immediately, then a quiet refresh picks up computed attributes without
+  // turning a failed refresh into a false save failure.
+  const saveAttribute = useCallback(
+    async (name: string, value: unknown) => {
+      const target = subject.id;
+      await updateInstance(target, { values: { [name]: value } });
+      setLoaded((current) =>
+        current && current.id === target
+          ? {
+              id: target,
+              instance: { ...current.instance, values: { ...current.instance.values, [name]: value } },
+            }
+          : current,
+      );
+      toast.success(tr('已保存', 'Saved'));
+      onInstanceSaved?.(target);
+      void getInstance(target)
+        .then((got) => {
+          setLoaded((current) => (current && current.id === target ? { id: target, instance: got } : current));
+        })
+        .catch(() => undefined);
+    },
+    [onInstanceSaved, subject.id, toast, tr],
+  );
 
   // The user list is admin-only. A non-admin still gets the numeric uid rather
   // than an empty User column; a missing user is a label we cannot resolve, not
-  // a reason to hide the change.
-  const needsUsers = isAdmin && (tab === 'history' || tab === 'triggers');
+  // a reason to hide the change. The header needs it too when the stored
+  // updater is an email written by this service.
+  const storedUpdater = instance?.updated_by ?? '';
+  const needsUsers =
+    isAdmin && (tab === 'history' || tab === 'triggers' || storedUpdater.includes('@'));
   useEffect(() => {
     if (!needsUsers) return;
     let live = true;
@@ -108,7 +221,7 @@ export function InstanceDetailDrawer({
   // would open the new view halfway down.
   useEffect(() => {
     topRef.current?.scrollIntoView?.({ block: 'start' });
-  }, [tab]);
+  }, [subject.id, tab]);
 
   const userLabel = (uid?: number): string => {
     if (!uid) return '—';
@@ -117,25 +230,36 @@ export function InstanceDetailDrawer({
   };
 
   const values = instance?.values ?? {};
-  const uniqueValue = displayValue(values[model.unique_key ?? '']) || `#${instanceID}`;
+  const uniqueValue = displayValue(values[subject.model.unique_key ?? '']) || `#${subject.id}`;
   const nameAttribute =
-    attributes.find((attribute) => attribute.name === model.show_name) ??
-    attributes.find((attribute) => attribute.name === 'name') ??
-    attributes.find((attribute) => attribute.name === model.unique_key) ??
-    attributes[0];
+    subject.attributes.find((attribute) => attribute.name === subject.model.show_name) ??
+    subject.attributes.find((attribute) => attribute.name === 'name') ??
+    subject.attributes.find((attribute) => attribute.name === subject.model.unique_key) ??
+    subject.attributes[0];
   const displayName = displayValue(values[nameAttribute?.name ?? '']) || uniqueValue;
-  const uniqueAttribute = attributes.find((attribute) => attribute.name === model.unique_key);
-  const uniqueLabel = model.unique_key === 'uuid' ? 'UUID' : uniqueAttribute?.alias || model.unique_key || 'UUID';
-  const showUnique = uniqueValue !== displayName && uniqueValue !== `#${instanceID}`;
+  const uniqueAttribute = subject.attributes.find((attribute) => attribute.name === subject.model.unique_key);
+  const uniqueLabel =
+    subject.model.unique_key === 'uuid' ? 'UUID' : uniqueAttribute?.alias || subject.model.unique_key || 'UUID';
+  const showUnique = uniqueValue !== displayName && uniqueValue !== `#${subject.id}`;
   const statusAttribute =
-    attributes.find((attribute) => attribute.name === 'data_status') ??
-    attributes.find((attribute) => attribute.name === 'status') ??
-    attributes.find((attribute) => attribute.name === 'state');
+    subject.attributes.find((attribute) => attribute.name === 'data_status') ??
+    subject.attributes.find((attribute) => attribute.name === 'status') ??
+    subject.attributes.find((attribute) => attribute.name === 'state');
   const status = statusAttribute ? displayValue(values[statusAttribute.name]) : '';
   const statusLabel = statusAttribute ? choiceText(statusAttribute, values[statusAttribute.name]) ?? status : status;
   const statusLower = status.toLowerCase();
   const statusActive = ['active', 'online', 'enabled', 'running', 'normal', '启用', '正常'].includes(statusLower);
   const statusStopped = ['inactive', 'offline', 'disabled', 'error', '停用', '异常'].includes(statusLower);
+  // Editing opens the page's form for the page's model, so it stays available
+  // only while the drawer still shows that model; a cross-model jump is read-only.
+  const canEdit = Boolean(onEdit) && Number(subject.model.id) === Number(model.id);
+  const updatedAt = headerDateTime(instance?.updated_at);
+  // cantor stored a nickname; this service writes the caller's email. Resolve
+  // that email to the IAM display name when the viewer may read the user list,
+  // and otherwise show what is stored rather than hiding the fact.
+  const updatedByName = storedUpdater.includes('@')
+    ? users.find((user) => user.email === storedUpdater)?.display_name || storedUpdater
+    : storedUpdater;
 
   return (
     <Drawer
@@ -144,9 +268,22 @@ export function InstanceDetailDrawer({
       size="xl"
       title={displayName}
       header={
-        <header className="flex items-start justify-between gap-3 px-5 pb-3 pt-4">
+        <header className="flex items-start gap-3 px-5 pb-3 pt-4">
+          {/* Model icon, name, type and status are one identity block; the
+              second row is the instance's audit fingerprint. */}
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card shadow-sm">
+            <CMDBIcon
+              value={subject.model.icon}
+              size={24}
+              label={subject.model.alias || subject.model.name}
+            />
+          </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
+              <DialogTitle className="min-w-0 break-words text-xl font-semibold leading-snug text-text">
+                {displayName}
+              </DialogTitle>
+              <Chip dense>{subject.model.alias || subject.model.name}</Chip>
               {status && (
                 <span
                   className={cn(
@@ -160,18 +297,33 @@ export function InstanceDetailDrawer({
                   {statusLabel}
                 </span>
               )}
-              <span className="rounded-md bg-bg/70 px-2 py-0.5 font-mono text-xs text-text-muted">
-                #{instanceID}
-              </span>
             </div>
-            <DialogTitle className="mt-3 break-words text-xl font-semibold leading-snug text-text">
-              {displayName}
-            </DialogTitle>
-            {showUnique && (
-              <DialogDescription className="mt-1 break-all font-mono text-xs text-text-muted">
-                {uniqueLabel}: {uniqueValue}
-              </DialogDescription>
-            )}
+            <DialogDescription className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-text-muted">
+              <span className="inline-flex items-center gap-1">
+                <Hash size={12} className="shrink-0 text-text-faint" aria-hidden="true" />
+                {tr('ID', 'ID')}: {subject.id}
+              </span>
+              {updatedAt && (
+                <span className="inline-flex items-center gap-1">
+                  <Clock3 size={12} className="shrink-0 text-text-faint" aria-hidden="true" />
+                  {tr('更新时间', 'Updated')}: {updatedAt}
+                </span>
+              )}
+              {updatedByName && (
+                <span className="inline-flex items-center gap-1">
+                  <UserRound size={12} className="shrink-0 text-text-faint" aria-hidden="true" />
+                  {tr('更新人', 'Updated by')}: {updatedByName}
+                </span>
+              )}
+              {showUnique && (
+                <span className="inline-flex min-w-0 items-center gap-1" title={uniqueValue}>
+                  <Fingerprint size={12} className="shrink-0 text-text-faint" aria-hidden="true" />
+                  <span className="truncate font-mono">
+                    {uniqueLabel}: {uniqueValue}
+                  </span>
+                </span>
+              )}
+            </DialogDescription>
           </div>
           <button
             type="button"
@@ -184,12 +336,15 @@ export function InstanceDetailDrawer({
         </header>
       }
       footer={
-        onEdit ? (
+        canEdit ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[11px] text-text-faint">
-              {tr('只读视图；编辑会打开表单并保留当前列表。', 'Read-only view; Edit opens the form without losing the list.')}
+              {tr(
+                '字段旁的编辑图标可单独修改；完整表单保留当前列表。',
+                'Use the pencil beside a field to change it in place; the full form keeps the current list.',
+              )}
             </span>
-            <Button variant="primary" type="button" onClick={() => onEdit(instanceID)} className="inline-flex items-center gap-1.5">
+            <Button variant="primary" type="button" onClick={() => onEdit?.(subject.id)} className="inline-flex items-center gap-1.5">
               <Pencil size={12} aria-hidden="true" />
               {tr('编辑', 'Edit')}
             </Button>
@@ -228,35 +383,64 @@ export function InstanceDetailDrawer({
         <TabsContent value="overview" className="mt-4">
           {tab === 'overview' && (
             <InstanceOverview
-              model={model}
+              model={subject.model}
               models={models}
               instance={instance}
-              attributes={attributes}
-              groups={groups}
+              attributes={subject.attributes}
+              groups={subject.groups}
               loading={loading}
               error={error}
               onRetry={() => setRetryKey((key) => key + 1)}
+              onSaveValue={saveAttribute}
             />
           )}
         </TabsContent>
         <TabsContent value="topology" className="mt-4">
           {tab === 'topology' && (
-            <InstanceTopology
-              model={model}
-              attributes={attributes}
-              instance={instance}
-              instanceID={instanceID}
-              instanceLabel={uniqueValue}
-            />
+            <>
+              {navError && (
+                <div
+                  role="alert"
+                  className="mb-3 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300"
+                >
+                  {navError}
+                </div>
+              )}
+              <InstanceTopology
+                model={subject.model}
+                attributes={subject.attributes}
+                instance={instance}
+                instanceID={subject.id}
+                instanceLabel={uniqueValue}
+                onNavigate={(target) => void openNode(target)}
+              />
+            </>
           )}
         </TabsContent>
         <TabsContent value="history" className="mt-4">
-          {tab === 'history' && <InstanceHistory ciID={instanceID} userLabel={userLabel} />}
+          {tab === 'history' && <InstanceHistory ciID={subject.id} userLabel={userLabel} />}
         </TabsContent>
         <TabsContent value="triggers" className="mt-4">
-          {tab === 'triggers' && <InstanceTriggers ciID={instanceID} userLabel={userLabel} />}
+          {tab === 'triggers' && <InstanceTriggers ciID={subject.id} userLabel={userLabel} />}
         </TabsContent>
       </Tabs>
     </Drawer>
   );
+}
+
+/**
+ * The header's audit time, in the stored-looking `YYYY-MM-DD HH:mm:ss` form the
+ * cantor detail page used. The API sends RFC 3339; `new Date` moves it to the
+ * operator's zone, and the fixed shape keeps the header scannable in both
+ * locales (unlike `toLocaleString`, whose separators change with the locale).
+ */
+function headerDateTime(raw?: string): string {
+  if (!raw) return '';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  ].join(' ');
 }

@@ -36,7 +36,7 @@ func seedCI(t *testing.T, repo *Repo, values map[cmdbmodel.ID]any) *cimodel.CI {
 		CI:     ci,
 		Specs:  fullSpecs(),
 		Values: values,
-		Audit:  cibiz.AuditInfo{Actor: 7, Origin: "ui"},
+		Audit:  cibiz.AuditInfo{Actor: 7, ActorEmail: "seed@example.test", Origin: "ui"},
 	})
 	if err != nil {
 		t.Fatalf("CreateCIWithValues() error = %v", err)
@@ -67,6 +67,11 @@ func TestCreateCIWithValuesRoundTrip(t *testing.T) {
 	})
 	if ci.ID == 0 {
 		t.Fatal("CI got no id")
+	}
+	// The creator labels the CI's own audit column; the header shows it before
+	// the first edit.
+	if ci.UpdatedBy == nil || *ci.UpdatedBy != "seed@example.test" {
+		t.Fatalf("created CI updated_by = %v, want seed@example.test", ci.UpdatedBy)
 	}
 
 	rows, err := repo.LoadValueRows(ctx, ci.ID)
@@ -192,7 +197,7 @@ func TestUpsertUpdatesRowHistoryAndDocument(t *testing.T) {
 	changes, err := repo.UpsertCIValues(ctx, cibiz.UpdateInput{
 		CIID: ci.ID, TypeID: 42, Specs: fullSpecs(),
 		Values: map[cmdbmodel.ID]any{2: 16, 7: []any{"10.0.0.1", "10.0.0.9"}},
-		Audit:  cibiz.AuditInfo{Actor: 9, Origin: "ui", TicketID: "CHG-1"},
+		Audit:  cibiz.AuditInfo{Actor: 9, ActorEmail: "ops@example.test", Origin: "ui", TicketID: "CHG-1"},
 	})
 	if err != nil {
 		t.Fatalf("UpsertCIValues() error = %v", err)
@@ -232,6 +237,10 @@ func TestUpsertUpdatesRowHistoryAndDocument(t *testing.T) {
 	}
 	if doc["cpu_count"] != float64(16) {
 		t.Fatalf("doc cpu_count = %v, want 16 after the update", doc["cpu_count"])
+	}
+	// The editor replaces the creator in the CI's audit column.
+	if updated.UpdatedBy == nil || *updated.UpdatedBy != "ops@example.test" {
+		t.Fatalf("updated_by = %v, want ops@example.test", updated.UpdatedBy)
 	}
 }
 

@@ -60,6 +60,11 @@ type Instance struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
+	// UpdatedBy is the CI row's own audit column. cantor stored the editor's
+	// nickname there; the Go port writes the caller's email. Empty for rows no
+	// person has touched (imports and auto-discovery), which the console hides.
+	UpdatedBy string
+
 	// Values is keyed according to the request's ret_key.
 	//
 	// PASSWORD, LINK and FILE attributes are ABSENT — not empty, absent. cantor
@@ -231,7 +236,8 @@ func (u *Usecase) Get(ctx context.Context, ciID model.ID, fields []string, key R
 func (u *Usecase) renderInstance(set *AttributeSet, ci cimodel.CI, fallbackRows []ValueRow, fields map[string]bool, key RetKey) (Instance, error) {
 	out := Instance{
 		ID: ci.ID, TypeID: ci.TypeID, CreatedAt: ci.CreatedAt, UpdatedAt: ci.UpdatedAt,
-		Values: map[string]any{},
+		UpdatedBy: updatedBy(ci),
+		Values:    map[string]any{},
 	}
 
 	doc, err := ParsePropsDocument(ci.PropsJSON)

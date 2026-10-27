@@ -15,6 +15,8 @@ export type Instance = {
   type_id: number;
   created_at?: string;
   updated_at?: string;
+  /** cantor's nickname or the email of the caller that last wrote the row. */
+  updated_by?: string;
   /** Keyed by attribute name (or alias/id, per `ret_key`). */
   values: Record<string, unknown>;
 };

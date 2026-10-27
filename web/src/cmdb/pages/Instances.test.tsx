@@ -73,6 +73,9 @@ function handlers(instances: unknown[] = []) {
       HttpResponse.json({ type_id: 1, unique_id: 10, unique: 'hostname', attributes }),
     ),
     http.get('/api/v1/cmdb/ci-types/host/attribute-groups', () => HttpResponse.json([])),
+    // The rail loads groups beside the models; an empty set keeps older tests
+    // on the flat list.
+    http.get('/api/v1/cmdb/preferences/model-groups', () => HttpResponse.json({ items: [], total: 0 })),
     http.get('/api/v1/cmdb/preferences/ci-types/host/fields', () =>
       HttpResponse.json({
         type_id: 1,
@@ -332,6 +335,125 @@ describe('the workspace layout', () => {
     expect(screen.queryByText('web-01')).not.toBeInTheDocument();
     expect(within(rail).getByRole('button', { name: '交换机' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(rail).getByRole('button', { name: '主机' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('groups the model rail by the configured model groups', async () => {
+    const user = userEvent.setup();
+    const members = { ...model, id: 54, name: 'members', alias: '人员', unique_key: 'userid' };
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () =>
+        HttpResponse.json({ items: [model, switchModel, members], total: 3 }),
+      ),
+      http.get('/api/v1/cmdb/preferences/model-groups', () =>
+        HttpResponse.json({
+          items: [
+            { id: 1, name: '服务器', ci_types: [model] },
+            { id: 2, name: '网络', ci_types: [switchModel] },
+          ],
+          total: 2,
+        }),
+      ),
+    );
+    renderPage();
+
+    const rail = await screen.findByRole('navigation', { name: '模型对象' });
+    expect(await within(rail).findByRole('heading', { name: /服务器/ })).toBeInTheDocument();
+    expect(within(rail).getByRole('heading', { name: /网络/ })).toBeInTheDocument();
+    // A model no group claims stays reachable in the trailing 其他 section.
+    expect(within(rail).getByRole('heading', { name: /其他/ })).toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: '主机' })).toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: '交换机' })).toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: '人员' })).toBeInTheDocument();
+
+    // A group collapses its models while keeping the heading and count.
+    const serverGroup = within(rail).getByRole('button', { name: /服务器/ });
+    expect(serverGroup).toHaveAttribute('aria-expanded', 'true');
+    await user.click(serverGroup);
+    expect(serverGroup).toHaveAttribute('aria-expanded', 'false');
+    expect(within(rail).queryByRole('button', { name: '主机' })).not.toBeInTheDocument();
+    expect(within(rail).getByRole('heading', { name: /服务器/ })).toBeInTheDocument();
+    await user.click(serverGroup);
+    expect(within(rail).getByRole('button', { name: '主机' })).toBeInTheDocument();
+  });
+
+  it('keeps the rail flat and explains when model groups cannot be read', async () => {
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
+    server.use(
+      http.get('/api/v1/cmdb/preferences/model-groups', () => new HttpResponse(null, { status: 500 })),
+    );
+    renderPage();
+
+    const rail = await screen.findByRole('navigation', { name: '模型对象' });
+    expect(await within(rail).findByText(/模型分组加载失败/)).toBeInTheDocument();
+    expect(within(rail).queryByRole('heading', { level: 3 })).not.toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: '主机' })).toBeInTheDocument();
+  });
+
+  it('lists every model attribute and saves the chosen columns', async () => {
+    const user = userEvent.setup();
+    const environment = attribute(13, 'environment', { alias: '环境' });
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello', environment: 'prod' } }]);
+    const saved: unknown[] = [];
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/host/attributes', () =>
+        HttpResponse.json({
+          type_id: 1,
+          unique_id: 10,
+          unique: 'hostname',
+          attributes: [...attributes, environment],
+        }),
+      ),
+      http.get('/api/v1/cmdb/preferences/ci-types/host/fields', () =>
+        HttpResponse.json({
+          type_id: 1,
+          is_subscribed: true,
+          fields: [
+            { attr_id: 10, is_fixed: true },
+            { attr_id: 11, is_fixed: false },
+          ],
+        }),
+      ),
+      http.put('/api/v1/cmdb/preferences/ci-types/1/fields', async ({ request }) => {
+        saved.push(await request.json());
+        return HttpResponse.json({ type_id: 1, is_subscribed: true, fields: [] });
+      }),
+    );
+    renderPage();
+
+    // Wait for the subscribed columns before opening: the dialog starts from
+    // them, and opening early would save a different set.
+    expect(await screen.findByRole('columnheader', { name: 'note' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '查看并选择模型字段' }));
+
+    const dialog = await screen.findByRole('dialog', { name: /属性说明/ });
+    // The complete attribute set is on screen, not only the visible columns.
+    expect(within(dialog).getByRole('checkbox', { name: '环境' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('checkbox', { name: 'hostname' })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(dialog).getByRole('img', { name: '标识列，固定显示' })).toBeInTheDocument();
+    // The table shows the definition, not just a name: alias, type and flags.
+    const row = within(dialog).getByRole('row', { name: /environment/ });
+    expect(within(row).getByText('环境')).toBeInTheDocument();
+    expect(within(row).getByText('文本')).toBeInTheDocument();
+    expect(within(row).getAllByRole('img', { name: '是' }).length).toBeGreaterThan(0);
+
+    // Searching narrows the table to the matching attributes.
+    await user.type(within(dialog).getByRole('searchbox', { name: '搜索属性' }), '环境');
+    expect(within(dialog).queryByText('hostname')).not.toBeInTheDocument();
+    await user.clear(within(dialog).getByRole('searchbox', { name: '搜索属性' }));
+
+    await user.click(within(dialog).getByRole('checkbox', { name: '环境' }));
+    await user.click(within(dialog).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]).toEqual({
+      fields: [
+        { ref: '10', is_fixed: true },
+        { ref: '11', is_fixed: false },
+        { ref: '13', is_fixed: false },
+      ],
+    });
+    expect(await screen.findByRole('columnheader', { name: '环境' })).toBeInTheDocument();
   });
 
   it('keeps the instances usable when the model list fails, then retries from the rail', async () => {

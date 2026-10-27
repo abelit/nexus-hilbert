@@ -39,11 +39,25 @@ const INSTANCE_ATTRIBUTES = [
   { id: 21, name: 'serial', alias: '序列号', value_type: '2', is_list: false, is_index: false },
   { id: 22, name: 'owner_team', alias: '负责团队', value_type: '2', is_list: false, is_index: false },
   { id: 23, name: 'created_at', alias: '创建时间', value_type: '2', is_list: false, is_index: false },
-];
+].map((attribute, index) => ({
+  ...attribute,
+  order: index,
+  // The definition table's flag columns; realistic values so a screenshot
+  // shows marks rather than a wall of dashes.
+  is_unique: attribute.name === 'hostname',
+  is_indexed: index < 12,
+  default_show: index < 10,
+  is_choice: ['environment', 'level', 'data_status'].includes(attribute.name),
+  is_sortable: ['hostname', 'level', 'data_status'].includes(attribute.name),
+  is_computed: attribute.name === 'created_at',
+}));
 
 const INSTANCE_ROWS = Array.from({ length: 40 }, (_, index) => ({
   ci_id: index + 1,
   type_id: 1,
+  // The detail header's audit line; the list ignores these fields.
+  updated_at: '2026-06-01T11:01:04Z',
+  updated_by: 'admin',
   values: {
     hostname: `host-${String(index + 1).padStart(2, '0')}`,
     note: `rack-${(index % 3) + 1}`,
@@ -853,6 +867,122 @@ test('resource data uses the compact header, model rail and one vertical scrolle
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+test('the resource model rail follows the configured model groups', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockInstanceDetail(page);
+  // A second model makes the ungrouped bucket visible next to a real group.
+  await mockInstanceData(page, true);
+  await page.route('**/api/v1/cmdb/preferences/model-groups', (route) =>
+    route.fulfill({ json: { items: [{ id: 10, name: '服务器', ci_types: [HOST] }], total: 1 } }),
+  );
+
+  await page.goto('/cmdb/instances?type=host');
+  const rail = page.getByRole('navigation', { name: '模型对象' });
+  await expect(rail.getByRole('heading', { name: '服务器' })).toBeVisible();
+  // The switch belongs to no group, so it trails in 其他.
+  await expect(rail.getByRole('heading', { name: '其他' })).toBeVisible();
+  await expect(rail.getByRole('button', { name: '主机' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(rail.getByRole('button', { name: '交换机' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('resource-model-groups-rail-1440-light-zh-CN.png') });
+
+  // A group folds its models and reopens on the same heading.
+  const serverGroup = rail.getByRole('button', { name: /服务器/ });
+  await expect(serverGroup).toHaveAttribute('aria-expanded', 'true');
+  await serverGroup.click();
+  await expect(serverGroup).toHaveAttribute('aria-expanded', 'false');
+  await expect(rail.getByRole('button', { name: '主机' })).toHaveCount(0);
+  await serverGroup.click();
+  await expect(rail.getByRole('button', { name: '主机' })).toHaveAttribute('aria-pressed', 'true');
+
+  // Searching narrows the sections; a group with no match disappears.
+  await page.getByRole('searchbox', { name: '搜索模型对象' }).fill('交换');
+  await expect(rail.getByRole('heading', { name: '服务器' })).toHaveCount(0);
+  await expect(rail.getByRole('heading', { name: '其他' })).toBeVisible();
+  await expect(rail.getByRole('button', { name: '交换机' })).toBeVisible();
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test('resource data lists every model attribute and saves the chosen columns', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockInstanceDetail(page);
+  let saved: unknown = null;
+  // Only two columns are subscribed; the picker must still offer the rest.
+  await page.route('**/api/v1/cmdb/preferences/ci-types/host/fields', (route) =>
+    route.fulfill({
+      json: {
+        type_id: 1,
+        is_subscribed: true,
+        fields: [{ attr_id: 10, is_fixed: true }, { attr_id: 11, is_fixed: false }],
+      },
+    }),
+  );
+  await page.route('**/api/v1/cmdb/preferences/ci-types/1/fields', (route) => {
+    saved = route.request().postDataJSON();
+    return route.fulfill({ json: { type_id: 1, is_subscribed: true, fields: [] } });
+  });
+
+  await page.goto('/cmdb/instances?type=host');
+  await expect(page.getByRole('columnheader', { name: '说明' })).toBeVisible();
+  await page.getByRole('button', { name: '查看并选择模型字段' }).click();
+
+  const dialog = page.getByRole('dialog', { name: /属性说明/ });
+  await expect(dialog).toBeVisible();
+  // The definition table, not a bare name list.
+  for (const header of ['名称', '别名', '类型', '可检索', '默认展示', '唯一', '枚举', '多值', '可排序', '计算属性']) {
+    await expect(dialog.getByRole('columnheader', { name: header })).toBeVisible();
+  }
+  // The complete attribute set is listed, not only the subscribed columns.
+  await expect(dialog.getByRole('checkbox', { name: '操作系统' })).toBeVisible();
+  await expect(dialog.getByRole('checkbox', { name: '主机名' })).toBeDisabled();
+  await expect(dialog.getByRole('img', { name: '标识列，固定显示' })).toBeVisible();
+  // Flags render as marks in the definition columns.
+  await expect(
+    dialog.getByRole('row', { name: /hostname/ }).getByRole('img', { name: '是' }).first(),
+  ).toBeVisible();
+  await dialog.getByRole('checkbox', { name: '操作系统' }).click();
+  await page.screenshot({ path: testInfo.outputPath('resource-data-attributes-dialog-1440-light-zh-CN.png') });
+  await dialog.getByRole('button', { name: '保存' }).click();
+
+  await expect(page.getByRole('columnheader', { name: '操作系统' })).toBeVisible();
+  expect(saved).toEqual({
+    fields: [
+      { ref: '10', is_fixed: true },
+      { ref: '11', is_fixed: false },
+      { ref: '20', is_fixed: false },
+    ],
+  });
+
+  // The table scrolls inside the dialog; the page itself must not overflow.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '查看并选择模型字段' }).click();
+  await expect(page.getByRole('dialog', { name: /属性说明/ })).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: testInfo.outputPath('resource-data-attributes-dialog-390-light-zh-CN.png') });
+});
+
 test('resource data hides the rail and uses the model Select on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
@@ -901,6 +1031,9 @@ test('resource detail shows its values, topology, change history and trigger rec
   await expect(drawer).toBeVisible();
   await expect(drawer.getByRole('tab')).toHaveCount(4);
   await expect(drawer.getByText('host-05').first()).toBeVisible();
+  // The attribute section uses the same card header as 关联关系.
+  await expect(drawer.getByRole('heading', { name: '属性' })).toBeVisible();
+  await expect(drawer.getByRole('button', { name: '刷新' }).first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('resource-detail-overview-1440-light-zh-CN.png') });
 
   const relations = drawer.getByText('关联关系', { exact: true });
@@ -957,6 +1090,127 @@ test('resource detail shows its values, topology, change history and trigger rec
   );
   expect(overflow).toBeLessThanOrEqual(1);
   await page.screenshot({ path: testInfo.outputPath('resource-detail-triggers-390-light-zh-CN.png') });
+});
+
+test('resource detail edits one attribute in place', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockInstanceDetail(page);
+
+  // The drawer refreshes the instance after a write; keep the mocked read in
+  // step with the write so the saved value does not flip back.
+  let values = { ...INSTANCE_ROWS[4].values };
+  const writes: unknown[] = [];
+  await page.route('**/api/v1/cmdb/instances/5', (route) => {
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON() as { values?: Record<string, unknown> };
+      writes.push(body);
+      values = { ...values, ...(body.values ?? {}) };
+      return route.fulfill({ json: { ci_id: 5, created: false } });
+    }
+    return route.fulfill({ json: { ci_id: 5, type_id: 1, values } });
+  });
+
+  await page.goto('/cmdb/instances?type=host');
+  await page.getByRole('button', { name: '查看实例 5' }).click();
+  const drawer = page.getByRole('dialog');
+  await expect(drawer.getByText('host-05').first()).toBeVisible();
+
+  await drawer.getByText('说明', { exact: true }).hover();
+  await drawer.getByRole('button', { name: '编辑 说明' }).click();
+  const input = drawer.getByRole('textbox', { name: '说明' });
+  await expect(input).toBeVisible();
+  await input.fill('rack Z');
+  // There is no Save button: Enter (or leaving the field) writes the value.
+  await input.press('Enter');
+
+  await expect(page.getByText('已保存')).toBeVisible();
+  await expect(drawer.getByText('rack Z')).toBeVisible();
+  // ONLY THE EDITED FIELD IS WRITTEN: the rest of the instance is not resent.
+  expect(writes).toEqual([{ values: { note: 'rack Z' } }]);
+
+  // Leaving the field is the other save path: no confirmation step at all.
+  await drawer.getByText('说明', { exact: true }).hover();
+  await drawer.getByRole('button', { name: '编辑 说明' }).click();
+  await drawer.getByRole('textbox', { name: '说明' }).fill('rack Y');
+  await drawer.getByRole('heading', { name: 'host-05' }).click();
+  await expect(drawer.getByText('rack Y')).toBeVisible();
+  expect(writes).toEqual([
+    { values: { note: 'rack Z' } },
+    { values: { note: 'rack Y' } },
+  ]);
+
+  // Escape abandons the draft and must cancel the row, not the drawer.
+  await drawer.getByText('说明', { exact: true }).hover();
+  await drawer.getByRole('button', { name: '编辑 说明' }).click();
+  const discarded = drawer.getByRole('textbox', { name: '说明' });
+  await discarded.fill('discard me');
+  await discarded.press('Escape');
+  await expect(drawer.getByRole('textbox', { name: '说明' })).toHaveCount(0);
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText('rack Y')).toBeVisible();
+
+  await page.screenshot({ path: testInfo.outputPath('resource-detail-inline-saved-1440-light-zh-CN.png') });
+});
+
+test('resource detail topology switches to a double-clicked node', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockInstanceDetail(page);
+
+  // The drawer resolves a cross-model target through the model list and that
+  // model's own metadata; the rack type is not in the host page's list.
+  const RACK = { ...HOST, id: 3, name: 'rack', alias: '机柜', unique_key: 'name' };
+  const RACK_ATTRIBUTE = { id: 30, name: 'name', alias: '名称', value_type: '2', is_list: false, is_index: true };
+  await page.route(
+    (url) => url.pathname === '/api/v1/cmdb/ci-types' && url.searchParams.get('ids') === '3',
+    (route) => route.fulfill({ json: { items: [RACK], total: 1 } }),
+  );
+  await page.route('**/api/v1/cmdb/instances/41', (route) =>
+    route.fulfill({ json: { ci_id: 41, type_id: 3, values: { name: 'rack-01' } } }),
+  );
+  await page.route('**/api/v1/cmdb/ci-types/rack/attributes', (route) =>
+    route.fulfill({ json: { type_id: 3, unique_id: 30, unique: 'name', attributes: [RACK_ATTRIBUTE] } }),
+  );
+  await page.route('**/api/v1/cmdb/ci-types/rack/attribute-groups*', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/v1/cmdb/ci-types/rack/relation-parents', (route) =>
+    route.fulfill({ json: { items: [], total: 0 } }),
+  );
+  await page.route('**/api/v1/cmdb/ci-types/rack/relation-children', (route) =>
+    route.fulfill({ json: { items: [], total: 0 } }),
+  );
+
+  await page.goto('/cmdb/instances?type=host');
+  await expect(page.getByRole('heading', { name: /资源数据/ })).toBeVisible();
+  await page.getByRole('button', { name: '实例 5 拓扑' }).click();
+  const drawer = page.getByRole('dialog');
+  await expect(drawer.locator('.react-flow')).toBeVisible();
+  await expect(drawer.getByText('机柜', { exact: true })).toBeVisible();
+
+  await drawer.getByText('机柜', { exact: true }).dblclick();
+
+  // Cantor switched the whole detail panel and kept the topology tab active.
+  await expect(drawer.getByRole('heading', { name: 'rack-01' })).toBeVisible();
+  await expect(drawer.getByText('ID: 41', { exact: true })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: '拓扑' })).toHaveAttribute('aria-selected', 'true');
+  // The page's edit form belongs to the host model, so editing is not offered
+  // after a cross-model switch.
+  await expect(drawer.getByRole('button', { name: '编辑' })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('resource-detail-topology-switched-1440-light-zh-CN.png') });
 });
 
 test('resource topology expands inside a phone drawer', async ({ page }, testInfo) => {
@@ -1023,6 +1277,42 @@ for (const width of DETAIL_WIDTHS) {
         expect(overflow).toBeLessThanOrEqual(1);
         await page.screenshot({
           path: testInfo.outputPath(`resource-detail-${width}-${theme}-${locale}.png`),
+        });
+
+        // Inline editing is a new control on every row; open it at every width,
+        // theme and locale before moving on to the topology.
+        await drawer.getByText('说明', { exact: true }).hover();
+        await drawer.getByRole('button', {
+          name: locale === 'en-US' ? 'Edit 说明' : '编辑 说明',
+        }).click();
+        await expect(drawer.getByRole('textbox', { name: '说明' })).toBeVisible();
+        const editOverflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(editOverflow).toBeLessThanOrEqual(1);
+        await page.screenshot({
+          path: testInfo.outputPath(`resource-detail-inline-edit-${width}-${theme}-${locale}.png`),
+        });
+        // Leaving an unchanged field closes the row without a write.
+        await page.keyboard.press('Tab');
+        await expect(drawer.getByRole('textbox', { name: '说明' })).toHaveCount(0);
+
+        // The topology node card gained the keyboard/touch switch; check it at
+        // every width and theme rather than only in the 1440 flow.
+        await drawer.getByRole('tab', { name: locale === 'en-US' ? 'Topology' : '拓扑' }).click();
+        await expect(drawer.locator('.react-flow')).toBeVisible();
+        await drawer.getByText('机柜', { exact: true }).click();
+        const switchButton = drawer.getByRole('button', {
+          name: locale === 'en-US' ? 'Switch to this resource' : '切换到此资源',
+        });
+        await expect(switchButton).toBeVisible();
+        await expect(switchButton).toBeInViewport();
+        const topologyOverflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(topologyOverflow).toBeLessThanOrEqual(1);
+        await page.screenshot({
+          path: testInfo.outputPath(`resource-detail-topology-card-${width}-${theme}-${locale}.png`),
         });
       });
     }

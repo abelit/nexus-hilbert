@@ -114,6 +114,11 @@ type UpdateInput struct {
 type AuditInfo struct {
 	// Actor is the Ongrid user id performing the write.
 	Actor model.ID
+	// ActorEmail labels the CI's own updated_by column. The CMDB service does
+	// not read the IAM database, so the JWT's email is the only stable label
+	// available at the write boundary; cantor stored a nickname in the same
+	// column, and the console renders whatever is stored.
+	ActorEmail string
 	// Origin names the subsystem, e.g. "ui", "import", "discovery".
 	Origin string
 	// TicketID is an optional change-management reference.

@@ -541,6 +541,7 @@ export function InstanceRelations({
           instanceID={peek.row._id}
           initialTab={peek.tab}
           onClose={() => setPeek(null)}
+          onInstanceSaved={() => void load()}
         />
       )}
     </section>

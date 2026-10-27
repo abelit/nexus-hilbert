@@ -160,7 +160,7 @@ func actor(r *http.Request, req *instanceRequest) (cibiz.AuditInfo, error) {
 		origin = "ui"
 	}
 	return cibiz.AuditInfo{
-		Actor: model.ID(t.UserID), Origin: origin,
+		Actor: model.ID(t.UserID), ActorEmail: t.Email, Origin: origin,
 		TicketID: req.TicketID, Reason: req.Reason,
 	}, nil
 }
@@ -308,11 +308,12 @@ type instanceDTO struct {
 	TypeID    model.ID       `json:"type_id"`
 	CreatedAt string         `json:"created_at,omitempty"`
 	UpdatedAt string         `json:"updated_at,omitempty"`
+	UpdatedBy string         `json:"updated_by,omitempty"`
 	Values    map[string]any `json:"values"`
 }
 
 func toInstanceDTO(in cibiz.Instance) instanceDTO {
-	dto := instanceDTO{ID: in.ID, TypeID: in.TypeID, Values: in.Values}
+	dto := instanceDTO{ID: in.ID, TypeID: in.TypeID, UpdatedBy: in.UpdatedBy, Values: in.Values}
 	if dto.Values == nil {
 		dto.Values = map[string]any{}
 	}

@@ -637,3 +637,30 @@ html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabl
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
 }
+
+/* Inline attribute editing in the resource detail drawer.
+   The pencil stays out of the way while an operator scans values, appears when
+   the row is hovered or focused, and is always visible on touch devices where
+   there is no hover to reveal it. */
+.cmdb-attribute-row .cmdb-attribute-edit {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.cmdb-attribute-row:hover .cmdb-attribute-edit,
+.cmdb-attribute-row:focus-within .cmdb-attribute-edit,
+.cmdb-attribute-row .cmdb-attribute-edit:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cmdb-attribute-row .cmdb-attribute-edit {
+    opacity: 0.65;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cmdb-attribute-row .cmdb-attribute-edit {
+    transition: none;
+  }
+}

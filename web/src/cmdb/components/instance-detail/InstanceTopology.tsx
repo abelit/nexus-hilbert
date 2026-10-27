@@ -117,7 +117,7 @@ function TopoNodeView({ id, data, selected }: NodeProps<Node<TopoNodeData>>) {
 
 const nodeTypes = { ci: TopoNodeView };
 
-function DetailCard({ data, onClose }: { data: TopoNodeData; onClose(): void }) {
+function DetailCard({ data, onClose, onOpen }: { data: TopoNodeData; onClose(): void; onOpen?(): void }) {
   const { tr } = useI18n();
   const rows = data.attrs
     .map((attribute) => {
@@ -160,6 +160,21 @@ function DetailCard({ data, onClose }: { data: TopoNodeData; onClose(): void }) 
           <p className="py-6 text-center text-[11px] text-text-faint">{tr('没有可显示的值', 'No values to show')}</p>
         )}
       </div>
+      {onOpen && (
+        <footer className="border-t border-border px-3 py-2">
+          {/* Double-click is mouse-only; this is the same switch for a
+              keyboard or touch operator who opened the card by clicking. */}
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={onOpen}
+            className="w-full justify-center text-[11px]"
+          >
+            {tr('切换到此资源', 'Switch to this resource')}
+          </Button>
+        </footer>
+      )}
     </aside>
   );
 }
@@ -170,12 +185,15 @@ export function InstanceTopology({
   instance,
   instanceID,
   instanceLabel,
+  onNavigate,
 }: {
   model: CIType;
   attributes: TypeAttribute[];
   instance: Instance | null;
   instanceID: number;
   instanceLabel: string;
+  /** Double-clicking a node (or its card's switch button) opens that CI. */
+  onNavigate?(target: { ciID: number; typeID: number }): void;
 }) {
   const { tr } = useI18n();
   const toast = useToast();
@@ -290,6 +308,18 @@ export function InstanceTopology({
     [toast, tr],
   );
 
+  // Cantor switched the whole detail panel to the double-clicked CI and kept
+  // the topology tab active; the drawer owns that switch, so this component
+  // only reports the target. The root is the resource already shown, and the
+  // drawer ignores a no-op target.
+  const openNode = useCallback(
+    (node: Node<TopoNodeData>) => {
+      const { ciID, typeID } = node.data;
+      if (ciID && typeID) onNavigate?.({ ciID, typeID });
+    },
+    [onNavigate],
+  );
+
   const nodes = useMemo(() => (tree ? flattenTree(tree.root) : []), [tree]);
 
   useEffect(() => {
@@ -396,16 +426,27 @@ export function InstanceTopology({
     );
   }
 
+  const activeTarget =
+    active && !active.isRoot && active.ciID !== undefined && active.typeID !== undefined
+      ? { ciID: active.ciID, typeID: active.typeID }
+      : null;
   const hasEdges = Boolean(tree && tree.edges.length > 0);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-text-muted">
-          {tr(
-            `${nodes.length} 个节点 · ${tree?.edges.length ?? 0} 条关系`,
-            `${nodes.length} nodes · ${tree?.edges.length ?? 0} relations`,
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="text-xs text-text-muted">
+            {tr(
+              `${nodes.length} 个节点 · ${tree?.edges.length ?? 0} 条关系`,
+              `${nodes.length} nodes · ${tree?.edges.length ?? 0} relations`,
+            )}
+          </p>
+          {onNavigate && (
+            <span className="text-[11px] text-text-faint">
+              {tr('双击节点切换资源', 'Double-click a node to switch resources')}
+            </span>
           )}
-        </p>
+        </div>
         <Button
           variant="outline"
           size="sm"
@@ -443,6 +484,7 @@ export function InstanceTopology({
               }}
               onNodesChange={onNodesChange}
               onNodeClick={(_, node) => setActive(node.data)}
+              onNodeDoubleClick={(_, node) => openNode(node)}
               onPaneClick={() => setActive(null)}
               nodesConnectable={false}
               elementsSelectable
@@ -484,7 +526,13 @@ export function InstanceTopology({
             </label>
           </div>
 
-          {active && <DetailCard data={active} onClose={() => setActive(null)} />}
+          {active && (
+            <DetailCard
+              data={active}
+              onClose={() => setActive(null)}
+              onOpen={activeTarget ? () => onNavigate?.(activeTarget) : undefined}
+            />
+          )}
         </div>
       )}
     </div>
