@@ -292,7 +292,10 @@ export function DataTable<T>({
                 {actions && (
                   // LEFT-ALIGNED AND CONTENT-SIZED: the design language fixes the
                   // operation column's alignment and forbids a guessed width.
-                  <th scope="col" className="w-px whitespace-nowrap">
+                  // THE HEADER IS PINNED WITH THE CELLS. Without `sticky
+                  // right-0` the cells cover the headers of the columns they
+                  // scroll over while their own header sits off-screen.
+                  <th scope="col" className="sticky right-0 w-px whitespace-nowrap">
                     {actionsHeader ?? tr('操作', 'Actions')}
                   </th>
                 )}

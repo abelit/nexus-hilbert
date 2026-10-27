@@ -103,7 +103,12 @@ describe('the list', () => {
     // NO ROWS, so the empty state is what draws — and it has to explain the
     // model rather than say "no data".
     handlers([]);
-    server.use(http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [{ ...model, is_attached: false }], total: 1 })));
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [{ ...model, is_attached: false }], total: 1 })),
+      http.get('/api/v1/cmdb/ci-types/host/attributes', () =>
+        HttpResponse.json({ type_id: 1, unique_id: 10, unique: 'hostname', attributes: [] }),
+      ),
+    );
     renderPage();
 
     expect(await screen.findByText(/存不了实例/)).toBeInTheDocument();

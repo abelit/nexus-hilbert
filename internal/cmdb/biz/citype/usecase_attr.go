@@ -78,6 +78,12 @@ type Attribute struct {
 	// cannot see.
 	ChoiceValue []ChoiceValue `json:"choice_value,omitempty"`
 
+	// ReCheck is the optional regular expression the instance form applies.
+	ReCheck *string `json:"re_check,omitempty"`
+	// Option carries the console's presentation options (font, colour, ...).
+	// It is user data, not a credential; choice webhooks stay hidden.
+	Option map[string]any `json:"option,omitempty"`
+
 	// IsIndexed reports where the values actually live, which is not always
 	// what IsIndex says: password, link and file attributes are forced
 	// unindexed, and everything except TEXT and JSON is forced indexed.
@@ -116,6 +122,8 @@ func attributeView(a citypemodel.Attribute, choices []ChoiceValue) Attribute {
 		HasChoiceWebHook: len(a.ChoiceWebHook) > 0,
 		HasChoiceOther:   len(a.ChoiceOther) > 0,
 		ChoiceValue:      choices,
+		ReCheck:          a.ReCheck,
+		Option:           a.Option,
 		IsIndexed:        indexed,
 		StorageTable:     table,
 		UID:              a.UID,

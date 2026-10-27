@@ -26,6 +26,7 @@ type createRequest struct {
 	Name             string         `json:"name"`
 	Alias            string         `json:"alias"`
 	UniqueKey        string         `json:"unique_key"`
+	ShowKey          string         `json:"show_key"`
 	Icon             string         `json:"icon"`
 	Order            model.SmallInt `json:"order"`
 	DefaultOrderAttr string         `json:"default_order_attr"`
@@ -39,9 +40,11 @@ type updateRequest struct {
 	Name             *string         `json:"name"`
 	Alias            *string         `json:"alias"`
 	UniqueKey        *string         `json:"unique_key"`
+	ShowKey          *string         `json:"show_key"`
 	Icon             *string         `json:"icon"`
 	Order            *model.SmallInt `json:"order"`
 	DefaultOrderAttr *string         `json:"default_order_attr"`
+	ParentIDs        *[]model.ID     `json:"parent_ids"`
 }
 
 type enableRequest struct {
@@ -135,7 +138,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view, err := h.uc.Create(r.Context(), citypebiz.CreateInput{
-		Name: req.Name, Alias: req.Alias, UniqueKey: req.UniqueKey,
+		Name: req.Name, Alias: req.Alias, UniqueKey: req.UniqueKey, ShowKey: req.ShowKey,
 		Icon: req.Icon, Order: req.Order, DefaultOrderAttr: req.DefaultOrderAttr,
 		ParentIDs: req.ParentIDs, Actor: actor.UserID,
 	})
@@ -165,7 +168,8 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 	in := citypebiz.UpdateInput{
 		ID: id, Actor: actor.UserID,
-		Icon: req.Icon, Order: req.Order, DefaultOrderAttr: req.DefaultOrderAttr,
+		ShowKey: req.ShowKey,
+		Icon:    req.Icon, Order: req.Order, DefaultOrderAttr: req.DefaultOrderAttr,
 	}
 	if req.Name != nil {
 		in.Name = *req.Name
@@ -175,6 +179,10 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.UniqueKey != nil {
 		in.UniqueKey = *req.UniqueKey
+	}
+	if req.ParentIDs != nil {
+		in.ParentIDs = *req.ParentIDs
+		in.ParentsSet = true
 	}
 
 	view, err := h.uc.Update(r.Context(), in)

@@ -17,7 +17,11 @@ export type CIType = {
   name: string;
   alias: string;
   enabled: boolean;
-  /** The model has attributes bound to it, so it can hold instances. */
+  /**
+   * cantor's stored flag, NOT "has bound attributes". cantor data has false on
+   * models with dozens of bindings; use the model's effective attribute set to
+   * decide whether it can hold instances.
+   */
   is_attached: boolean;
   /** The stored icon value (`type$$color$$isCustom$$url`); see lib/iconvalue. */
   icon?: string;
@@ -36,6 +40,8 @@ export type CITypeInput = {
   name: string;
   alias: string;
   unique_key: string;
+  /** The NAME of the attribute used as a row's title; empty clears it. */
+  show_key?: string;
   icon?: string;
   order?: number;
   default_order_attr?: string;
@@ -117,6 +123,10 @@ export type Attribute = {
   has_choice_web_hook: boolean;
   has_choice_other: boolean;
   choice_value?: ChoiceValue[];
+  /** Optional regular expression applied by the instance form. */
+  re_check?: string;
+  /** Presentation options (font, colour, ...); secrets are not echoed. */
+  option?: Record<string, unknown>;
 
   /**
    * WHERE THE VALUES ACTUALLY LIVE, which is not always what `is_index` says:
@@ -133,10 +143,55 @@ export type Attribute = {
 export type AttributeInput = Omit<
   Attribute,
   'id' | 'is_choice' | 'has_compute_script' | 'has_choice_web_hook' | 'has_choice_other' | 'is_indexed' | 'storage_table' | 'uid'
->;
+> & {
+  /** Write-only: the read endpoint reports only `has_choice_web_hook`. */
+  choice_web_hook?: Record<string, unknown>;
+  /** Write-only: the read endpoint reports only `has_choice_other`. */
+  choice_other?: Record<string, unknown>;
+  /** Write-only: the read endpoint reports only `has_compute_script`. */
+  compute_script?: string;
+};
+
+export type AttributePage = {
+  items: Attribute[];
+  total: number;
+};
+
+export function listAttributesPage(params?: { name?: string; alias?: string; page?: number; page_size?: number }): Promise<AttributePage> {
+  return cmdbGet<ListResponse<Attribute>>('/attributes', params).then((got) => ({
+    items: got.items ?? [],
+    total: got.total ?? got.items?.length ?? 0,
+  }));
+}
+
+/**
+ * Loads the whole attribute dictionary, one server page at a time.
+ *
+ * THE SERVER CLAMPS page_size TO 200, and a single page is not the dictionary:
+ * asking for 500 silently returned 200, which made every attribute past the
+ * first page impossible to bind or pick as a unique key. The loop follows the
+ * reported total and stops on an empty page, so a server that ignores the
+ * parameters cannot make the caller loop forever.
+ */
+export async function listAllAttributes(params?: { name?: string; alias?: string }): Promise<Attribute[]> {
+  const pageSize = 200;
+  const out: Attribute[] = [];
+  const seen = new Set<number>();
+  for (let page = 1; page <= 50; page += 1) {
+    const got = await listAttributesPage({ ...params, page, page_size: pageSize });
+    for (const item of got.items) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        out.push(item);
+      }
+    }
+    if (got.items.length === 0 || out.length >= got.total) break;
+  }
+  return out;
+}
 
 export function listAttributes(params?: { name?: string; alias?: string; page?: number; page_size?: number }): Promise<Attribute[]> {
-  return cmdbGet<ListResponse<Attribute>>('/attributes', params).then((got) => got.items ?? []);
+  return listAttributesPage(params).then((got) => got.items);
 }
 
 export function getAttribute(ref: string | number): Promise<Attribute> {

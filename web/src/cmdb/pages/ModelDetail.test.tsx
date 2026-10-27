@@ -71,6 +71,10 @@ function renderPage() {
 function baseHandlers() {
   server.use(
     http.get('/api/v1/cmdb/ci-types/1', () => HttpResponse.json(model)),
+    http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [model, disk], total: 2 })),
+    http.get('/api/v1/cmdb/preferences/model-groups', () =>
+      HttpResponse.json({ items: [{ id: 1, name: '资产', ci_types: [model, disk] }], total: 1 }),
+    ),
     http.get('/api/v1/cmdb/ci-types/1/attributes', () =>
       HttpResponse.json({
         type_id: 1,
@@ -219,6 +223,58 @@ describe('the other tabs', () => {
 
     await waitFor(() => expect(posted).toEqual({ relation_type_id: 5, constraint: '1' }));
     expect(postedPath).toBe('/api/v1/cmdb/ci-types/1/relation-children/2');
+  });
+
+  it('sends the relation attribute mapping when one is configured', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    let posted: unknown;
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [model, disk], total: 2 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/2/attributes', () =>
+        HttpResponse.json({
+          type_id: 2,
+          unique_id: 30,
+          unique: 'sn',
+          attributes: [
+            {
+              ...ownAttribute,
+              id: 30,
+              name: 'sn',
+              alias: '序列号',
+              is_required: true,
+            },
+          ],
+        }),
+      ),
+      http.get('/api/v1/cmdb/relation-types', () =>
+        HttpResponse.json({ items: [{ id: 5, name: '包含', color: '#6366f1' }], total: 1 }),
+      ),
+      http.post('/api/v1/cmdb/ci-types/:parent/relation-children/:child', async ({ request }) => {
+        posted = await request.json();
+        return HttpResponse.json({});
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '模型关系' }));
+    await user.click(await screen.findByRole('button', { name: '加子模型' }));
+    await selectOption(screen.getByLabelText('对端模型'), '磁盘');
+    await user.click(screen.getByRole('button', { name: '添加映射' }));
+    await selectOption(screen.getByLabelText('父属性'), '主机名（hostname）');
+    await selectOption(screen.getByLabelText('子属性'), '序列号（sn）');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() =>
+      expect(posted).toEqual({
+        relation_type_id: 5,
+        constraint: '0',
+        parent_attr_ids: [10],
+        child_attr_ids: [30],
+      }),
+    );
   });
 
   it('marks a uniqueness rule that names a deleted attribute', async () => {

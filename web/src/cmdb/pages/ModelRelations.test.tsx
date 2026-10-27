@@ -117,6 +117,56 @@ describe('the flat relation list', () => {
     expect(postedPath).toBe('/api/v1/cmdb/ci-types/1/relation-children/2');
   });
 
+  it('drops an attribute mapping when the parent changes', async () => {
+    let releaseRack = () => {};
+    const rackPending = new Promise<void>((resolve) => {
+      releaseRack = resolve;
+    });
+    const attr = (id: number, name: string, alias: string) => ({
+      id, name, alias, value_type: '2', is_choice: false, is_list: false, is_unique: false,
+      is_index: true, is_link: false, is_password: false, is_sortable: false, is_dynamic: false,
+      is_bool: false, is_file: false, is_reference: false, is_computed: false,
+      has_compute_script: false, has_choice_web_hook: false, has_choice_other: false,
+      is_indexed: true, storage_table: 'c_value_index_texts', is_required: false, order: 0,
+      default_show: false, inherited: false,
+    });
+    server.use(
+      http.get('/api/v1/cmdb/ci-type-relations', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/relation-types', () =>
+        HttpResponse.json({ items: [{ id: 5, name: '连接', color: '#6366f1' }], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [host, disk, rack], total: 3 })),
+      http.get('/api/v1/cmdb/ci-types/:ref/attributes', async ({ params }) => {
+        if (String(params.ref) === '3') await rackPending;
+        const attributes =
+          String(params.ref) === '1'
+            ? [attr(10, 'hostname', '主机名')]
+            : [attr(20, 'sn', '序列号')];
+        return HttpResponse.json({ type_id: Number(params.ref), unique_id: attributes[0].id, unique: attributes[0].name, attributes });
+      }),
+    );
+    renderPage();
+
+    try {
+      await userEvent.click(await screen.findByRole('button', { name: '新建关系' }));
+      await selectOption(screen.getByLabelText('父模型'), '主机');
+      await selectOption(screen.getByLabelText('子模型'), '磁盘');
+      await waitFor(() => expect(screen.getByRole('button', { name: '添加映射' })).toBeEnabled());
+
+      await userEvent.click(screen.getByRole('button', { name: '添加映射' }));
+      await selectOption(screen.getByLabelText('父属性'), '主机名（hostname）');
+      await selectOption(screen.getByLabelText('子属性'), '序列号（sn）');
+      expect(screen.queryByText('没有属性映射；关系仍可创建。')).not.toBeInTheDocument();
+
+      // Rack's attributes are still loading, but the mapping belongs to the
+      // previous parent and must not survive the change.
+      await selectOption(screen.getAllByLabelText('父模型')[0], '机柜');
+      expect(await screen.findByText('没有属性映射；关系仍可创建。')).toBeInTheDocument();
+    } finally {
+      releaseRack();
+    }
+  });
+
   it('asks before deleting and does nothing on cancel', async () => {
     const user = userEvent.setup();
     let deleted = 0;

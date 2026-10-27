@@ -52,14 +52,15 @@ export function TargetsPanel() {
     setTypesLoading(true);
     setTypesErr(null);
     try {
-      // EVERY ATTACHED MODEL IS LISTED, not only the ones that already have a
-      // target: otherwise the first target of a model could never be created
-      // from this page. `target-types` supplies the counts, `ci-types` the
-      // models, and a model missing from the counts simply starts at zero.
+      // EVERY MODEL IS LISTED, not only the ones that already have a target:
+      // otherwise the first target of a model could never be created from this
+      // page. `target-types` supplies the counts, `ci-types` the models, and a
+      // model missing from the counts simply starts at zero. `is_attached` is
+      // not a usable filter here: cantor stores false even on models with
+      // attributes, so the port derives capability from the effective set.
       const [counts, models] = await Promise.all([listTargetTypes(), listCITypes()]);
       const countOf = new Map(counts.map((item) => [item.type_id, item.target_count]));
       const merged: TargetTypeCount[] = models
-        .filter((model) => model.is_attached)
         .map((model) => ({
           type_id: model.id,
           name: model.name,

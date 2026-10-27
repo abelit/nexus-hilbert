@@ -29,10 +29,12 @@ type countingRepo struct {
 	iconCalls   int
 
 	// Recorded by the write methods, which live in usecase_write_test.go.
-	createdBinding model.ID
-	createdParents []model.ID
-	updatedUnique  model.ID
-	deletedActor   model.ID
+	createdBinding    model.ID
+	createdParents    []model.ID
+	updatedUnique     model.ID
+	updatedParents    []model.ID
+	updatedParentsSet bool
+	deletedActor      model.ID
 }
 
 func (c *countingRepo) ListTypes(_ context.Context, f ListFilter) ([]citypemodel.CIType, error) {

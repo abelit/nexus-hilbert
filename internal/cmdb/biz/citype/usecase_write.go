@@ -30,6 +30,8 @@ var (
 	ErrUniqueKeyRequired = fmt.Errorf("%w: unique_key is required", errs.ErrInvalid)
 	// ErrUniqueKeyNotFound is returned when unique_key names no attribute.
 	ErrUniqueKeyNotFound = fmt.Errorf("%w: unique_key does not match an attribute", errs.ErrNotFound)
+	// ErrShowKeyNotFound is returned when show_key names no attribute.
+	ErrShowKeyNotFound = fmt.Errorf("%w: show_key does not match an attribute", errs.ErrNotFound)
 	// ErrBuiltinRename is returned when a built-in model (IPAM/DCIM) is renamed.
 	ErrBuiltinRename = fmt.Errorf("%w: a built-in model cannot be renamed", errs.ErrConflict)
 	// ErrTypeHasInstances refuses deletion while instances exist.
@@ -101,9 +103,23 @@ func (u *Usecase) Create(ctx context.Context, in CreateInput) (*View, error) {
 		return nil, err
 	}
 
+	var showID *model.ID
+	if ref := strings.TrimSpace(in.ShowKey); ref != "" {
+		showAttr, err := u.repo.FindAttribute(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		if showAttr == nil {
+			return nil, fmt.Errorf("%w: %q", ErrShowKeyNotFound, ref)
+		}
+		id := showAttr.ID
+		showID = &id
+	}
+
 	ct := citypemodel.CIType{
 		Name: name, Alias: alias,
 		UniqueID: attr.ID,
+		ShowID:   showID,
 		Enabled:  true,
 		Order:    in.Order,
 	}
@@ -213,11 +229,39 @@ func (u *Usecase) Update(ctx context.Context, in UpdateInput) (*View, error) {
 			updated.DefaultOrderAttr = &orderAttr
 		}
 	}
+	if in.ShowKey != nil {
+		ref := strings.TrimSpace(*in.ShowKey)
+		if ref == "" {
+			updated.ShowID = nil
+		} else {
+			showAttr, err := u.repo.FindAttribute(ctx, ref)
+			if err != nil {
+				return nil, err
+			}
+			if showAttr == nil {
+				return nil, fmt.Errorf("%w: %q", ErrShowKeyNotFound, ref)
+			}
+			id := showAttr.ID
+			updated.ShowID = &id
+		}
+	}
+	if in.ParentsSet {
+		if err := u.validateParents(ctx, in.ParentIDs); err != nil {
+			return nil, err
+		}
+		for _, parentID := range in.ParentIDs {
+			if parentID == in.ID {
+				return nil, fmt.Errorf("%w: a model cannot inherit from itself", errs.ErrInvalid)
+			}
+		}
+	}
 
 	if err := u.repo.UpdateType(ctx, UpdateTypeInput{
 		Type:              updated,
 		UniqueAttributeID: newUniqueID,
 		Previous:          previous,
+		ParentIDs:         in.ParentIDs,
+		ParentsSet:        in.ParentsSet,
 		Actor:             in.Actor,
 	}); err != nil {
 		return nil, err
@@ -309,6 +353,7 @@ type CreateInput struct {
 	Name             string
 	Alias            string
 	UniqueKey        string
+	ShowKey          string
 	Icon             string
 	Order            model.SmallInt
 	DefaultOrderAttr string
@@ -323,9 +368,12 @@ type UpdateInput struct {
 	Name             string
 	Alias            string
 	UniqueKey        string
+	ShowKey          *string
 	Icon             *string
 	Order            *model.SmallInt
 	DefaultOrderAttr *string
+	ParentIDs        []model.ID
+	ParentsSet       bool
 	Actor            model.ID
 }
 

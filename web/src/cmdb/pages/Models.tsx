@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Boxes, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Boxes, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/DropdownMenu';
 import { Chip } from '@/components/ui/Chip';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Hint } from '@/components/ui/Tooltip';
@@ -23,7 +24,7 @@ import {
   createCIType,
   deleteCIType,
   ensureBuiltinModels,
-  listAttributes,
+  listAllAttributes,
   listCITypes,
   listTypeAttributes,
   setCITypeEnabled,
@@ -36,6 +37,8 @@ import {
 import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { IconPicker } from '../components/IconPicker';
+import { ModelConfigShell } from '../components/ModelConfigShell';
+import { useModelTreeRefresh } from '../components/model-tree-context';
 import { useToast } from '../components/Toast';
 import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
 
@@ -56,6 +59,9 @@ import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
 
 export default function ModelsPage() {
   const { tr } = useI18n();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const treeRefresh = useModelTreeRefresh();
   const { isAdmin } = usePermissions();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
@@ -89,6 +95,14 @@ export default function ModelsPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return;
+    setEditing({ mode: 'create' });
+    const next = new URLSearchParams(searchParams);
+    next.delete('new');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const byId = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
 
   // THE FILTER IS CLIENT-SIDE because the list is the schema: a deployment has
@@ -112,6 +126,7 @@ export default function ModelsPage() {
       await setCITypeEnabled(row.id, !row.enabled);
       toast.success(row.enabled ? tr('已停用', 'Disabled') : tr('已启用', 'Enabled'));
       await load(true);
+      treeRefresh?.refresh();
     } catch (error) {
       toast.error(describeError(error, tr('操作失败', 'Could not change it')));
     }
@@ -129,6 +144,7 @@ export default function ModelsPage() {
       await deleteCIType(row.id);
       toast.success(tr('已删除', 'Deleted'));
       await load(true);
+      treeRefresh?.refresh();
     } catch (error) {
       toast.error(describeError(error, tr('删除失败', 'Delete failed')));
     }
@@ -144,6 +160,7 @@ export default function ModelsPage() {
           : tr('内建模型都已存在', 'Every built-in model already exists'),
       );
       await load(true);
+      treeRefresh?.refresh();
     } catch (error) {
       toast.error(describeError(error, tr('创建失败', 'Could not create them')));
     }
@@ -183,6 +200,17 @@ export default function ModelsPage() {
         ),
     },
     {
+      key: 'show',
+      header: tr('展示属性', 'Display attribute'),
+      hideable: true,
+      cell: (row) =>
+        row.show_name ? (
+          <code className="font-mono text-[11px] text-text-muted">{row.show_name}</code>
+        ) : (
+          <span className="text-text-faint">—</span>
+        ),
+    },
+    {
       key: 'parents',
       header: tr('继承自', 'Inherits from'),
       hideable: true,
@@ -198,20 +226,6 @@ export default function ModelsPage() {
       },
     },
     {
-      key: 'attached',
-      header: tr('可存实例', 'Holds instances'),
-      hideable: true,
-      cell: (row) =>
-        row.is_attached ? (
-          <Chip tone="success">{tr('是', 'Yes')}</Chip>
-        ) : (
-          // A MODEL WITH NO BOUND ATTRIBUTES CANNOT HOLD ANYTHING. It is a
-          // legitimate state — a freshly created model, or a parent that only
-          // carries attributes for its children.
-          <Chip>{tr('否', 'No')}</Chip>
-        ),
-    },
-    {
       key: 'enabled',
       header: tr('状态', 'Status'),
       cell: (row) => (
@@ -221,6 +235,7 @@ export default function ModelsPage() {
   ];
 
   return (
+    <ModelConfigShell>
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
       <PageHeader
         title={tr('模型配置', 'Model configuration')}
@@ -273,7 +288,7 @@ export default function ModelsPage() {
           <div className="flex flex-wrap items-center gap-3">
             <Input
               type="search"
-              aria-label={tr('搜索模型', 'Search models')}
+              aria-label={tr('搜索模型列表', 'Search model list')}
               placeholder={tr('按名称或别名搜索', 'Search by name or alias')}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -304,47 +319,83 @@ export default function ModelsPage() {
             }
             actions={(row) => (
               <>
-                <Hint content={adminTip}>
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    type="button"
-                    onClick={() => setEditing({ mode: 'edit', row })}
-                    disabled={!isAdmin}
-                    aria-label={tr(`编辑 ${row.name}`, `Edit ${row.name}`)}
-                    className="inline-flex items-center gap-1"
-                  >
-                    <Pencil size={12} aria-hidden="true" />
-                    {tr('编辑', 'Edit')}
-                  </Button>
-                </Hint>
-                <Hint content={adminTip}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    onClick={() => void toggleEnabled(row)}
-                    disabled={!isAdmin}
-                    aria-label={row.enabled ? tr(`停用 ${row.name}`, `Disable ${row.name}`) : tr(`启用 ${row.name}`, `Enable ${row.name}`)}
-                    className="inline-flex items-center gap-1"
-                  >
-                    {row.enabled ? tr('停用', 'Disable') : tr('启用', 'Enable')}
-                  </Button>
-                </Hint>
-                <Hint content={adminTip}>
-                  <Button
-                    variant="dangerGhost"
-                    size="sm"
-                    type="button"
-                    onClick={() => void handleDelete(row)}
-                    disabled={!isAdmin}
-                    aria-label={tr(`删除 ${row.name}`, `Delete ${row.name}`)}
-                    className="inline-flex items-center gap-1"
-                  >
-                    <Trash2 size={12} aria-hidden="true" />
-                    {tr('删除', 'Delete')}
-                  </Button>
-                </Hint>
+                {/* THREE LABELLED BUTTONS DO NOT FIT A PHONE. Because the
+                    action column is pinned, a wide action cell covers the
+                    model name instead of pushing the table wider. Below
+                    `sm`, the same actions move into one menu trigger. */}
+                <div className="hidden items-center gap-1 sm:flex">
+                  <Hint content={adminTip}>
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      type="button"
+                      onClick={() => setEditing({ mode: 'edit', row })}
+                      disabled={!isAdmin}
+                      aria-label={tr(`编辑 ${row.name}`, `Edit ${row.name}`)}
+                      className="inline-flex items-center gap-1"
+                    >
+                      <Pencil size={12} aria-hidden="true" />
+                      {tr('编辑', 'Edit')}
+                    </Button>
+                  </Hint>
+                  <Hint content={adminTip}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      onClick={() => void toggleEnabled(row)}
+                      disabled={!isAdmin}
+                      aria-label={row.enabled ? tr(`停用 ${row.name}`, `Disable ${row.name}`) : tr(`启用 ${row.name}`, `Enable ${row.name}`)}
+                      className="inline-flex items-center gap-1"
+                    >
+                      {row.enabled ? tr('停用', 'Disable') : tr('启用', 'Enable')}
+                    </Button>
+                  </Hint>
+                  <Hint content={adminTip}>
+                    <Button
+                      variant="dangerGhost"
+                      size="sm"
+                      type="button"
+                      onClick={() => void handleDelete(row)}
+                      disabled={!isAdmin}
+                      aria-label={tr(`删除 ${row.name}`, `Delete ${row.name}`)}
+                      className="inline-flex items-center gap-1"
+                    >
+                      <Trash2 size={12} aria-hidden="true" />
+                      {tr('删除', 'Delete')}
+                    </Button>
+                  </Hint>
+                </div>
+                <div className="sm:hidden">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          type="button"
+                          disabled={!isAdmin}
+                          aria-label={tr('更多操作', 'More actions')}
+                        />
+                      }
+                    >
+                      <MoreHorizontal size={14} aria-hidden="true" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40 p-1">
+                      <DropdownMenuItem disabled={!isAdmin} onClick={() => setEditing({ mode: 'edit', row })} className="gap-2">
+                        <Pencil size={12} aria-hidden="true" />
+                        {tr('编辑', 'Edit')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled={!isAdmin} onClick={() => void toggleEnabled(row)} className="gap-2">
+                        {row.enabled ? tr('停用', 'Disable') : tr('启用', 'Enable')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled={!isAdmin} onClick={() => void handleDelete(row)} className="gap-2 text-red-300">
+                        <Trash2 size={12} aria-hidden="true" />
+                        {tr('删除', 'Delete')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </>
             )}
           />
@@ -360,6 +411,10 @@ export default function ModelsPage() {
             setEditing(null);
             toast.success(message);
             await load(true);
+            treeRefresh?.refresh();
+            if (editing?.mode === 'create' && typeof id === 'number') {
+              navigate(`/cmdb/models/${id}`);
+            }
             return id;
           }}
         />
@@ -367,6 +422,7 @@ export default function ModelsPage() {
 
       {dialog}
     </div>
+    </ModelConfigShell>
   );
 }
 
@@ -392,7 +448,12 @@ export function ModelForm({
   const [icon, setIcon] = useState(row?.icon ?? '');
   const [order, setOrder] = useState(String(row?.order ?? 0));
   const [parentIDs, setParentIDs] = useState<number[]>(row?.parent_ids ?? []);
-  const [defaultOrderAttr, setDefaultOrderAttr] = useState(row?.default_order_attr ?? '');
+  const [parentQuery, setParentQuery] = useState('');
+  const [defaultOrderAttr, setDefaultOrderAttr] = useState((row?.default_order_attr ?? '').replace(/^-/, ''));
+  const [defaultOrderAsc, setDefaultOrderAsc] = useState<'asc' | 'desc'>(
+    (row?.default_order_attr ?? '').startsWith('-') ? 'desc' : 'asc',
+  );
+  const [showKey, setShowKey] = useState(row?.show_name ?? '');
   const [uniqueKey, setUniqueKey] = useState(row?.unique_key ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -400,11 +461,12 @@ export function ModelForm({
   // The dictionary, for the unique-key picker.
   const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [attributesErr, setAttributesErr] = useState<string | null>(null);
+  const [allModels, setAllModels] = useState<CIType[]>([]);
   // The model's own attributes, for the default-sort picker (edit only).
   const [ownAttributes, setOwnAttributes] = useState<TypeAttribute[]>([]);
 
   useEffect(() => {
-    void listAttributes({ page_size: 500 })
+    void listAllAttributes()
       .then(setAttributes)
       .catch((error) => setAttributesErr(describeError(error, tr('无法读取属性字典', 'Could not load the attribute dictionary'))));
   }, [tr]);
@@ -415,6 +477,13 @@ export function ModelForm({
       .then((got) => setOwnAttributes(got.attributes ?? []))
       .catch(() => setOwnAttributes([]));
   }, [row]);
+
+  useEffect(() => {
+    if (models.length > 0) return;
+    void listCITypes()
+      .then(setAllModels)
+      .catch(() => setAllModels([]));
+  }, [models]);
 
   // Inline creation of the identifying attribute: a fresh deployment has no
   // attributes at all, and the backend refuses a model whose unique_key names
@@ -430,6 +499,44 @@ export function ModelForm({
     value: attribute.name,
     label: `${attribute.name}（${attribute.alias}）`,
   }));
+  const availableModels = models.length > 0 ? models : allModels;
+  const parentOptions = availableModels.filter((model) => model.id !== row?.id);
+  const parentNeedle = parentQuery.trim().toLowerCase();
+  const visibleParentOptions = parentOptions.filter(
+    (model) =>
+      parentIDs.includes(model.id) ||
+      !parentNeedle ||
+      model.name.toLowerCase().includes(parentNeedle) ||
+      model.alias.toLowerCase().includes(parentNeedle),
+  );
+  const showOptions = [
+    { value: '', label: tr('（默认使用标识属性）', '(use the identifying attribute)') },
+    ...(row
+      ? ownAttributes.map((attribute) => ({
+          value: attribute.name,
+          label: `${attribute.alias || attribute.name}（${attribute.name}）`,
+        }))
+      : attributes
+          .filter((attribute) => attribute.name === uniqueKey)
+          .map((attribute) => ({
+            value: attribute.name,
+            label: `${attribute.alias || attribute.name}（${attribute.name}）`,
+          }))),
+  ];
+  const sortOptions = [
+    { value: '', label: tr('（不指定）', '(none)') },
+    ...(row
+      ? ownAttributes.map((attribute) => ({
+          value: attribute.name,
+          label: `${attribute.alias || attribute.name}（${attribute.name}）`,
+        }))
+      : attributes
+          .filter((attribute) => attribute.name === uniqueKey)
+          .map((attribute) => ({
+            value: attribute.name,
+            label: `${attribute.alias || attribute.name}（${attribute.name}）`,
+          }))),
+  ];
 
   const createAttributeInline = async () => {
     const attrName = newAttr.name.trim();
@@ -467,8 +574,12 @@ export function ModelForm({
           name: trimmedName,
           alias: trimmedAlias,
           unique_key: uniqueKey.trim(),
+          show_key: showKey.trim() || undefined,
           icon: icon || undefined,
           order: Number(order) || 0,
+          default_order_attr: defaultOrderAttr
+            ? (defaultOrderAsc === 'desc' ? `-${defaultOrderAttr}` : defaultOrderAttr)
+            : undefined,
           parent_ids: parentIDs,
         };
         const created = await createCIType(input);
@@ -477,9 +588,13 @@ export function ModelForm({
         const updated = await updateCIType(row.id, {
           name: trimmedName,
           alias: trimmedAlias,
+          show_key: showKey.trim(),
           icon,
           order: Number(order) || 0,
-          default_order_attr: defaultOrderAttr,
+          default_order_attr: defaultOrderAttr
+            ? (defaultOrderAsc === 'desc' ? `-${defaultOrderAttr}` : defaultOrderAttr)
+            : '',
+          parent_ids: parentIDs,
         });
         await onSaved(tr('已保存', 'Saved'), updated.id);
       }
@@ -632,6 +747,47 @@ export function ModelForm({
                 </Button>
               </div>
             )}
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="cmdb-model-show-create">{tr('展示属性', 'Display attribute')}</Label>
+                <Select
+                  id="cmdb-model-show-create"
+                  label={tr('展示属性', 'Display attribute')}
+                  value={showKey}
+                  onValueChange={setShowKey}
+                  options={showOptions}
+                  searchable
+                  className="mt-1 w-full"
+                />
+                <p className="mt-1 text-[11px] text-text-faint">
+                  {tr('实例列表和详情用它作为标题；创建后仍可修改。', 'Used as the title of an instance; editable after creation.')}
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="cmdb-model-sort-create">{tr('默认排序列', 'Default sort column')}</Label>
+                <div className="mt-1 flex items-center gap-2">
+                  <Select
+                    id="cmdb-model-sort-create"
+                    label={tr('默认排序列', 'Default sort column')}
+                    value={defaultOrderAttr}
+                    onValueChange={setDefaultOrderAttr}
+                    options={sortOptions}
+                    searchable
+                    className="min-w-0 flex-1"
+                  />
+                  <Select
+                    label={tr('排序方向', 'Sort direction')}
+                    value={defaultOrderAsc}
+                    onValueChange={(next) => setDefaultOrderAsc(next === 'desc' ? 'desc' : 'asc')}
+                    options={[
+                      { value: 'asc', label: tr('升序', 'Ascending') },
+                      { value: 'desc', label: tr('降序', 'Descending') },
+                    ]}
+                    className="w-28"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -643,31 +799,60 @@ export function ModelForm({
               </p>
             </div>
             <div>
-              <Label htmlFor="cmdb-model-sort">{tr('默认排序列', 'Default sort column')}</Label>
+              <Label htmlFor="cmdb-model-show">{tr('展示属性', 'Display attribute')}</Label>
               <Select
-                id="cmdb-model-sort"
-                label={tr('默认排序列', 'Default sort column')}
-                value={defaultOrderAttr}
-                onValueChange={setDefaultOrderAttr}
-                options={[
-                  { value: '', label: tr('（不指定）', '(none)') },
-                  ...ownAttributes.map((attribute) => ({
-                    value: attribute.name,
-                    label: `${attribute.name}（${attribute.alias}）`,
-                  })),
-                ]}
+                id="cmdb-model-show"
+                label={tr('展示属性', 'Display attribute')}
+                value={showKey}
+                onValueChange={setShowKey}
+                options={showOptions}
                 searchable
                 className="mt-1 w-full"
               />
+              <p className="mt-1 text-[11px] text-text-faint">
+                {tr('实例列表和详情用它作为标题。', 'Used as the title of an instance in lists and details.')}
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="cmdb-model-sort">{tr('默认排序列', 'Default sort column')}</Label>
+              <div className="mt-1 flex items-center gap-2">
+                <Select
+                  id="cmdb-model-sort"
+                  label={tr('默认排序列', 'Default sort column')}
+                  value={defaultOrderAttr}
+                  onValueChange={setDefaultOrderAttr}
+                  options={sortOptions}
+                  searchable
+                  className="min-w-0 flex-1"
+                />
+                <Select
+                  label={tr('排序方向', 'Sort direction')}
+                  value={defaultOrderAsc}
+                  onValueChange={(next) => setDefaultOrderAsc(next === 'desc' ? 'desc' : 'asc')}
+                  options={[
+                    { value: 'asc', label: tr('升序', 'Ascending') },
+                    { value: 'desc', label: tr('降序', 'Descending') },
+                  ]}
+                  className="w-28"
+                />
+              </div>
             </div>
           </div>
         )}
 
-        {creating && models.length > 0 && (
+        {availableModels.length > 0 && (
           <fieldset>
             <legend className="text-xs font-medium text-text-muted">{tr('继承自（可多选）', 'Inherits from (any number)')}</legend>
-            <div className="mt-1 flex max-h-32 flex-wrap gap-x-4 gap-y-1.5 overflow-y-auto rounded-md border border-border p-2">
-              {models.map((model) => (
+            <Input
+              type="search"
+              aria-label={tr('筛选父模型', 'Filter parent models')}
+              placeholder={tr('筛选父模型', 'Filter parent models')}
+              value={parentQuery}
+              onChange={(event) => setParentQuery(event.target.value)}
+              className="mt-1 w-full"
+            />
+            <div className="mt-2 flex max-h-32 flex-wrap gap-x-4 gap-y-1.5 overflow-y-auto rounded-md border border-border p-2">
+              {visibleParentOptions.map((model) => (
                 <label key={model.id} className="flex items-center gap-2 text-xs text-text-muted">
                   <Checkbox
                     checked={parentIDs.includes(model.id)}

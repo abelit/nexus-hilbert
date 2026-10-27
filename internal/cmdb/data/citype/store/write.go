@@ -95,6 +95,7 @@ func (r *Repo) UpdateType(ctx context.Context, in citypebiz.UpdateTypeInput) err
 			"name":               ct.Name,
 			"alias":              ct.Alias,
 			"unique_id":          ct.UniqueID,
+			"show_id":            ct.ShowID,
 			"icon":               ct.Icon,
 			"order":              ct.Order,
 			"default_order_attr": ct.DefaultOrderAttr,
@@ -110,6 +111,26 @@ func (r *Repo) UpdateType(ctx context.Context, in citypebiz.UpdateTypeInput) err
 		if in.UniqueAttributeID > 0 {
 			if err := ensureRequiredBinding(tx, ct.ID, in.UniqueAttributeID); err != nil {
 				return err
+			}
+		}
+		if in.ParentsSet {
+			// The edges are replaced, not merged. A soft delete would leave the
+			// old rows in the table and require every read to filter them; the
+			// edge has no independent identity worth keeping.
+			if err := tx.Unscoped().Where("child_id = ?", ct.ID).
+				Delete(&citypemodel.CITypeInheritance{}).Error; err != nil {
+				return fmt.Errorf("clear inheritance edges for ci type %d: %w", ct.ID, err)
+			}
+			seen := make(map[model.ID]bool, len(in.ParentIDs))
+			for _, parentID := range in.ParentIDs {
+				if parentID == 0 || seen[parentID] {
+					continue
+				}
+				seen[parentID] = true
+				edge := citypemodel.CITypeInheritance{ParentID: parentID, ChildID: ct.ID}
+				if err := tx.Create(&edge).Error; err != nil {
+					return fmt.Errorf("insert inheritance edge: %w", err)
+				}
 			}
 		}
 

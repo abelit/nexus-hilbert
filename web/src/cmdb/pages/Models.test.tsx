@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { server } from '@/test/msw-server';
+import { selectOption } from '@/test/select-option';
 import { useAuth } from '@/store/auth';
 import ModelsPage from './Models';
 import { ToastProvider } from '../components/Toast';
@@ -56,7 +57,7 @@ beforeEach(() => {
 });
 
 describe('the list', () => {
-  it('draws the models and marks the ones that cannot hold instances', async () => {
+  it('draws the models and their navigation links', async () => {
     server.use(
       http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })),
       http.get('/api/v1/cmdb/attributes', () => HttpResponse.json({ items: attributes, total: attributes.length })),
@@ -65,13 +66,8 @@ describe('the list', () => {
 
     expect(await screen.findByRole('link', { name: '主机' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '交换机' })).toBeInTheDocument();
-    // A MODEL WITH NO BOUND ATTRIBUTES CANNOT HOLD ANYTHING, and saying so on the
-    // list is the point of the column: `switch` has none and `host` has some.
-    const rows = screen.getAllByRole('row');
-    const switchRow = rows.find((row) => within(row).queryByRole('link', { name: '交换机' }))!;
-    const hostRow = rows.find((row) => within(row).queryByRole('link', { name: '主机' }))!;
-    expect(within(switchRow).getAllByText('否').length).toBeGreaterThan(0);
-    expect(within(hostRow).getAllByText('是').length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: '主机' })).toHaveAttribute('href', '/cmdb/models/1');
+    expect(screen.getByRole('link', { name: '交换机' })).toHaveAttribute('href', '/cmdb/models/2');
   });
 
   it('filters by name or alias without a request per keystroke', async () => {
@@ -87,7 +83,7 @@ describe('the list', () => {
 
     await screen.findByRole('link', { name: '主机' });
     const before = requests;
-    await user.type(screen.getByLabelText('搜索模型'), '交换');
+    await user.type(screen.getByLabelText('搜索模型列表'), '交换');
     // THE LIST IS THE SCHEMA: a deployment has tens of models, so the filter runs
     // over the page's own rows rather than issuing a request per character.
     expect(requests).toBe(before);
@@ -127,7 +123,7 @@ describe('creating a model', () => {
       http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })),
       http.get('/api/v1/cmdb/attributes', () => HttpResponse.json({ items: attributes, total: attributes.length })),
       http.post('/api/v1/cmdb/ci-types', async ({ request }) => {
-        posted.push(await request.json());
+        posted.push((await request.json()) as Record<string, unknown>);
         return HttpResponse.json({ id: 3, ...(posted.at(-1) as object) }, { status: 201 });
       }),
     );
@@ -142,6 +138,47 @@ describe('creating a model', () => {
     // form refuses it first and says why.
     expect(await screen.findByRole('alert')).toHaveTextContent('标识属性');
     expect(posted).toHaveLength(0);
+  });
+
+  it('carries the display attribute, default sort and inherited parents on create', async () => {
+    const user = userEvent.setup();
+    const posted: Record<string, unknown>[] = [];
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [models[0]], total: 1 })),
+      http.get('/api/v1/cmdb/attributes', () =>
+        HttpResponse.json({
+          items: [
+            { id: 10, name: 'hostname', alias: '主机名', value_type: '2', is_list: false, is_index: true },
+            { id: 11, name: 'cpu', alias: '核数', value_type: '0', is_list: false, is_index: true },
+          ],
+          total: 2,
+        }),
+      ),
+      http.post('/api/v1/cmdb/ci-types', async ({ request }) => {
+        posted.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ id: 3 }, { status: 201 });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /新建模型/ }));
+    await user.type(screen.getByLabelText('名称（唯一标识）'), 'database');
+    await user.type(screen.getByLabelText('别名（显示名）'), '数据库');
+    await selectOption(screen.getByLabelText('标识属性'), 'hostname（主机名）');
+    await selectOption(screen.getByLabelText('展示属性'), '主机名（hostname）');
+    await selectOption(screen.getByLabelText('默认排序列'), '主机名（hostname）');
+    await selectOption(screen.getByLabelText('排序方向'), '降序');
+    await user.click(screen.getByRole('checkbox', { name: '主机' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({
+      name: 'database',
+      unique_key: 'hostname',
+      show_key: 'hostname',
+      default_order_attr: '-hostname',
+      parent_ids: [1],
+    });
   });
 
   it('creates the identifying attribute inline, then the model', async () => {

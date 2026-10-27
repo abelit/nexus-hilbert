@@ -456,3 +456,91 @@ func TestFindAttributeByIDAndName(t *testing.T) {
 		t.Fatalf("FindAttribute(\"\") = %+v, %v; want nil", got, err)
 	}
 }
+
+func TestUpdateTypeWritesAndClearsTheShowAttribute(t *testing.T) {
+	repo, db := newWriteRepo(t)
+	unique := seedAttr(t, db, "hostname")
+	show := seedAttr(t, db, "serial")
+	ct := mustType(t, repo, "host", unique.ID)
+
+	updated := ct
+	updated.ShowID = &show.ID
+	if err := repo.UpdateType(context.Background(), citypebiz.UpdateTypeInput{
+		Type: updated, Previous: ct, Actor: 7,
+	}); err != nil {
+		t.Fatalf("UpdateType() error = %v", err)
+	}
+	var got citypemodel.CIType
+	if err := db.First(&got, ct.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.ShowID == nil || *got.ShowID != show.ID {
+		t.Fatalf("show_id = %v, want %d", got.ShowID, show.ID)
+	}
+
+	cleared := updated
+	cleared.ShowID = nil
+	if err := repo.UpdateType(context.Background(), citypebiz.UpdateTypeInput{
+		Type: cleared, Previous: updated, Actor: 7,
+	}); err != nil {
+		t.Fatalf("clearing UpdateType() error = %v", err)
+	}
+	if err := db.First(&got, ct.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.ShowID != nil {
+		t.Fatalf("show_id = %v after clear, want nil", got.ShowID)
+	}
+}
+
+func TestUpdateTypeReplacesInheritanceEdgesOnlyWhenSet(t *testing.T) {
+	repo, db := newWriteRepo(t)
+	attr := seedAttr(t, db, "hostname")
+	first := mustType(t, repo, "first", attr.ID)
+	second := mustType(t, repo, "second", attr.ID)
+	child := mustType(t, repo, "child", attr.ID, first.ID)
+
+	// A partial update that does not mention inheritance leaves the edge alone.
+	partial := child
+	partial.Alias = "renamed"
+	if err := repo.UpdateType(context.Background(), citypebiz.UpdateTypeInput{
+		Type: partial, Previous: child, Actor: 7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var edges []citypemodel.CITypeInheritance
+	if err := db.Where("child_id = ?", child.ID).Find(&edges).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 || edges[0].ParentID != first.ID {
+		t.Fatalf("edges after an unrelated update = %+v", edges)
+	}
+
+	// An explicit parent list replaces the edges.
+	if err := repo.UpdateType(context.Background(), citypebiz.UpdateTypeInput{
+		Type: partial, Previous: child, ParentIDs: []model.ID{second.ID}, ParentsSet: true, Actor: 7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	edges = nil
+	if err := db.Where("child_id = ?", child.ID).Find(&edges).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 || edges[0].ParentID != second.ID {
+		t.Fatalf("edges after replace = %+v, want the second parent only", edges)
+	}
+
+	// An explicit empty list clears them.
+	if err := repo.UpdateType(context.Background(), citypebiz.UpdateTypeInput{
+		Type: partial, Previous: child, ParentIDs: nil, ParentsSet: true, Actor: 7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	edges = nil
+	if err := db.Where("child_id = ?", child.ID).Find(&edges).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("edges after clear = %+v, want none", edges)
+	}
+}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -25,12 +25,11 @@ import {
   deleteAttributeGroup,
   getCIType,
   listAttributeGroups,
-  listAttributes,
+  listAllAttributes,
   listTypeAttributes,
   saveAttributeGroup,
   swapAttributeGroups,
   unbindAttributes,
-  updateAttribute,
   updateAttributeGroup,
   updateBindings,
   type Attribute,
@@ -38,13 +37,16 @@ import {
   type CIType,
   type TypeAttribute,
 } from '../api/citype';
-import { AttributeControl } from '../components/AttributeControl';
+import { AttributeDictionary } from '../components/AttributeDictionary';
+import { ModelConfigShell } from '../components/ModelConfigShell';
+import { useModelTreeRefresh } from '../components/model-tree-context';
+import { AttributeForm } from '../components/AttributeForm';
 import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { ModelForm } from './Models';
 import { ConstraintsTab, RelationsTab, TriggersTab } from '../components/ModelRuleTabs';
 import { useToast } from '../components/Toast';
-import { VALUE_TYPE_LABELS, isValueTypeCode, toWireValue } from '../lib/valuetype';
+import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
 
 // 模型配置 · 单个模型.
 //
@@ -61,13 +63,21 @@ import { VALUE_TYPE_LABELS, isValueTypeCode, toWireValue } from '../lib/valuetyp
 
 type Tab = 'attributes' | 'groups' | 'relations' | 'constraints' | 'triggers' | 'discovery';
 
+const TABS: Tab[] = ['attributes', 'groups', 'relations', 'constraints', 'triggers', 'discovery'];
+
+function validTab(value: string | null): Tab | null {
+  return value && (TABS as string[]).includes(value) ? (value as Tab) : null;
+}
+
 export default function ModelDetailPage() {
   const { tr } = useI18n();
   const params = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const ref = params.id ?? '';
   const { isAdmin } = usePermissions();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
+  const treeRefresh = useModelTreeRefresh();
 
   const [model, setModel] = useState<CIType | null>(null);
   const [attributes, setAttributes] = useState<TypeAttribute[]>([]);
@@ -75,10 +85,11 @@ export default function ModelDetailPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('attributes');
+  const [tab, setTab] = useState<Tab>(() => validTab(searchParams.get('tab')) ?? 'attributes');
   const [editing, setEditing] = useState(false);
   const [binding, setBinding] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<TypeAttribute | null>(null);
+  const [dictionaryOpen, setDictionaryOpen] = useState(false);
 
   const load = useCallback(
     async (quiet = false) => {
@@ -108,6 +119,20 @@ export default function ModelDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const requested = validTab(searchParams.get('tab'));
+    if (requested) setTab(requested);
+  }, [searchParams]);
+
+  const changeTab = (next: string) => {
+    const value = validTab(next);
+    if (!value) return;
+    setTab(value);
+    const params = new URLSearchParams(searchParams);
+    params.set('tab', value);
+    setSearchParams(params, { replace: true });
+  };
 
   const adminTip = isAdmin ? undefined : tr('需要管理员权限', 'Administrator role required');
 
@@ -144,6 +169,7 @@ export default function ModelDetailPage() {
   const modelLabel = model ? model.alias || model.name : ref;
 
   return (
+    <ModelConfigShell>
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
       <PageHeader
         leading={
@@ -160,7 +186,7 @@ export default function ModelDetailPage() {
             <CMDBIcon value={model?.icon} size={18} label={modelLabel} />
             <span className="truncate">{modelLabel}</span>
             {model && !model.enabled && <Chip>{tr('停用', 'Disabled')}</Chip>}
-            {model && !model.is_attached && <Chip tone="warning">{tr('无绑定属性', 'No bound attributes')}</Chip>}
+            {model && !loading && attributes.length === 0 && <Chip tone="warning">{tr('无绑定属性', 'No bound attributes')}</Chip>}
           </span>
         }
         subtitle={
@@ -170,6 +196,11 @@ export default function ModelDetailPage() {
               {model.unique_key && (
                 <span>
                   {tr('标识', 'Identifies by')} <code className="font-mono">{model.unique_key}</code>
+                </span>
+              )}
+              {model.show_name && (
+                <span>
+                  {tr('展示', 'Shows')} <code className="font-mono">{model.show_name}</code>
                 </span>
               )}
             </span>
@@ -212,7 +243,7 @@ export default function ModelDetailPage() {
           </div>
         )}
 
-        <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
+        <Tabs value={tab} onValueChange={changeTab}>
           <TabsList className="mb-4">
             <TabsTrigger value="attributes">
               {tr('属性', 'Attributes')}
@@ -238,7 +269,7 @@ export default function ModelDetailPage() {
               onEdit={setEditingAttribute}
               onUnbind={(row) => void unbind(row)}
               onFlag={setBindingFlag}
-              model={model}
+              onOpenDictionary={() => setDictionaryOpen(true)}
             />
           </TabsContent>
 
@@ -297,6 +328,7 @@ export default function ModelDetailPage() {
             setEditing(false);
             toast.success(message);
             await load(true);
+            treeRefresh?.refresh();
           }}
         />
       )}
@@ -315,19 +347,34 @@ export default function ModelDetailPage() {
       )}
 
       {editingAttribute && (
-        <AttributeModal
-          row={editingAttribute}
+        <Modal
+          open
           onClose={() => setEditingAttribute(null)}
-          onSaved={async (message) => {
-            setEditingAttribute(null);
-            toast.success(message);
-            await load(true);
-          }}
-        />
+          size="xl"
+          resizable
+          title={tr(`编辑属性 ${editingAttribute.name}`, `Edit attribute ${editingAttribute.name}`)}
+        >
+          <AttributeForm
+            attribute={editingAttribute}
+            onClose={() => setEditingAttribute(null)}
+            onSaved={async (message) => {
+              setEditingAttribute(null);
+              toast.success(message);
+              await load(true);
+            }}
+          />
+        </Modal>
       )}
+
+      <AttributeDictionary
+        open={dictionaryOpen}
+        onClose={() => setDictionaryOpen(false)}
+        onChanged={() => void load(true)}
+      />
 
       {dialog}
     </div>
+    </ModelConfigShell>
   );
 }
 
@@ -342,7 +389,7 @@ function AttributesTab({
   onEdit,
   onUnbind,
   onFlag,
-  model,
+  onOpenDictionary,
 }: {
   rows: TypeAttribute[];
   loading: boolean;
@@ -352,7 +399,7 @@ function AttributesTab({
   onEdit(row: TypeAttribute): void;
   onUnbind(row: TypeAttribute): void;
   onFlag(row: TypeAttribute, patch: { is_required?: boolean; default_show?: boolean }): void;
-  model: CIType | null;
+  onOpenDictionary(): void;
 }) {
   const { tr } = useI18n();
 
@@ -436,10 +483,15 @@ function AttributesTab({
             'An attribute exists in the dictionary first and is then bound to a model. One attribute can be on several models, and each binding has its own settings.',
           )}
         </p>
-        <Button variant="primary" size="sm" type="button" onClick={onBind} disabled={!isAdmin} className="inline-flex items-center gap-1.5">
-          <Plus size={12} aria-hidden="true" />
-          {tr('绑定属性', 'Bind attributes')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" type="button" onClick={onOpenDictionary} className="inline-flex items-center gap-1.5">
+            {tr('属性字典', 'Attribute dictionary')}
+          </Button>
+          <Button variant="primary" size="sm" type="button" onClick={onBind} disabled={!isAdmin} className="inline-flex items-center gap-1.5">
+            <Plus size={12} aria-hidden="true" />
+            {tr('绑定属性', 'Bind attributes')}
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -450,19 +502,17 @@ function AttributesTab({
           loading={loading}
           storageKey="model-attributes"
           empty={
-            model && !model.is_attached
-              ? tr('这个模型还没有属性，所以还不能存实例。', 'This model has no attributes yet, so it cannot hold instances.')
-              : tr('还没有属性', 'No attributes yet')
+            tr('还没有属性', 'No attributes yet')
           }
           actions={(row) => (
             <>
-              <Hint content={adminTip}>
+              <Hint content={row.inherited ? tr('这个属性来自父模型，请到父模型上编辑', 'It comes from a parent model; edit it there') : adminTip}>
                 <Button
                   variant="subtle"
                   size="sm"
                   type="button"
                   onClick={() => onEdit(row)}
-                  disabled={!isAdmin}
+                  disabled={!isAdmin || row.inherited}
                   aria-label={tr(`编辑 ${row.name}`, `Edit ${row.name}`)}
                   className="inline-flex items-center gap-1"
                 >
@@ -513,9 +563,10 @@ function BindModal({
   const [err, setErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [newAttr, setNewAttr] = useState({ open: false, name: '', alias: '', type: '2' });
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
-    void listAttributes({ page_size: 500 })
+    void listAllAttributes()
       .then(setDictionary)
       .catch((error) => setErr(describeError(error, tr('无法读取属性字典', 'Could not load the attribute dictionary'))))
       .finally(() => setLoading(false));
@@ -524,7 +575,10 @@ function BindModal({
   const boundIDs = useMemo(() => new Set(bound.map((row) => row.id)), [bound]);
   // AN ATTRIBUTE ALREADY ON THE MODEL IS NOT OFFERED AGAIN — the backend would
   // take it as a re-bind and the operator would think they added something.
-  const available = dictionary.filter((attribute) => !boundIDs.has(attribute.id));
+  const needle = search.trim().toLowerCase();
+  const available = dictionary
+    .filter((attribute) => !boundIDs.has(attribute.id))
+    .filter((attribute) => !needle || attribute.name.toLowerCase().includes(needle) || attribute.alias.toLowerCase().includes(needle));
 
   const submit = async () => {
     if (selected.length === 0) return;
@@ -582,11 +636,25 @@ function BindModal({
         </div>
       )}
 
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Input
+          type="search"
+          aria-label={tr('搜索属性', 'Search attributes')}
+          placeholder={tr('搜索可绑定属性', 'Search available attributes')}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          className="w-56"
+        />
         <span className="text-xs text-text-muted">
           {tr(`${available.length} 个属性可绑定`, `${available.length} attributes available`)}
         </span>
-        <Button variant="outline" size="sm" type="button" onClick={() => setNewAttr((current) => ({ ...current, open: !current.open }))}>
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          onClick={() => setNewAttr((current) => ({ ...current, open: !current.open }))}
+          className="ms-auto"
+        >
           {tr('新建属性', 'New attribute')}
         </Button>
       </div>
@@ -663,139 +731,6 @@ function BindModal({
               </label>
             );
           })
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-// --- one attribute, editing the dictionary entry ---
-
-function AttributeModal({
-  row,
-  onClose,
-  onSaved,
-}: {
-  row: TypeAttribute;
-  onClose(): void;
-  onSaved(message: string): void | Promise<void>;
-}) {
-  const { tr } = useI18n();
-  const [alias, setAlias] = useState(row.alias);
-  // THE DEFAULT IS A DOCUMENT: `{"default": <literal or $token>}`, which is what
-  // the write path's classifier reads. A bare scalar here would be stored and
-  // then ignored.
-  const storedDefault = row.default && typeof row.default === 'object' ? (row.default.default ?? '') : '';
-  const [defaultValue, setDefaultValue] = useState(storedDefault === null || storedDefault === undefined ? '' : String(storedDefault));
-  const [indexed, setIndexed] = useState(row.is_index);
-  const [sortable, setSortable] = useState(row.is_sortable);
-  const [unique, setUnique] = useState(row.is_unique);
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const aliasId = 'cmdb-attr-alias';
-
-  const submit = async () => {
-    setSubmitting(true);
-    setErr(null);
-    try {
-      await updateAttribute(row.id, {
-        alias: alias.trim() || row.name,
-        is_index: indexed,
-        is_sortable: sortable,
-        is_unique: unique,
-        // AN EMPTY BOX CLEARS THE DEFAULT, by sending an empty DOCUMENT: a
-        // document with no `default` key is what the classifier reads as "none",
-        // and it is written rather than omitted so the old value really goes.
-        default:
-          defaultValue === ''
-            ? {}
-            : { default: toWireValue(isValueTypeCode(row.value_type) ? row.value_type : '2', defaultValue) },
-      });
-      await onSaved(tr('已保存', 'Saved'));
-    } catch (error) {
-      setErr(describeError(error, tr('保存失败', 'Could not save')));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={tr(`编辑属性 ${row.name}`, `Edit attribute ${row.name}`)}
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
-            {tr('取消', 'Cancel')}
-          </Button>
-          <Button variant="primary" type="button" onClick={() => void submit()} disabled={submitting}>
-            {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
-          </Button>
-        </div>
-      }
-    >
-      <div className="flex flex-col gap-3">
-        {err && (
-          <div role="alert" className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
-            {err}
-          </div>
-        )}
-
-        <div>
-          <Label htmlFor={aliasId}>{tr('别名', 'Alias')}</Label>
-          <Input id={aliasId} value={alias} onChange={(event) => setAlias(event.target.value)} className="mt-1 w-full" />
-        </div>
-
-        <div>
-          <Label htmlFor="cmdb-attr-default">{tr('默认值', 'Default')}</Label>
-          <div className="mt-1">
-            <AttributeControl
-              id="cmdb-attr-default"
-              type={isValueTypeCode(row.value_type) ? row.value_type : '2'}
-              value={defaultValue || null}
-              onChange={(next) => setDefaultValue(next === null ? '' : String(next))}
-              aria-label={tr('默认值', 'Default')}
-            />
-          </div>
-          <p className="mt-1 text-[11px] text-text-faint">
-            {tr(
-              '留空表示没有默认值；计算属性的默认值由模型生成。',
-              'Empty means no default; a computed attribute’s value comes from the model.',
-            )}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <label className="flex items-center gap-2 text-xs text-text-muted">
-            <Checkbox checked={indexed} onCheckedChange={(next) => setIndexed(next === true)} />
-            {tr('可检索', 'Searchable')}
-          </label>
-          <label className="flex items-center gap-2 text-xs text-text-muted">
-            <Checkbox checked={sortable} onCheckedChange={(next) => setSortable(next === true)} />
-            {tr('可排序', 'Sortable')}
-          </label>
-          <label className="flex items-center gap-2 text-xs text-text-muted">
-            <Checkbox checked={unique} onCheckedChange={(next) => setUnique(next === true)} />
-            {tr('唯一', 'Unique')}
-          </label>
-        </div>
-
-        <p className="text-[11px] text-text-faint">
-          {tr(
-            `值存放在 ${row.storage_table}；密码、链接与文件属性强制不可检索，而除文本与 JSON 外的类型强制可检索——所以这里的开关对它们不起作用。`,
-            `Values live in ${row.storage_table}. Password, link and file attributes are forced unsearchable, and every type but text and JSON is forced searchable, so the switch does nothing for those.`,
-          )}
-        </p>
-
-        {row.has_compute_script && (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">
-            {tr(
-              '这个属性带有 Python 计算脚本。本移植不会执行它，因此它不会自动计算。',
-              'This attribute carries a Python compute script. This port does not run it, so the value is not computed.',
-            )}
-          </p>
         )}
       </div>
     </Modal>

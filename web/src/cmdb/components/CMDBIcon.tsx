@@ -100,16 +100,10 @@ export function CMDBIcon({ value, size = 16, className, label }: Props) {
   if (parsed.custom && parsed.url) {
     // AN UPLOADED IMAGE IS NOT A GLYPH. The value's fourth part is where the
     // operator's own picture lives, and it is drawn as an image rather than
-    // looked up.
-    return (
-      <img
-        src={parsed.url}
-        alt={label}
-        width={size}
-        height={size}
-        className={cn('shrink-0 rounded-sm object-contain', className)}
-      />
-    );
+    // looked up. A missing upload must fall back to the neutral glyph: an
+    // `<img>` that fails renders its alt text inside a size-pixel box, which
+    // wraps a Chinese model name one character per line.
+    return <CustomIcon src={parsed.url} size={size} label={label} className={className} />;
   }
 
   const symbol = parsed.type ? glyphs?.[parsed.type] : undefined;
@@ -138,6 +132,24 @@ export function CMDBIcon({ value, size = 16, className, label }: Props) {
       // The only operator-controlled part is `parsed.color`, and iconvalue.ts
       // accepts it only when it is a literal colour.
       dangerouslySetInnerHTML={{ __html: symbol.c }}
+    />
+  );
+}
+
+function CustomIcon({ src, size, label, className }: { src: string; size: number; label: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <Boxes size={size} aria-label={label} role="img" className={cn('shrink-0 text-text-faint', className)} />;
+  }
+  return (
+    <img
+      src={src}
+      alt={label}
+      width={size}
+      height={size}
+      style={{ width: size, height: size }}
+      onError={() => setFailed(true)}
+      className={cn('shrink-0 rounded-sm object-contain', className)}
     />
   );
 }

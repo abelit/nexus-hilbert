@@ -124,6 +124,80 @@ async function mockAPI(page: import('@playwright/test').Page) {
   });
 }
 
+// The action column must be fixed as one piece: a pinned cell under an
+// unpinned header lets the headers of the columns it covers show through.
+// A DOM assertion cannot see that, so this measures both boxes in Chromium.
+test('the model action header stays pinned with the action cells', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+
+  await page.goto('/cmdb/models');
+  await expect(page.getByRole('heading', { name: '模型配置' })).toBeVisible();
+
+  const table = page.locator('.cmdb-table');
+  const scroller = table.locator('div.overflow-x-auto').first();
+  await expect(table.getByText('hostname')).toBeVisible();
+
+  const scroll = await scroller.evaluate((element) => ({
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  expect(scroll.scrollWidth).toBeGreaterThan(scroll.clientWidth);
+
+  const headerBox = await table.locator('thead th').filter({ hasText: '操作' }).boundingBox();
+  const cellBox = await table.locator('tbody td.sticky').first().boundingBox();
+  const scrollerBox = await scroller.boundingBox();
+  expect(headerBox).not.toBeNull();
+  expect(cellBox).not.toBeNull();
+  expect(scrollerBox).not.toBeNull();
+  if (!headerBox || !cellBox || !scrollerBox) return;
+
+  const scrollerRight = scrollerBox.x + scrollerBox.width;
+  expect(headerBox.x + headerBox.width).toBeLessThanOrEqual(scrollerRight + 1);
+  expect(Math.abs((headerBox.x + headerBox.width) - (cellBox.x + cellBox.width))).toBeLessThanOrEqual(1);
+});
+
+// Three labelled row buttons take almost the whole width of a phone table,
+// and because the action column is pinned they cover the model name itself.
+test('the model list compresses its row actions on a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+
+  await page.goto('/cmdb/models');
+  await expect(page.getByRole('heading', { name: '模型配置' })).toBeVisible();
+
+  const table = page.locator('.cmdb-table');
+  const modelLink = table.locator('tbody tr a').first();
+  const actionCell = table.locator('tbody td.sticky').first();
+  await expect(modelLink).toBeVisible();
+  await expect(page.getByRole('button', { name: '更多操作' }).first()).toBeVisible();
+
+  const linkBox = await modelLink.boundingBox();
+  const cellBox = await actionCell.boundingBox();
+  expect(linkBox).not.toBeNull();
+  expect(cellBox).not.toBeNull();
+  if (!linkBox || !cellBox) return;
+
+  expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(cellBox.x + 1);
+  expect(cellBox.width).toBeLessThanOrEqual(80);
+});
+
 for (const pageDef of PAGES) {
   const widths = [390, 768, 1280, 1920];
   const themes = ['light', 'dark'] as const;

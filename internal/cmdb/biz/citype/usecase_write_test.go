@@ -51,6 +51,8 @@ func (c *countingRepo) UpdateType(_ context.Context, in UpdateTypeInput) error {
 		if c.types[i].ID == in.Type.ID {
 			c.types[i] = in.Type
 			c.updatedUnique = in.UniqueAttributeID
+			c.updatedParents = in.ParentIDs
+			c.updatedParentsSet = in.ParentsSet
 			return nil
 		}
 	}
@@ -501,5 +503,99 @@ func TestIsBuiltin(t *testing.T) {
 		if isBuiltin(name) {
 			t.Errorf("isBuiltin(%q) = true, want false", name)
 		}
+	}
+}
+
+func TestCreateSetsTheShowAttribute(t *testing.T) {
+	repo, _ := writeRepo()
+	serial := newAttr(11, "serial")
+	repo.attrs[serial.ID] = serial
+
+	view, err := NewUsecase(repo, nil).Create(context.Background(), CreateInput{
+		Name: "host", UniqueKey: "hostname", ShowKey: "serial",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if view.Type.ShowID == nil || *view.Type.ShowID != serial.ID {
+		t.Fatalf("show_id = %v, want %d", view.Type.ShowID, serial.ID)
+	}
+	if view.ShowName != "serial" {
+		t.Fatalf("show name = %q, want serial", view.ShowName)
+	}
+}
+
+func TestCreateRejectsAnUnknownShowAttribute(t *testing.T) {
+	repo, _ := writeRepo()
+	_, err := NewUsecase(repo, nil).Create(context.Background(), CreateInput{
+		Name: "host", UniqueKey: "hostname", ShowKey: "missing",
+	})
+	if !errors.Is(err, ErrShowKeyNotFound) || !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrShowKeyNotFound wrapping ErrNotFound", err)
+	}
+}
+
+func TestUpdateSetsAndClearsTheShowAttribute(t *testing.T) {
+	repo, _ := writeRepo()
+	serial := newAttr(11, "serial")
+	repo.attrs[serial.ID] = serial
+	existing := newCIType(1, "host", "主机")
+	existing.UniqueID = 10
+	repo.types = append(repo.types, existing)
+	uc := NewUsecase(repo, nil)
+
+	show := "serial"
+	view, err := uc.Update(context.Background(), UpdateInput{ID: 1, ShowKey: &show})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if view.Type.ShowID == nil || *view.Type.ShowID != serial.ID || view.ShowName != "serial" {
+		t.Fatalf("show = %+v / %q, want serial", view.Type.ShowID, view.ShowName)
+	}
+
+	clear := ""
+	view, err = uc.Update(context.Background(), UpdateInput{ID: 1, ShowKey: &clear})
+	if err != nil {
+		t.Fatalf("clearing ShowKey error = %v", err)
+	}
+	if view.Type.ShowID != nil || view.ShowName != "" {
+		t.Fatalf("show after clear = %+v / %q, want nil", view.Type.ShowID, view.ShowName)
+	}
+}
+
+func TestUpdateReplacesInheritanceParents(t *testing.T) {
+	repo, _ := writeRepo()
+	first := newCIType(1, "host", "主机")
+	first.UniqueID = 10
+	second := newCIType(2, "vm", "虚拟机")
+	second.UniqueID = 10
+	third := newCIType(3, "network", "网络")
+	third.UniqueID = 10
+	repo.types = append(repo.types, first, second, third)
+
+	if _, err := NewUsecase(repo, nil).Update(context.Background(), UpdateInput{
+		ID: 1, ParentIDs: []model.ID{second.ID, third.ID}, ParentsSet: true,
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !repo.updatedParentsSet {
+		t.Fatal("ParentsSet was not carried to the store")
+	}
+	if len(repo.updatedParents) != 2 || repo.updatedParents[0] != second.ID || repo.updatedParents[1] != third.ID {
+		t.Fatalf("parents = %v, want [%d %d]", repo.updatedParents, second.ID, third.ID)
+	}
+}
+
+func TestUpdateRejectsSelfInheritance(t *testing.T) {
+	repo, _ := writeRepo()
+	existing := newCIType(1, "host", "主机")
+	existing.UniqueID = 10
+	repo.types = append(repo.types, existing)
+
+	_, err := NewUsecase(repo, nil).Update(context.Background(), UpdateInput{
+		ID: 1, ParentIDs: []model.ID{1}, ParentsSet: true,
+	})
+	if !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid for a self parent", err)
 	}
 }

@@ -242,7 +242,7 @@ export default function InstancesPage() {
               size="sm"
               type="button"
               onClick={() => setEditing({ mode: 'create' })}
-              disabled={!model || !model.is_attached}
+              disabled={!model || attributes.length === 0}
               className="inline-flex items-center gap-1.5 font-medium text-accent-fg"
             >
               <Plus size={12} aria-hidden="true" />
@@ -291,7 +291,7 @@ export default function InstancesPage() {
             onRetry={() => void load()}
             storageKey={`instances-${model?.name ?? 'none'}`}
             empty={
-              model && !model.is_attached
+              model && attributes.length === 0
                 ? tr('这个模型还没有绑定属性，存不了实例。去模型详情里加几个。', 'This model has no bound attributes, so it cannot hold instances. Add some on its page.')
                 : tr('还没有实例', 'No instances yet')
             }

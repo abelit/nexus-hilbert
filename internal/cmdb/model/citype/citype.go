@@ -73,7 +73,12 @@ type CIType struct {
 	// dangle.
 	ShowID *cmdbmodel.ID `gorm:"column:show_id;index:idx_c_ci_types_show_id"`
 
-	Enabled    bool `gorm:"column:enabled;not null;default:true"`
+	Enabled bool `gorm:"column:enabled;not null;default:true"`
+	// IsAttached is cantor's own flag and is NOT "has bound attributes".
+	// cantor's data contains false for models that carry dozens of bindings;
+	// the port therefore uses the effective attribute set wherever it needs
+	// to answer "can this model hold instances". Kept only so an adopted row
+	// round-trips its stored value.
 	IsAttached bool `gorm:"column:is_attached;not null;default:false"`
 
 	// Icon is opaque user data: cantor stores an iconfont literal here (e.g.

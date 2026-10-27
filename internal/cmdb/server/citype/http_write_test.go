@@ -54,6 +54,10 @@ func (s *stubRepo) UpdateType(_ context.Context, in citypebiz.UpdateTypeInput) e
 	for i := range s.types {
 		if s.types[i].ID == in.Type.ID {
 			s.types[i] = in.Type
+			s.lastUpdate = &in
+			if in.ParentsSet {
+				s.parent[in.Type.ID] = in.ParentIDs
+			}
 			return nil
 		}
 	}
@@ -408,5 +412,64 @@ func TestSizeLimitDoesNotCountUnreadTrailingBytes(t *testing.T) {
 		"/v1/cmdb/ci-types", body); rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201: trailing bytes past the first JSON value are not read, "+
 			"so they cannot trip the limit (body %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateCarriesTheShowKey(t *testing.T) {
+	repo := adminRepo()
+	repo.attrs[11] = newAttr(11, "serial")
+	rec := send(t, writeRouter(t, repo, "admin", false, 7), http.MethodPost, "/v1/cmdb/ci-types",
+		`{"name":"switch","unique_key":"hostname","show_key":"serial"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var dto citTypeDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.ShowName != "serial" {
+		t.Fatalf("show_name = %q, want serial", dto.ShowName)
+	}
+	if repo.lastCreate == nil || repo.lastCreate.Type.ShowID == nil || *repo.lastCreate.Type.ShowID != 11 {
+		t.Fatalf("create input = %+v, want show_id 11", repo.lastCreate)
+	}
+}
+
+func TestUpdateCarriesShowKeyAndReplacesParents(t *testing.T) {
+	repo := adminRepo()
+	repo.attrs[11] = newAttr(11, "serial")
+	repo.parent = map[model.ID][]model.ID{}
+	rec := send(t, writeRouter(t, repo, "admin", false, 7), http.MethodPut, "/v1/cmdb/ci-types/1",
+		`{"show_key":"serial","parent_ids":[2]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var dto citTypeDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.ShowName != "serial" {
+		t.Fatalf("show_name = %q, want serial", dto.ShowName)
+	}
+	if len(dto.ParentIDs) != 1 || dto.ParentIDs[0] != 2 {
+		t.Fatalf("parent_ids = %v, want [2]", dto.ParentIDs)
+	}
+	if repo.lastUpdate == nil || repo.lastUpdate.Type.ShowID == nil || *repo.lastUpdate.Type.ShowID != 11 ||
+		!repo.lastUpdate.ParentsSet || len(repo.lastUpdate.ParentIDs) != 1 || repo.lastUpdate.ParentIDs[0] != 2 {
+		t.Fatalf("update input = %+v", repo.lastUpdate)
+	}
+}
+
+func TestUpdateCanClearTheShowKey(t *testing.T) {
+	repo := adminRepo()
+	show := model.ID(10)
+	repo.types[0].ShowID = &show
+	rec := send(t, writeRouter(t, repo, "admin", false, 7), http.MethodPut, "/v1/cmdb/ci-types/1",
+		`{"show_key":""}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	if repo.types[0].ShowID != nil {
+		t.Fatalf("show_id = %v after clearing, want nil", repo.types[0].ShowID)
 	}
 }

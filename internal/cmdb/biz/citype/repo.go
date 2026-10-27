@@ -142,6 +142,12 @@ type UpdateTypeInput struct {
 	// attribute had to add the binding or the type became uninstantiable.
 	UniqueAttributeID model.ID
 
+	// ParentIDs replaces the inheritance edges when ParentsSet is true. The
+	// unused state is distinct from an empty list: a partial update that does
+	// not mention inheritance must not clear it.
+	ParentIDs  []model.ID
+	ParentsSet bool
+
 	// Previous is the row as it was before the update, for the history delta.
 	Previous citypemodel.CIType
 

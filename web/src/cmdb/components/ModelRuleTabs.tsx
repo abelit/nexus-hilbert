@@ -24,6 +24,7 @@ import {
   deleteUniqueConstraint,
   listCITypes,
   listTriggers,
+  listTypeAttributes,
   listUniqueConstraints,
   relationChildren,
   relationParents,
@@ -37,6 +38,7 @@ import {
 } from '../api/citype';
 import { listRelationTypes, type RelationType } from '../api/relationtype';
 import { DataTable, type Column } from './DataTable';
+import { RelationAttributePairs, type AttributePair } from './RelationAttributePairs';
 import { useToast } from './Toast';
 
 // The three rule-shaped tabs of a model: relations, uniqueness and triggers.
@@ -277,7 +279,8 @@ function RelationModal({
   const [peer, setPeer] = useState('');
   const [relationTypeID, setRelationTypeID] = useState('');
   const [constraint, setConstraint] = useState('0');
-  const [showKey, setShowKey] = useState('');
+  const [peerAttributes, setPeerAttributes] = useState<TypeAttribute[]>([]);
+  const [pairs, setPairs] = useState<AttributePair[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -289,6 +292,29 @@ function RelationModal({
       })
       .catch((error) => setErr(describeError(error, tr('无法读取关系类型', 'Could not load relation types'))));
   }, [tr]);
+
+  useEffect(() => {
+    if (!peer) {
+      setPeerAttributes([]);
+      setPairs([]);
+      return;
+    }
+    let cancelled = false;
+    // Clear the positional mapping before the request settles so a pair from
+    // the previous peer cannot be submitted against the new one.
+    setPeerAttributes([]);
+    setPairs([]);
+    void listTypeAttributes(peer)
+      .then((got) => {
+        if (!cancelled) setPeerAttributes(got.attributes ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPeerAttributes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [peer]);
 
   const submit = async () => {
     if (!peer) {
@@ -306,9 +332,16 @@ function RelationModal({
       // other, which is the only thing "direction" means here.
       const parentRef = direction === 'children' ? modelRef : peer;
       const childRef = direction === 'children' ? peer : modelRef;
+      const filled = pairs.filter((pair) => pair.parent && pair.child);
       await saveRelation(parentRef, childRef, {
         relation_type_id: Number(relationTypeID),
         constraint,
+        ...(filled.length > 0
+          ? {
+              parent_attr_ids: filled.map((pair) => Number(pair.parent)),
+              child_attr_ids: filled.map((pair) => Number(pair.child)),
+            }
+          : {}),
       });
       await onSaved(tr('已保存', 'Saved'));
     } catch (error) {
@@ -393,21 +426,14 @@ function RelationModal({
           </p>
         </div>
 
-        {attributes.length > 0 && (
-          <div>
-            <Label htmlFor="cmdb-rel-show">{tr('树上显示的属性', 'Attribute shown on the tree')}</Label>
-            <Select
-              id="cmdb-rel-show"
-              label={tr('树上显示的属性', 'Attribute shown on the tree')}
-              value={showKey}
-              onValueChange={setShowKey}
-              options={[
-                { value: '', label: tr('（默认）', '(default)') },
-                ...attributes.map((attribute) => ({ value: attribute.name, label: attribute.alias || attribute.name })),
-              ]}
-              className="mt-1 w-full"
-            />
-          </div>
+        {peer && (
+          <RelationAttributePairs
+            parentAttributes={direction === 'children' ? attributes : peerAttributes}
+            childAttributes={direction === 'children' ? peerAttributes : attributes}
+            pairs={pairs}
+            onChange={setPairs}
+            disabled={submitting}
+          />
         )}
       </div>
     </Modal>

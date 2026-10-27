@@ -22,13 +22,16 @@ import {
   deleteRelationById,
   listCITypes,
   listRelations,
+  listTypeAttributes,
   saveRelation,
   type CIType,
   type ModelRelation,
+  type TypeAttribute,
 } from '../api/citype';
 import { listRelationTypes, type RelationType } from '../api/relationtype';
 import { DataTable, type Column } from '../components/DataTable';
 import { useToast } from '../components/Toast';
+import { RelationAttributePairs, type AttributePair } from '../components/RelationAttributePairs';
 
 // 模型关系 — every parent → child pair in the estate, in one table.
 //
@@ -278,8 +281,41 @@ function RelationFormModal({
   const [childID, setChildID] = useState('');
   const [typeID, setTypeID] = useState('');
   const [constraint, setConstraint] = useState('0');
+  const [parentAttributes, setParentAttributes] = useState<TypeAttribute[]>([]);
+  const [childAttributes, setChildAttributes] = useState<TypeAttribute[]>([]);
+  const [pairs, setPairs] = useState<AttributePair[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!parentID || !childID) {
+      setParentAttributes([]);
+      setChildAttributes([]);
+      setPairs([]);
+      return;
+    }
+    // A PAIR IS POSITIONAL AND MODEL-SPECIFIC. Clear it before the request
+    // settles: otherwise a mapping from the previous parent can be submitted
+    // while the new attributes are still loading.
+    setPairs([]);
+    setParentAttributes([]);
+    setChildAttributes([]);
+    void Promise.all([listTypeAttributes(parentID), listTypeAttributes(childID)])
+      .then(([parent, child]) => {
+        if (cancelled) return;
+        setParentAttributes(parent.attributes ?? []);
+        setChildAttributes(child.attributes ?? []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setParentAttributes([]);
+        setChildAttributes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [parentID, childID]);
 
   const submit = async () => {
     if (!parentID || !childID || !typeID) {
@@ -293,9 +329,16 @@ function RelationFormModal({
     setSubmitting(true);
     setErr(null);
     try {
+      const filled = pairs.filter((pair) => pair.parent && pair.child);
       await saveRelation(parentID, childID, {
         relation_type_id: Number(typeID),
         constraint,
+        ...(filled.length > 0
+          ? {
+              parent_attr_ids: filled.map((pair) => Number(pair.parent)),
+              child_attr_ids: filled.map((pair) => Number(pair.child)),
+            }
+          : {}),
       });
       await onSaved(tr('已创建模型关系', 'Relation created'));
     } catch (error) {
@@ -373,6 +416,15 @@ function RelationFormModal({
             className="mt-1 w-full"
           />
         </div>
+        {parentID && childID && (
+          <RelationAttributePairs
+            parentAttributes={parentAttributes}
+            childAttributes={childAttributes}
+            pairs={pairs}
+            onChange={setPairs}
+            disabled={submitting}
+          />
+        )}
       </div>
     </Modal>
   );

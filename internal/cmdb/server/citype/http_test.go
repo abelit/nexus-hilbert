@@ -32,6 +32,7 @@ type stubRepo struct {
 
 	// Recorded by the write methods, which live in http_write_test.go.
 	lastCreate   *citypebiz.CreateTypeInput
+	lastUpdate   *citypebiz.UpdateTypeInput
 	deletedActor model.ID
 }
 

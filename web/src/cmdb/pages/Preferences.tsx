@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
@@ -18,9 +19,32 @@ import SubscriptionsPage from './Subscriptions';
 
 type Tab = 'models' | 'groups' | 'tree' | 'searches';
 
+const TABS: Tab[] = ['models', 'groups', 'tree', 'searches'];
+
+function tabFrom(value: string | null): Tab | null {
+  return value && (TABS as string[]).includes(value) ? (value as Tab) : null;
+}
+
 export default function PreferencesPage() {
   const { tr } = useI18n();
-  const [tab, setTab] = useState<Tab>('models');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => tabFrom(searchParams.get('tab')) ?? 'models');
+
+  // The URL is also the state when the operator uses back/forward or follows a
+  // deep link while the page is already mounted.
+  useEffect(() => {
+    const requested = tabFrom(searchParams.get('tab'));
+    if (requested) setTab(requested);
+  }, [searchParams]);
+
+  const changeTab = (next: string) => {
+    const value = tabFrom(next);
+    if (!value) return;
+    setTab(value);
+    const params = new URLSearchParams(searchParams);
+    params.set('tab', value);
+    setSearchParams(params, { replace: true });
+  };
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
@@ -32,7 +56,7 @@ export default function PreferencesPage() {
         )}
       />
 
-      <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="min-h-0 flex-1">
+      <Tabs value={tab} onValueChange={changeTab} className="min-h-0 flex-1">
         <TabsList className="mx-6 mt-4">
           <TabsTrigger value="models">{tr('模型与列', 'Models & columns')}</TabsTrigger>
           <TabsTrigger value="groups">{tr('模型分组', 'Model groups')}</TabsTrigger>
