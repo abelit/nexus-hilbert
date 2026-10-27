@@ -51,9 +51,9 @@ const inheritedAttribute = {
   is_required: false,
 };
 
-function renderPage() {
+function renderPage(path = '/cmdb/models/1') {
   return render(
-    <MemoryRouter initialEntries={['/cmdb/models/1']}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route
           path="/cmdb/models/:id"
@@ -161,7 +161,6 @@ describe('the attribute tab', () => {
 
 describe('the other tabs', () => {
   it('loads relations for this model', async () => {
-    const user = userEvent.setup();
     baseHandlers();
     server.use(
       // THE CHILDREN ENDPOINT RETURNS THE OTHER END, NOT A parent/child PAIR.
@@ -188,12 +187,24 @@ describe('the other tabs', () => {
       http.get('/api/v1/cmdb/ci-types/1/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
       http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [model], total: 1 })),
     );
-    renderPage();
+    // THE URL ITSELF OPENS THE TAB. This is the deep link the reported page
+    // used, not a click that happens to select the same panel.
+    renderPage('/cmdb/models/1?tab=relations');
 
-    await user.click(await screen.findByRole('tab', { name: '模型关系' }));
     expect(await screen.findByRole('link', { name: '磁盘' })).toBeInTheDocument();
     expect(screen.getByText('子模型')).toBeInTheDocument();
     expect(screen.getByText('1-N')).toBeInTheDocument();
+  });
+
+  it('shows the empty state from the relations deep link', async () => {
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+    );
+    renderPage('/cmdb/models/1?tab=relations');
+
+    expect(await screen.findByText('这个模型还没有关系')).toBeInTheDocument();
   });
 
   it('shows parent relations and deletes them by the edge id', async () => {
