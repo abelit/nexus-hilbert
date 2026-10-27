@@ -48,9 +48,24 @@ export type Column<T> = {
 
 export type SortState = { key: string; desc: boolean };
 
+/**
+ * A labelled section of rows inside the one table.
+ *
+ * Groups use a header row in the same table rather than one table per group:
+ * a table per group would repeat the column picker, the header and the
+ * horizontal scroller, and each group would sort independently.
+ */
+export type RowGroup<T> = {
+  key: string;
+  header: ReactNode;
+  rows: T[];
+};
+
 type Props<T> = {
   columns: Column<T>[];
   rows: T[];
+  /** When present, rows are rendered under these group headers. */
+  groups?: RowGroup<T>[];
   rowKey: (row: T) => string | number;
 
   loading?: boolean;
@@ -80,6 +95,7 @@ type Props<T> = {
 export function DataTable<T>({
   columns,
   rows,
+  groups,
   rowKey,
   loading = false,
   error = null,
@@ -129,19 +145,36 @@ export function DataTable<T>({
     });
   };
 
-  const sortedRows = useMemo(() => {
-    if (onSortChange || !activeSort) return rows;
+  // ONE COMPARATOR FOR THE WHOLE TABLE. In grouped mode it is applied inside
+  // each group, so clicking a header sorts every section the same way without
+  // moving rows between groups or changing group order.
+  const sortRows = useMemo(() => {
+    if (onSortChange || !activeSort) return (list: T[]) => list;
     const column = columns.find((item) => item.key === activeSort.key);
-    if (!column?.sortValue) return rows;
+    if (!column?.sortValue) return (list: T[]) => list;
     const direction = activeSort.desc ? -1 : 1;
-    return [...rows].sort((a, b) => {
-      const left = column.sortValue!(a);
-      const right = column.sortValue!(b);
-      if (left < right) return -direction;
-      if (left > right) return direction;
-      return 0;
-    });
-  }, [rows, columns, activeSort, onSortChange]);
+    return (list: T[]) =>
+      [...list].sort((a, b) => {
+        const left = column.sortValue!(a);
+        const right = column.sortValue!(b);
+        if (left < right) return -direction;
+        if (left > right) return direction;
+        return 0;
+      });
+  }, [columns, activeSort, onSortChange]);
+
+  const sortedGroups = useMemo(
+    () =>
+      groups
+        ?.filter((group) => group.rows.length > 0)
+        .map((group) => ({ ...group, rows: sortRows(group.rows) })),
+    [groups, sortRows],
+  );
+
+  const sortedRows = useMemo(
+    () => (sortedGroups ? sortedGroups.flatMap((group) => group.rows) : sortRows(rows)),
+    [sortedGroups, rows, sortRows],
+  );
 
   /** Ascending, then descending, then the server's natural order. */
   const nextSort = (column: Column<T>): SortState | null => {
@@ -175,6 +208,34 @@ export function DataTable<T>({
     if (next.has(key)) next.delete(key);
     else next.add(key);
     selection.onChange(next);
+  };
+
+  const renderRow = (row: T) => {
+    const key = rowKey(row);
+    const checked = selection?.selected.has(key) ?? false;
+    return (
+      <tr key={key} data-selected={checked || undefined}>
+        {selectable && (
+          <td className="w-px">
+            <Checkbox
+              checked={checked}
+              onCheckedChange={() => toggleRow(key)}
+              aria-label={tr('选择这一行', 'Select this row')}
+            />
+          </td>
+        )}
+        {visible.map((column) => (
+          <td key={column.key} className={cn('min-w-0 align-middle', column.align === 'right' && 'text-right')}>
+            {column.cell(row)}
+          </td>
+        ))}
+        {actions && (
+          <td className="sticky right-0 w-px whitespace-nowrap px-4 py-2 text-left align-middle">
+            <div className="flex items-center gap-1">{actions(row)}</div>
+          </td>
+        )}
+      </tr>
+    );
   };
 
   return (
@@ -301,35 +362,23 @@ export function DataTable<T>({
                 )}
               </tr>
             </thead>
-            <tbody>
-              {sortedRows.map((row) => {
-                const key = rowKey(row);
-                const checked = selection?.selected.has(key) ?? false;
-                return (
-                  <tr key={key} data-selected={checked || undefined}>
-                    {selectable && (
-                      <td className="w-px">
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={() => toggleRow(key)}
-                          aria-label={tr('选择这一行', 'Select this row')}
-                        />
-                      </td>
-                    )}
-                    {visible.map((column) => (
-                      <td key={column.key} className={cn('min-w-0 align-middle', column.align === 'right' && 'text-right')}>
-                        {column.cell(row)}
-                      </td>
-                    ))}
-                    {actions && (
-                      <td className="sticky right-0 w-px whitespace-nowrap px-4 py-2 text-left align-middle">
-                        <div className="flex items-center gap-1">{actions(row)}</div>
-                      </td>
-                    )}
+            {sortedGroups ? (
+              sortedGroups.map((group) => (
+                <tbody key={group.key}>
+                  <tr className="cmdb-liquid-group-row">
+                    <th
+                      scope="rowgroup"
+                      colSpan={Math.max(1, visible.length + (selectable ? 1 : 0) + (actions ? 1 : 0))}
+                    >
+                      {group.header}
+                    </th>
                   </tr>
-                );
-              })}
-            </tbody>
+                  {group.rows.map(renderRow)}
+                </tbody>
+              ))
+            ) : (
+              <tbody>{sortedRows.map(renderRow)}</tbody>
+            )}
           </table>
         </div>
       )}

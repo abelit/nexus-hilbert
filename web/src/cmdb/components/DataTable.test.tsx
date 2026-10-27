@@ -86,6 +86,108 @@ describe('sorting', () => {
   });
 });
 
+describe('grouped rows', () => {
+  const groupedRows: Row[] = [
+    { id: 1, name: 'web-01', cpu: 8 },
+    { id: 2, name: 'cache-01', cpu: 4 },
+    { id: 3, name: 'db-01', cpu: 16 },
+    { id: 4, name: 'api-01', cpu: 2 },
+  ];
+  const groups = [
+    { key: 'hardware', header: <span>硬件</span>, rows: [groupedRows[0], groupedRows[1]] },
+    { key: 'software', header: <span>软件</span>, rows: [groupedRows[2], groupedRows[3]] },
+    { key: 'empty', header: <span>空组</span>, rows: [] },
+  ];
+
+  it('renders one table with a header row per non-empty group', () => {
+    const withExtra: Column<Row>[] = [
+      ...columns,
+      { key: 'extra', header: 'Extra', hideable: true, cell: () => 'extra-value' },
+    ];
+    render(
+      <DataTable
+        columns={withExtra}
+        rows={groupedRows}
+        groups={groups}
+        rowKey={(row) => row.id}
+        actions={() => <button type="button">edit</button>}
+      />,
+    );
+
+    // ONE table and ONE column picker. A table per group would repeat both and
+    // give each group its own horizontal scroller.
+    expect(screen.getAllByRole('table')).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /列/ })).toHaveLength(1);
+
+    // The group header spans every visible column plus the action column.
+    expect(screen.getByRole('rowheader', { name: '硬件' })).toHaveAttribute('colspan', '4');
+    expect(screen.getByRole('rowheader', { name: '软件' })).toHaveAttribute('colspan', '4');
+    expect(screen.queryByText('空组')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'edit' })).toHaveLength(4);
+  });
+
+  it('recomputes the group header colspan after a column is hidden', async () => {
+    const user = userEvent.setup();
+    const withExtra: Column<Row>[] = [
+      ...columns,
+      { key: 'extra', header: 'Extra', hideable: true, cell: () => 'extra-value' },
+    ];
+    render(
+      <DataTable
+        columns={withExtra}
+        rows={groupedRows}
+        groups={groups}
+        rowKey={(row) => row.id}
+        actions={() => <button type="button">edit</button>}
+        storageKey="grouped-colspan"
+      />,
+    );
+    expect(screen.getByRole('rowheader', { name: '硬件' })).toHaveAttribute('colspan', '4');
+
+    await user.click(screen.getByRole('button', { name: /列/ }));
+    await user.click(await screen.findByRole('button', { name: 'Extra' }));
+
+    // Two visible columns plus the action column.
+    expect(screen.getByRole('rowheader', { name: '硬件' })).toHaveAttribute('colspan', '3');
+  });
+
+  it('sorts inside every group without changing group order', async () => {
+    const user = userEvent.setup();
+    render(<DataTable columns={columns} rows={groupedRows} groups={groups} rowKey={(row) => row.id} />);
+
+    await user.click(screen.getByRole('button', { name: /CPU/ }));
+
+    expect(screen.getAllByRole('rowheader').map((header) => header.textContent)).toEqual(['硬件', '软件']);
+    const hardwareBody = screen.getByRole('rowheader', { name: '硬件' }).closest('tbody');
+    const softwareBody = screen.getByRole('rowheader', { name: '软件' }).closest('tbody');
+    expect(hardwareBody).not.toBeNull();
+    expect(softwareBody).not.toBeNull();
+    if (!hardwareBody || !softwareBody) return;
+
+    expect(within(hardwareBody).getAllByRole('row')[1]).toHaveTextContent('cache-01');
+    expect(within(softwareBody).getAllByRole('row')[1]).toHaveTextContent('api-01');
+
+    await user.click(screen.getByRole('button', { name: /CPU/ }));
+    expect(within(hardwareBody).getAllByRole('row')[1]).toHaveTextContent('web-01');
+    expect(within(softwareBody).getAllByRole('row')[1]).toHaveTextContent('db-01');
+  });
+
+  it('shows the empty state when every group is empty', () => {
+    render(
+      <DataTable
+        columns={columns}
+        rows={[]}
+        groups={[{ key: 'empty', header: <span>空组</span>, rows: [] }]}
+        rowKey={(row) => row.id}
+        empty="还没有内容"
+      />,
+    );
+
+    expect(screen.getByText('没有数据')).toBeInTheDocument();
+    expect(screen.queryByRole('rowheader')).not.toBeInTheDocument();
+  });
+});
+
 describe('columns', () => {
   it('hides a column and remembers the choice', async () => {
     const user = userEvent.setup();

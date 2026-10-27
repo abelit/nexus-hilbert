@@ -31,13 +31,15 @@ type Props = {
   title: ReactNode;
   /** A one-line explanation under the title. */
   description?: ReactNode;
+  /** Replaces the default title/description header; the caller supplies the close control. */
+  header?: ReactNode;
   /** Sticky footer, typically the save / cancel pair. */
   footer?: ReactNode;
   size?: keyof typeof WIDTHS;
   children: ReactNode;
 };
 
-export function Drawer({ open, onClose, title, description, footer, size = 'md', children }: Props) {
+export function Drawer({ open, onClose, title, description, header, footer, size = 'md', children }: Props) {
   const { tr } = useI18n();
 
   return (
@@ -48,24 +50,26 @@ export function Drawer({ open, onClose, title, description, footer, size = 'md',
       }}
     >
       <DialogContent placement="right" className={cn('max-w-none gap-0', WIDTHS[size])}>
-        <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="min-w-0">
-            <DialogTitle className="truncate text-sm font-semibold text-text">{title}</DialogTitle>
-            {description && (
-              <DialogDescription className="mt-0.5 text-xs text-text-muted">{description}</DialogDescription>
-            )}
-          </div>
-          {/* A NAMED CLOSE BUTTON. An icon-only control still needs an
-              accessible name, and Escape alone is not discoverable. */}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={tr('关闭', 'Close')}
-            className="shrink-0 rounded p-1 text-text-faint hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
-          >
-            <X size={14} aria-hidden="true" />
-          </button>
-        </header>
+        {header ?? (
+          <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+            <div className="min-w-0">
+              <DialogTitle className="truncate text-sm font-semibold text-text">{title}</DialogTitle>
+              {description && (
+                <DialogDescription className="mt-0.5 text-xs text-text-muted">{description}</DialogDescription>
+              )}
+            </div>
+            {/* A NAMED CLOSE BUTTON. An icon-only control still needs an
+                accessible name, and Escape alone is not discoverable. */}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={tr('关闭', 'Close')}
+              className="shrink-0 rounded p-1 text-text-faint hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </header>
+        )}
 
         {/* THE BODY SCROLLS, THE HEADER AND FOOTER DO NOT — so the close button
             and the save button stay reachable however long the panel gets. */}

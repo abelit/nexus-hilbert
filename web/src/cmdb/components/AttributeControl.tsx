@@ -209,7 +209,18 @@ function ListControl({
 // disagree about how a value looks. Used by every table column that shows an
 // attribute.
 
-export function AttributeValue({ type, value }: { type: ValueTypeCode; value: unknown }) {
+export function AttributeValue({
+  type,
+  value,
+  label,
+  title,
+}: {
+  type: ValueTypeCode;
+  value: unknown;
+  /** A resolved display label for a reference value; falls back to the raw value. */
+  label?: string;
+  title?: string;
+}) {
   const { tr } = useI18n();
   if (value === null || value === undefined || value === '') {
     return <span className="text-text-faint">—</span>;
@@ -218,5 +229,8 @@ export function AttributeValue({ type, value }: { type: ValueTypeCode; value: un
     const on = value === true || value === 'true' || value === 1 || value === '1';
     return <span className={on ? 'text-emerald-400' : 'text-text-muted'}>{on ? tr('是', 'Yes') : tr('否', 'No')}</span>;
   }
-  return <span className="min-w-0 break-words">{displayValue(value)}</span>;
+  if (label !== undefined) {
+    return <span className="min-w-0 break-words" title={title}>{label}</span>;
+  }
+  return <span className="min-w-0 break-words" title={title}>{displayValue(value)}</span>;
 }

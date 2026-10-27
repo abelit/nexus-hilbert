@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  Activity,
   Boxes,
+  Eye,
   FileUp,
   LayoutGrid,
+  Network,
   Pencil,
   Plus,
   RefreshCw,
   Search,
-  Server,
-  ShieldCheck,
   Table2,
   Trash2,
 } from 'lucide-react';
@@ -19,6 +18,7 @@ import { Button, EmptyState } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import { PageHeader } from '@/components/ui/PageHeader';
 import { PaginationFooter } from '@/components/ui/PaginationFooter';
 import { Select } from '@/components/ui/Select';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -47,7 +47,12 @@ import { AttributeControl, AttributeValue } from '../components/AttributeControl
 import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { Drawer } from '../components/Drawer';
+import { InstanceDetailDrawer } from '../components/instance-detail/InstanceDetailDrawer';
+import { ReferencePicker } from '../components/ReferencePicker';
 import { useToast } from '../components/Toast';
+import { attributeSections } from '../lib/attribute-sections';
+import { choiceText } from '../lib/choice-labels';
+import { referenceRawText, referenceText, useReferenceLabels, type ReferenceLabels } from '../lib/reference-labels';
 import { displayValue, isValueTypeCode } from '../lib/valuetype';
 
 // 资源数据 — the instances of one model.
@@ -71,7 +76,11 @@ export default function InstancesPage() {
   const { confirmAction, dialog } = useDialogs();
   const [params, setParams] = useSearchParams();
 
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const selectedRailRef = useRef<HTMLButtonElement | null>(null);
+
   const [models, setModels] = useState<CIType[]>([]);
+  const [modelsErr, setModelsErr] = useState<string | null>(null);
   const [typeRef, setTypeRef] = useState<string>(params.get('type') ?? '');
   const [attributes, setAttributes] = useState<TypeAttribute[]>([]);
   const [groups, setGroups] = useState<AttributeGroup[]>([]);
@@ -90,22 +99,45 @@ export default function InstancesPage() {
     window.matchMedia?.('(max-width: 1279px)')?.matches ? 'grid' : 'table',
   );
   const [editing, setEditing] = useState<{ mode: 'create' } | { mode: 'edit'; id: number } | null>(null);
+  const [viewing, setViewing] = useState<{ id: number; tab: 'overview' | 'topology' } | null>(null);
 
-  // Load the model list once; the URL's `type` decides which one is shown.
+  // The model rail loads once. It must not refetch on every model switch: the
+  // list is the navigation, not the selected model's data.
+  const loadModels = useCallback(async () => {
+    setModelsErr(null);
+    try {
+      const all = await listCITypes();
+      setModels(all);
+      setTypeRef((current) => current || all[0]?.name || '');
+    } catch (error) {
+      setModelsErr(describeError(error, tr('无法读取模型', 'Could not load models')));
+    }
+  }, [tr]);
+
   useEffect(() => {
-    void listCITypes()
-      .then((all) => {
-        setModels(all);
-        if (!typeRef && all.length > 0) {
-          setTypeRef(all[0].name);
-        }
-      })
-      .catch((error) => setErr(describeError(error, tr('无法读取模型', 'Could not load the models'))));
-  }, [tr, typeRef]);
+    void loadModels();
+  }, [loadModels]);
+
+  useEffect(() => {
+    selectedRailRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [typeRef, models]);
 
   const model = useMemo(
     () => models.find((item) => item.name === typeRef || String(item.id) === typeRef),
     [models, typeRef],
+  );
+
+  // REFERENCE IDS ARE NOT NAMES. Resolve the visible page's references in one
+  // batch per referenced model, and fall back to the stored id if a lookup fails.
+  const referenceLabels = useReferenceLabels(rows, columns, models);
+  const labelAttributes = useMemo(
+    () =>
+      new Map(
+        attributes
+          .filter((attribute) => attribute.is_reference || attribute.is_choice)
+          .map((attribute) => [attribute.name, attribute]),
+      ),
+    [attributes],
   );
 
   // The model's shape: its effective attributes, its form sections, and the
@@ -172,11 +204,23 @@ export default function InstancesPage() {
   }, [load]);
 
   const chooseModel = (name: string) => {
+    if (name === typeRef) return;
+    // THE PREVIOUS MODEL'S NUMBERS MUST NOT LINGER under the new title while
+    // its attributes and rows are loading.
     setTypeRef(name);
     setPage(0);
     setFilter('');
     setEnvFilter('all');
     setLevelFilter('all');
+    setViewing(null);
+    setRows([]);
+    setNumFound(0);
+    setAttributes([]);
+    setColumns([]);
+    setGroups([]);
+    setErr(null);
+    setLoading(true);
+    if (contentRef.current) contentRef.current.scrollTop = 0;
     const next = new URLSearchParams(params);
     next.set('type', name);
     setParams(next, { replace: true });
@@ -220,9 +264,17 @@ export default function InstancesPage() {
       if (envFilter !== 'all' && displayValue(row.values?.environment) !== envFilter) return false;
       if (levelFilter !== 'all' && displayValue(row.values?.level) !== levelFilter) return false;
       if (!needle) return true;
-      return Object.values(row.values ?? {}).some((value) => displayValue(value).toLowerCase().includes(needle));
+      return Object.entries(row.values ?? {}).some(([name, value]) => {
+        const attribute = labelAttributes.get(name);
+        const label = attribute?.is_reference
+          ? referenceText(value, referenceLabels)
+          : attribute
+            ? choiceText(attribute, value)
+            : undefined;
+        return (label ?? displayValue(value)).toLowerCase().includes(needle);
+      });
     });
-  }, [rows, filter, envFilter, levelFilter]);
+  }, [rows, filter, envFilter, levelFilter, labelAttributes, referenceLabels]);
 
   const activeCount = rows.filter((row) => displayValue(row.values?.data_status).toLowerCase() === 'active').length;
   const activePercent = statusAttribute && rows.length > 0 ? Math.round((activeCount / rows.length) * 100) : null;
@@ -254,99 +306,193 @@ export default function InstancesPage() {
     header: attribute.alias || attribute.name,
     width: attribute.name === model?.unique_key ? 'w-full' : undefined,
     sortable: false,
-    cell: (row) => (
-      <span className="block min-w-0 truncate" title={displayValue(row.values?.[attribute.name])}>
-        <AttributeValue
-          type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
-          value={row.values?.[attribute.name]}
-        />
-      </span>
-    ),
+    cell: (row) => {
+      const value = row.values?.[attribute.name];
+      const label = attribute.is_reference
+        ? referenceText(value, referenceLabels)
+        : choiceText(attribute, value);
+      const raw = attribute.is_reference ? referenceRawText(value) : displayValue(value);
+      return (
+        <span
+          className="block min-w-0 truncate"
+          title={label && label !== raw ? `${label} (${raw})` : raw}
+        >
+          <AttributeValue
+            type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
+            value={value}
+            label={label}
+          />
+        </span>
+      );
+    },
   }));
 
-  const title = model ? `${tr('资源数据', 'Resources')} · ${model.alias || model.name}` : tr('资源数据', 'Resources');
-
-  const kpis = [
-    {
-      label: tr('实例总数', 'Total instances'),
-      value: numFound,
-      suffix: tr('个', ''),
-      icon: Boxes,
-      tone: 'bg-sky-500/10 text-sky-500',
-    },
-    {
-      label: tr('本页 Active', 'Active on page'),
-      value: activePercent === null ? '—' : `${activePercent}%`,
-      icon: Activity,
-      tone: 'bg-emerald-500/10 text-emerald-500',
-    },
-    {
-      label: tr('本页 PROD', 'PROD on page'),
-      value: prodCount === null ? '—' : prodCount,
-      suffix: prodCount === null ? '' : tr('个', ''),
-      icon: Server,
-      tone: 'bg-indigo-500/10 text-indigo-500',
-    },
-    {
-      label: tr('本页有 SLA', 'With SLA on page'),
-      value: slaCount === null ? '—' : slaCount,
-      suffix: slaCount === null ? '' : tr('个', ''),
-      icon: ShieldCheck,
-      tone: 'bg-cyan-500/10 text-cyan-500',
-    },
-  ];
-
   return (
-    <div className="cmdb-liquid relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
-      <div className="cmdb-liquid-blobs" aria-hidden="true">
-        <span className="cmdb-liquid-blob cmdb-liquid-blob-a" />
-        <span className="cmdb-liquid-blob cmdb-liquid-blob-b" />
-        <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
-      </div>
+    <div className="flex h-full min-h-0 w-full min-w-0">
+      {/* THE MODEL RAIL IS NAVIGATION, NOT A GLASS CARD. It mirrors the model
+          configuration tree: opaque, full height, with its own scroller. */}
+      <aside
+        className="hidden h-full min-h-0 w-64 shrink-0 border-r border-border bg-bg lg:flex"
+        aria-label={tr('模型导航', 'Model navigation')}
+      >
+        <div className="flex h-full min-h-0 w-full flex-col">
+          <div className="flex flex-col gap-2 border-b border-border p-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-text">{tr('模型', 'Models')}</h2>
+              <p className="text-[11px] text-text-faint">
+                {tr(`${models.length} 个模型`, `${models.length} models`)}
+              </p>
+            </div>
+            <div className="relative">
+              <Search
+                size={13}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
+                aria-hidden="true"
+              />
+              <Input
+                type="search"
+                aria-label={tr('搜索模型对象', 'Search models')}
+                placeholder={tr('搜索模型…', 'Search models…')}
+                value={modelQuery}
+                onChange={(event) => setModelQuery(event.target.value)}
+                className="w-full pl-7 text-xs"
+              />
+            </div>
+          </div>
 
-      <div className="cmdb-liquid-content relative min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        <div className="flex flex-col gap-4">
-          <div className="cmdb-liquid-panel flex flex-col gap-3 rounded-2xl p-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-500 text-white shadow-md shadow-sky-500/25">
+          <nav className="min-h-0 flex-1 overflow-y-auto p-2" aria-label={tr('模型对象', 'Model objects')}>
+            {modelsErr ? (
+              <div role="alert" className="flex flex-col items-center gap-2 px-2 py-6 text-center">
+                <p className="text-xs text-red-600 dark:text-red-300">
+                  <span className="font-medium">{tr('无法读取模型', 'Could not load models')}</span>
+                  <span className="ms-2">{modelsErr}</span>
+                </p>
+                <Button variant="outline" size="sm" type="button" onClick={() => void loadModels()}>
+                  {tr('重试', 'Retry')}
+                </Button>
+              </div>
+            ) : filteredModels.length === 0 ? (
+              <p className="px-2 py-6 text-center text-[11px] text-text-faint">
+                {tr('没有匹配的模型', 'No models match')}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {filteredModels.map((item) => {
+                  const selected = item.name === typeRef || String(item.id) === typeRef;
+                  return (
+                    <button
+                      key={item.id}
+                      ref={selected ? selectedRailRef : undefined}
+                      type="button"
+                      onClick={() => chooseModel(item.name)}
+                      aria-pressed={selected}
+                      aria-label={item.alias || item.name}
+                      title={item.alias || item.name}
+                      className={cn(
+                        'flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500',
+                        selected ? 'bg-indigo-500/15 text-text' : 'text-text-muted hover:bg-card hover:text-text',
+                      )}
+                    >
+                      <CMDBIcon value={item.icon} size={14} label={item.alias || item.name} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{item.alias || item.name}</span>
+                        <span className="block truncate font-mono text-[10px] text-text-faint">{item.name}</span>
+                      </span>
+                      {!item.enabled && <Chip dense>{tr('停用', 'Off')}</Chip>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </nav>
+
+          <div className="border-t border-border p-3">
+            <Link
+              to="/cmdb/search"
+              className="text-[11px] text-text-faint underline-offset-2 hover:text-text hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500"
+            >
+              {tr('高级查询', 'Search')}
+            </Link>
+          </div>
+        </div>
+      </aside>
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <PageHeader
+          className="cmdb-instances-header"
+          title={
+            <span className="flex min-w-0 items-center gap-2">
+              <span aria-hidden="true" className="shrink-0">
                 {model ? (
                   <CMDBIcon value={model.icon} size={18} label={model.alias || model.name} />
                 ) : (
-                  <Boxes size={18} aria-hidden="true" />
+                  <Boxes size={18} className="text-sky-500" />
                 )}
               </span>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-sky-500">
-                  <span>{tr('CMDB 资源实例', 'CMDB instances')}</span>
-                  <span className="text-text-faint">/</span>
-                  <span className="truncate text-text-muted">{model?.name ?? tr('资源数据', 'Resources')}</span>
-                </div>
-                <h1 className="truncate text-base font-semibold text-text">{title}</h1>
-                <p className="mt-0.5 text-xs text-text-muted">
-                  {tr(
-                    '一个模型下的实例。列来自「我的订阅」，表单由模型的属性生成。',
-                    'The instances of one model. The columns come from your subscription; the form is generated from the model.',
-                  )}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 md:justify-end">
+              <span className="truncate">{tr('资源数据', 'Resources')}</span>
+              {model && !model.enabled && <Chip>{tr('停用', 'Disabled')}</Chip>}
+            </span>
+          }
+          subtitle={
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {model && (
+                <>
+                  <span className="font-medium text-text">{model.alias || model.name}</span>
+                  <code className="font-mono">{model.name}</code>
+                </>
+              )}
+              <span className="inline-flex items-center gap-1">
+                <span>{tr('实例总数', 'Total instances')}</span>
+                <span className="font-mono font-medium text-text">{numFound}</span>
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span>{tr('本页', 'On this page')}</span>
+                <span className="font-mono font-medium text-text">{rows.length}</span>
+              </span>
+              {statusAttribute && (
+                <span className="inline-flex items-center gap-1">
+                  <span>{tr('本页 Active', 'Active on page')}</span>
+                  <span className="font-mono font-medium text-text">
+                    {activePercent === null ? '—' : `${activePercent}%`}
+                  </span>
+                </span>
+              )}
+              {envAttribute && (
+                <span className="inline-flex items-center gap-1">
+                  <span>{tr('本页 PROD', 'PROD on page')}</span>
+                  <span className="font-mono font-medium text-text">
+                    {prodCount === null ? '—' : prodCount}
+                  </span>
+                </span>
+              )}
+              {slaAttribute && (
+                <span className="inline-flex items-center gap-1">
+                  <span>{tr('本页有 SLA', 'With SLA on page')}</span>
+                  <span className="font-mono font-medium text-text">
+                    {slaCount === null ? '—' : slaCount}
+                  </span>
+                </span>
+              )}
+            </span>
+          }
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 type="button"
                 onClick={() => void load(true)}
                 disabled={loading || refreshing}
-                className="cmdb-liquid-secondary inline-flex items-center gap-1.5"
+                className="inline-flex items-center gap-1.5"
               >
                 <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
                 {tr('刷新', 'Refresh')}
               </Button>
               <Link
                 to="/cmdb/batch"
-                className="og-button cmdb-liquid-secondary inline-flex items-center gap-1.5"
+                className="og-button inline-flex items-center gap-1.5"
                 data-size="sm"
-                data-variant="ghost"
+                data-variant="outline"
               >
                 <FileUp size={12} aria-hidden="true" />
                 {tr('批量导入', 'Batch import')}
@@ -363,87 +509,33 @@ export default function InstancesPage() {
                 {tr('新建实例', 'New instance')}
               </Button>
             </div>
+          }
+        />
+
+        <div className="cmdb-liquid relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="cmdb-liquid-blobs" aria-hidden="true">
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-a" />
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-b" />
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
           </div>
 
-          <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start">
-            <aside className="hidden w-60 shrink-0 lg:block">
-              <div className="cmdb-liquid-panel sticky top-4 rounded-2xl p-3.5">
-                <div className="flex items-center justify-between gap-2 px-1">
-                  <h2 className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                    {tr('模型对象选择', 'Model objects')}
-                  </h2>
-                  <Link to="/cmdb/search" className="text-[11px] text-sky-500 hover:underline">
-                    {tr('高级查询', 'Search')}
-                  </Link>
-                </div>
-                <div className="relative mt-3">
-                  <Search
-                    size={13}
-                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
-                    aria-hidden="true"
-                  />
-                  <Input
-                    type="search"
-                    aria-label={tr('搜索模型对象', 'Search models')}
-                    placeholder={tr('搜索模型…', 'Search models…')}
-                    value={modelQuery}
-                    onChange={(event) => setModelQuery(event.target.value)}
-                    className="w-full pl-7 text-xs"
-                  />
-                </div>
-                <nav className="mt-3 max-h-[calc(100vh-300px)] space-y-1 overflow-y-auto pe-1" aria-label={tr('模型对象', 'Model objects')}>
-                  {filteredModels.map((item) => {
-                    const selected = item.name === typeRef || String(item.id) === typeRef;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => chooseModel(item.name)}
-                        aria-pressed={selected}
-                        className={cn('cmdb-liquid-model-item', selected && 'is-active')}
-                      >
-                        <CMDBIcon value={item.icon} size={14} label={item.alias || item.name} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-medium">{item.alias || item.name}</span>
-                          <span className="cmdb-liquid-model-key block truncate">{item.name}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {filteredModels.length === 0 && (
-                    <p className="px-2 py-4 text-center text-[11px] text-text-faint">
-                      {tr('没有匹配的模型', 'No models match')}
-                    </p>
-                  )}
-                </nav>
-                <p className="cmdb-liquid-divider mt-3 border-t pt-2 text-[10px] text-text-faint">
-                  {tr(`${models.length} 个模型`, `${models.length} models`)}
-                </p>
-              </div>
-            </aside>
-
-            <main className="min-w-0 flex-1 space-y-4">
-              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-                {kpis.map((card) => {
-                  const Icon = card.icon;
-                  return (
-                    <div key={card.label} className="cmdb-liquid-panel flex items-center justify-between gap-2 rounded-2xl p-3.5">
-                      <div className="min-w-0">
-                        <p className="truncate text-[11px] font-medium text-text-muted">{card.label}</p>
-                        <p className="mt-0.5 text-xl font-bold text-text">
-                          {card.value}
-                          {card.suffix && <span className="ms-1 text-xs font-normal text-text-faint">{card.suffix}</span>}
-                        </p>
-                      </div>
-                      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', card.tone)}>
-                        <Icon size={15} aria-hidden="true" />
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
+          <div ref={contentRef} className="cmdb-liquid-content relative min-h-0 flex-1 overflow-y-auto p-6">
+            <div className="flex flex-col gap-4">
               <div className="cmdb-liquid-panel rounded-2xl p-3">
+                {modelsErr && (
+                  <div
+                    role="alert"
+                    className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-red-500/40 bg-red-500/5 px-2 py-1.5 text-[11px] text-red-600 dark:text-red-300 lg:hidden"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium">{tr('无法读取模型', 'Could not load models')}</span>
+                      <span className="ms-2">{modelsErr}</span>
+                    </span>
+                    <Button variant="outline" size="sm" type="button" onClick={() => void loadModels()}>
+                      {tr('重试', 'Retry')}
+                    </Button>
+                  </div>
+                )}
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
                     <div className="lg:hidden">
@@ -458,7 +550,11 @@ export default function InstancesPage() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {envAttribute && facetValues('environment').length > 0 && (
-                        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+                        <div
+                          className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5"
+                          role="group"
+                          aria-label={tr('按环境筛选', 'Filter by environment')}
+                        >
                           <span className="text-[11px] font-medium text-text-faint">{tr('环境', 'Env')}</span>
                           <Button
                             variant="plain"
@@ -470,24 +566,32 @@ export default function InstancesPage() {
                           >
                             {tr('全部环境', 'All env')}
                           </Button>
-                          {facetValues('environment').map((value) => (
-                            <Button
-                              key={value}
-                              variant="plain"
-                              size="sm"
-                              type="button"
-                              aria-pressed={envFilter === value}
-                              onClick={() => setEnvFilter(value)}
-                              className={cn('cmdb-liquid-pill', envFilter === value && 'is-active')}
-                            >
-                              {value.toUpperCase()}
-                            </Button>
-                          ))}
+                          {facetValues('environment').map((value) => {
+                            const label = envAttribute ? choiceText(envAttribute, value) : undefined;
+                            return (
+                              <Button
+                                key={value}
+                                variant="plain"
+                                size="sm"
+                                type="button"
+                                aria-pressed={envFilter === value}
+                                onClick={() => setEnvFilter(value)}
+                                title={label ? `${label} (${value})` : value}
+                                className={cn('cmdb-liquid-pill', envFilter === value && 'is-active')}
+                              >
+                                {label ?? value.toUpperCase()}
+                              </Button>
+                            );
+                          })}
                           <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
                         </div>
                       )}
                       {levelAttribute && facetValues('level').length > 0 && (
-                        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+                        <div
+                          className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5"
+                          role="group"
+                          aria-label={tr('按等级筛选', 'Filter by level')}
+                        >
                           <span className="text-[11px] font-medium text-text-faint">{tr('等级', 'Level')}</span>
                           <Button
                             variant="plain"
@@ -499,24 +603,28 @@ export default function InstancesPage() {
                           >
                             {tr('全部等级', 'All levels')}
                           </Button>
-                          {facetValues('level').map((value) => (
-                            <Button
-                              key={value}
-                              variant="plain"
-                              size="sm"
-                              type="button"
-                              aria-pressed={levelFilter === value}
-                              onClick={() => setLevelFilter(value)}
-                              className={cn(
-                                'cmdb-liquid-pill',
-                                value.toLowerCase() === 'critical' && 'text-rose-500',
-                                value.toLowerCase() === 'important' && 'text-amber-500',
-                                levelFilter === value && 'is-active',
-                              )}
-                            >
-                              {value}
-                            </Button>
-                          ))}
+                          {facetValues('level').map((value) => {
+                            const label = levelAttribute ? choiceText(levelAttribute, value) : undefined;
+                            return (
+                              <Button
+                                key={value}
+                                variant="plain"
+                                size="sm"
+                                type="button"
+                                aria-pressed={levelFilter === value}
+                                onClick={() => setLevelFilter(value)}
+                                title={label ? `${label} (${value})` : value}
+                                className={cn(
+                                  'cmdb-liquid-pill',
+                                  value.toLowerCase() === 'critical' && 'text-rose-500',
+                                  value.toLowerCase() === 'important' && 'text-amber-500',
+                                  levelFilter === value && 'is-active',
+                                )}
+                              >
+                                {label ?? value}
+                              </Button>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -537,7 +645,11 @@ export default function InstancesPage() {
                         className="w-full pl-7 text-xs"
                       />
                     </div>
-                    <div className="cmdb-liquid-segment flex shrink-0 items-center gap-1 p-1">
+                    <div
+                      className="cmdb-liquid-segment flex shrink-0 items-center gap-1 p-1"
+                      role="group"
+                      aria-label={tr('视图', 'View')}
+                    >
                       <Button
                         variant="plain"
                         size="sm"
@@ -572,48 +684,72 @@ export default function InstancesPage() {
 
               <div className="cmdb-liquid-panel overflow-hidden rounded-2xl">
                 {view === 'table' ? (
-                  <DataTable
-                    columns={tableColumns}
-                    rows={visibleRows}
-                    rowKey={(row) => row.ci_id}
-                    loading={loading}
-                    error={err}
-                    onRetry={() => void load()}
-                    storageKey={`instances-${model?.name ?? 'none'}`}
-                    empty={
-                      model && attributes.length === 0
-                        ? tr('这个模型还没有绑定属性，存不了实例。去模型详情里加几个。', 'This model has no bound attributes, so it cannot hold instances. Add some on its page.')
-                        : visibleRows.length === 0 && rows.length > 0
-                          ? tr('没有匹配的实例', 'No matching instances')
-                          : tr('还没有实例', 'No instances yet')
-                    }
-                    actions={(row) => (
-                      <span className="flex items-center gap-3 whitespace-nowrap">
-                        <Button
-                          variant="link"
-                          size="sm"
-                          type="button"
-                          onClick={() => setEditing({ mode: 'edit', id: row.ci_id })}
-                          aria-label={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
-                          className="cmdb-liquid-action-edit inline-flex items-center gap-1"
-                        >
-                          <Pencil size={12} aria-hidden="true" />
-                          {tr('编辑', 'Edit')}
-                        </Button>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          type="button"
-                          onClick={() => void remove(row)}
-                          aria-label={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
-                          className="cmdb-liquid-action-danger inline-flex items-center gap-1"
-                        >
-                          <Trash2 size={12} aria-hidden="true" />
-                          {tr('删除', 'Delete')}
-                        </Button>
-                      </span>
-                    )}
-                  />
+                  <div className="p-3">
+                    <DataTable
+                      columns={tableColumns}
+                      rows={visibleRows}
+                      rowKey={(row) => row.ci_id}
+                      loading={loading}
+                      error={err}
+                      onRetry={() => void load()}
+                      storageKey={`instances-${model?.name ?? 'none'}`}
+                      empty={
+                        model && attributes.length === 0
+                          ? tr('这个模型还没有绑定属性，存不了实例。去模型详情里加几个。', 'This model has no bound attributes, so it cannot hold instances. Add some on its page.')
+                          : visibleRows.length === 0 && rows.length > 0
+                            ? tr('没有匹配的实例', 'No matching instances')
+                            : tr('还没有实例', 'No instances yet')
+                      }
+                      actions={(row) => (
+                        <span className="flex items-center gap-1 whitespace-nowrap">
+                          <Button
+                            variant="plain"
+                            size="sm"
+                            type="button"
+                            onClick={() => setViewing({ id: row.ci_id, tab: 'overview' })}
+                            aria-label={tr(`查看实例 ${row.ci_id}`, `View instance ${row.ci_id}`)}
+                            title={tr(`查看实例 ${row.ci_id}`, `View instance ${row.ci_id}`)}
+                            className="cmdb-liquid-action-view inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+                          >
+                            <Eye size={13} aria-hidden="true" />
+                          </Button>
+                          <Button
+                            variant="plain"
+                            size="sm"
+                            type="button"
+                            onClick={() => setViewing({ id: row.ci_id, tab: 'topology' })}
+                            aria-label={tr(`实例 ${row.ci_id} 拓扑`, `Topology for instance ${row.ci_id}`)}
+                            title={tr(`实例 ${row.ci_id} 拓扑`, `Topology for instance ${row.ci_id}`)}
+                            className="cmdb-liquid-action-topology inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+                          >
+                            <Network size={13} aria-hidden="true" />
+                          </Button>
+                          <Button
+                            variant="plain"
+                            size="sm"
+                            type="button"
+                            onClick={() => setEditing({ mode: 'edit', id: row.ci_id })}
+                            aria-label={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
+                            title={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
+                            className="cmdb-liquid-action-edit inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+                          >
+                            <Pencil size={13} aria-hidden="true" />
+                          </Button>
+                          <Button
+                            variant="plain"
+                            size="sm"
+                            type="button"
+                            onClick={() => void remove(row)}
+                            aria-label={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
+                            title={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
+                            className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+                          >
+                            <Trash2 size={13} aria-hidden="true" />
+                          </Button>
+                        </span>
+                      )}
+                    />
+                  </div>
                 ) : err ? (
                   <div role="alert" className="flex flex-wrap items-center gap-3 px-4 py-3 text-xs text-red-300">
                     <span className="min-w-0 flex-1 break-words">{err}</span>
@@ -659,7 +795,11 @@ export default function InstancesPage() {
                         key={row.ci_id}
                         row={row}
                         columns={columns}
+                        referenceLabels={referenceLabels}
+                        environmentAttribute={envAttribute}
                         model={model ?? null}
+                        onView={() => setViewing({ id: row.ci_id, tab: 'overview' })}
+                        onTopology={() => setViewing({ id: row.ci_id, tab: 'topology' })}
                         onEdit={() => setEditing({ mode: 'edit', id: row.ci_id })}
                         onDelete={() => void remove(row)}
                       />
@@ -679,7 +819,7 @@ export default function InstancesPage() {
                   />
                 </div>
               </div>
-            </main>
+            </div>
           </div>
         </div>
       </div>
@@ -687,6 +827,7 @@ export default function InstancesPage() {
       {editing && model && (
         <InstanceDrawer
           model={model}
+          models={models}
           attributes={attributes}
           groups={groups}
           instanceID={editing.mode === 'edit' ? editing.id : null}
@@ -699,6 +840,22 @@ export default function InstancesPage() {
         />
       )}
 
+      {viewing !== null && model && (
+        <InstanceDetailDrawer
+          model={model}
+          models={models}
+          attributes={attributes}
+          groups={groups}
+          instanceID={viewing.id}
+          initialTab={viewing.tab}
+          onClose={() => setViewing(null)}
+          onEdit={(id) => {
+            setViewing(null);
+            setEditing({ mode: 'edit', id });
+          }}
+        />
+      )}
+
       {dialog}
     </div>
   );
@@ -707,13 +864,21 @@ export default function InstancesPage() {
 function InstanceCard({
   row,
   columns,
+  referenceLabels,
+  environmentAttribute,
   model,
+  onView,
+  onTopology,
   onEdit,
   onDelete,
 }: {
   row: Instance;
   columns: TypeAttribute[];
+  referenceLabels: ReferenceLabels;
+  environmentAttribute?: TypeAttribute;
   model: CIType | null;
+  onView(): void;
+  onTopology(): void;
   onEdit(): void;
   onDelete(): void;
 }) {
@@ -722,15 +887,27 @@ function InstanceCard({
     columns.find((attribute) => attribute.name === 'name') ??
     columns.find((attribute) => attribute.name === model?.unique_key) ??
     columns[0];
-  const titleValue = titleAttribute ? displayValue(row.values?.[titleAttribute.name]) : '—';
+  const titleLabel = titleAttribute?.is_reference
+    ? referenceText(row.values?.[titleAttribute.name], referenceLabels)
+    : titleAttribute
+      ? choiceText(titleAttribute, row.values?.[titleAttribute.name])
+      : undefined;
+  const titleValue = titleLabel ?? (titleAttribute ? displayValue(row.values?.[titleAttribute.name]) : '—');
+  const codeAttribute = model?.unique_key ? columns.find((attribute) => attribute.name === model.unique_key) : undefined;
+  const codeLabel = codeAttribute?.is_reference
+    ? referenceText(row.values?.[codeAttribute.name], referenceLabels)
+    : codeAttribute
+      ? choiceText(codeAttribute, row.values?.[codeAttribute.name])
+      : undefined;
   const codeValue =
     model?.unique_key && model.unique_key !== titleAttribute?.name
-      ? displayValue(row.values?.[model.unique_key])
+      ? codeLabel ?? displayValue(row.values?.[model.unique_key])
       : `#${row.ci_id}`;
   const fields = columns
     .filter((attribute) => attribute.id !== titleAttribute?.id && attribute.name !== 'environment')
     .slice(0, 4);
   const environment = displayValue(row.values?.environment);
+  const environmentText = choiceText(environmentAttribute ?? { is_choice: false }, environment) ?? environment;
   const environmentTone =
     environment.toLowerCase() === 'prod' ? 'success' : environment.toLowerCase() === 'test' ? 'info' : 'default';
 
@@ -744,46 +921,79 @@ function InstanceCard({
               {titleValue === '—' ? `#${row.ci_id}` : titleValue}
             </h3>
           </div>
-          {environment !== '—' && <Chip tone={environmentTone}>{environment}</Chip>}
+          {environment !== '—' && <Chip tone={environmentTone}>{environmentText}</Chip>}
         </div>
         <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
-          {fields.map((attribute) => (
-            <div key={attribute.id} className="min-w-0">
-              <dt className="truncate text-[10px] text-text-faint">{attribute.alias || attribute.name}</dt>
-              <dd className="mt-0.5 min-w-0 truncate text-[11px] text-text-muted" title={displayValue(row.values?.[attribute.name])}>
-                <AttributeValue
-                  type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
-                  value={row.values?.[attribute.name]}
-                />
-              </dd>
-            </div>
-          ))}
+          {fields.map((attribute) => {
+            const value = row.values?.[attribute.name];
+            const label = attribute.is_reference
+              ? referenceText(value, referenceLabels)
+              : choiceText(attribute, value);
+            const raw = attribute.is_reference ? referenceRawText(value) : displayValue(value);
+            return (
+              <div key={attribute.id} className="min-w-0">
+                <dt className="truncate text-[10px] text-text-faint">{attribute.alias || attribute.name}</dt>
+                <dd
+                  className="mt-0.5 min-w-0 truncate text-[11px] text-text-muted"
+                  title={label && label !== raw ? `${label} (${raw})` : raw}
+                >
+                  <AttributeValue
+                    type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
+                    value={value}
+                    label={label}
+                  />
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
         <span className="text-[10px] text-text-faint">#{row.ci_id}</span>
-        <span className="flex items-center gap-3 whitespace-nowrap">
+        <span className="flex items-center gap-1 whitespace-nowrap">
           <Button
-            variant="link"
+            variant="plain"
+            size="sm"
+            type="button"
+            onClick={onView}
+            aria-label={tr(`查看实例 ${row.ci_id}`, `View instance ${row.ci_id}`)}
+            title={tr(`查看实例 ${row.ci_id}`, `View instance ${row.ci_id}`)}
+            className="cmdb-liquid-action-view inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+          >
+            <Eye size={13} aria-hidden="true" />
+          </Button>
+          <Button
+            variant="plain"
+            size="sm"
+            type="button"
+            onClick={onTopology}
+            aria-label={tr(`实例 ${row.ci_id} 拓扑`, `Topology for instance ${row.ci_id}`)}
+            title={tr(`实例 ${row.ci_id} 拓扑`, `Topology for instance ${row.ci_id}`)}
+            className="cmdb-liquid-action-topology inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+          >
+            <Network size={13} aria-hidden="true" />
+          </Button>
+          <Button
+            variant="plain"
             size="sm"
             type="button"
             onClick={onEdit}
             aria-label={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
-            className="cmdb-liquid-action-edit inline-flex items-center gap-1"
+            title={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
+            className="cmdb-liquid-action-edit inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
           >
-            <Pencil size={12} aria-hidden="true" />
-            {tr('编辑', 'Edit')}
+            <Pencil size={13} aria-hidden="true" />
           </Button>
           <Button
-            variant="link"
+            variant="plain"
             size="sm"
             type="button"
             onClick={onDelete}
             aria-label={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
-            className="cmdb-liquid-action-danger inline-flex items-center gap-1"
+            title={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
+            className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
           >
-            <Trash2 size={12} aria-hidden="true" />
-            {tr('删除', 'Delete')}
+            <Trash2 size={13} aria-hidden="true" />
           </Button>
         </span>
       </div>
@@ -795,6 +1005,7 @@ function InstanceCard({
 
 function InstanceDrawer({
   model,
+  models,
   attributes,
   groups,
   instanceID,
@@ -802,6 +1013,7 @@ function InstanceDrawer({
   onSaved,
 }: {
   model: CIType;
+  models: CIType[];
   attributes: TypeAttribute[];
   groups: AttributeGroup[];
   instanceID: number | null;
@@ -815,6 +1027,7 @@ function InstanceDrawer({
   const [loading, setLoading] = useState(!creating);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const referenceLabels = useReferenceLabels([{ values }], attributes, models);
 
   useEffect(() => {
     if (instanceID === null) return;
@@ -832,22 +1045,10 @@ function InstanceDrawer({
   // THE FORM IS THE MODEL, SECTION BY SECTION. An attribute in no section lands
   // in a trailing group, which is the same rule the backend's group endpoint
   // uses — so the form and the console's own ordering cannot disagree.
-  const sections = useMemo(() => {
-    const claimed = new Set<number>();
-    const out = groups
-      .filter((group) => !group.is_other)
-      .map((group) => {
-        const items = group.attributes
-          .map((attribute) => attributes.find((candidate) => candidate.id === attribute.id))
-          .filter((attribute): attribute is TypeAttribute => Boolean(attribute));
-        items.forEach((attribute) => claimed.add(attribute.id));
-        return { key: `g-${group.id}`, name: group.name, items };
-      })
-      .filter((section) => section.items.length > 0);
-    const rest = attributes.filter((attribute) => !claimed.has(attribute.id));
-    if (rest.length > 0) out.push({ key: 'other', name: tr('其他', 'Other'), items: rest });
-    return out;
-  }, [groups, attributes, tr]);
+  const sections = useMemo(
+    () => attributeSections(attributes, groups, tr('其他', 'Other')),
+    [attributes, groups, tr],
+  );
 
   const submit = async () => {
     setSubmitting(true);
@@ -917,6 +1118,10 @@ function InstanceDrawer({
                 {section.items.map((attribute) => {
                   const id = `cmdb-instance-${attribute.id}`;
                   const type = isValueTypeCode(attribute.value_type) ? attribute.value_type : '2';
+                  const referenceModel =
+                    attribute.is_reference && attribute.reference_type_id
+                      ? models.find((candidate) => Number(candidate.id) === Number(attribute.reference_type_id))
+                      : undefined;
                   return (
                     <div key={attribute.id}>
                       <Label htmlFor={id}>
@@ -929,16 +1134,30 @@ function InstanceDrawer({
                         )}
                       </Label>
                       <div className="mt-1">
-                        <AttributeControl
-                          id={id}
-                          type={type}
-                          isList={attribute.is_list}
-                          disabled={attribute.is_computed}
-                          required={attribute.is_required}
-                          value={values[attribute.name]}
-                          onChange={(next) => setValues((current) => ({ ...current, [attribute.name]: next }))}
-                          placeholder={attribute.alias || attribute.name}
-                        />
+                        {referenceModel ? (
+                          <ReferencePicker
+                            id={id}
+                            attribute={attribute}
+                            target={referenceModel}
+                            labels={referenceLabels}
+                            value={values[attribute.name]}
+                            onChange={(next) => setValues((current) => ({ ...current, [attribute.name]: next }))}
+                            disabled={attribute.is_computed}
+                            required={attribute.is_required}
+                            placeholder={attribute.alias || attribute.name}
+                          />
+                        ) : (
+                          <AttributeControl
+                            id={id}
+                            type={type}
+                            isList={attribute.is_list}
+                            disabled={attribute.is_computed}
+                            required={attribute.is_required}
+                            value={values[attribute.name]}
+                            onChange={(next) => setValues((current) => ({ ...current, [attribute.name]: next }))}
+                            placeholder={attribute.alias || attribute.name}
+                          />
+                        )}
                       </div>
                       {attribute.is_computed && (
                         <p className="mt-1 text-[11px] text-text-faint">

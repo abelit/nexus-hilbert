@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, Pencil, Plus, RefreshCw } from 'lucide-react';
+import { ChevronLeft, FileJson, Pencil, Plus, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -43,6 +43,7 @@ import { useModelTreeRefresh } from '../components/model-tree-context';
 import { AttributeForm } from '../components/AttributeForm';
 import { CMDBIcon } from '../components/CMDBIcon';
 import { ModelAttributesPanel } from '../components/ModelAttributesPanel';
+import { ModelDefinitionDrawer } from '../components/ModelDefinitionDrawer';
 import { ModelForm } from './Models';
 import { ConstraintsTab, RelationsTab, TriggersTab } from '../components/ModelRuleTabs';
 import { useToast } from '../components/Toast';
@@ -90,6 +91,7 @@ export default function ModelDetailPage() {
   const [binding, setBinding] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<TypeAttribute | null>(null);
   const [dictionaryOpen, setDictionaryOpen] = useState(false);
+  const [definitionOpen, setDefinitionOpen] = useState(false);
 
   const load = useCallback(
     async (quiet = false) => {
@@ -119,6 +121,12 @@ export default function ModelDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    // A definition belongs to one model; navigating to another model must not
+    // leave the previous snapshot open under the new title.
+    setDefinitionOpen(false);
+  }, [ref]);
 
   useEffect(() => {
     const requested = validTab(searchParams.get('tab'));
@@ -218,6 +226,17 @@ export default function ModelDetailPage() {
             >
               <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
               {tr('刷新', 'Refresh')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => setDefinitionOpen(true)}
+              disabled={!model}
+              className="inline-flex items-center gap-1.5"
+            >
+              <FileJson size={12} aria-hidden="true" />
+              {tr('模型定义', 'Model definition')}
             </Button>
             <Hint content={adminTip}>
               <Button
@@ -372,6 +391,15 @@ export default function ModelDetailPage() {
         onClose={() => setDictionaryOpen(false)}
         onChanged={() => void load(true)}
       />
+
+      {definitionOpen && (
+        <ModelDefinitionDrawer
+          ref_={ref}
+          modelLabel={modelLabel}
+          isAdmin={isAdmin}
+          onClose={() => setDefinitionOpen(false)}
+        />
+      )}
 
       {dialog}
     </div>

@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/i18n/locale';
+import { downloadJSON } from '@/lib/download';
 import { usePermissions } from '@/store/me';
 
 import { describeError } from '../../api/http';
@@ -216,18 +217,4 @@ export function TemplatesPanel() {
       </Card>
     </div>
   );
-}
-
-function downloadJSON(filename: string, text: string): void {
-  try {
-    const blob = new Blob([text], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  } catch {
-    /* The text is already in the editor; a download is a convenience. */
-  }
 }

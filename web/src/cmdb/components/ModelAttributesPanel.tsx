@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowUpDown,
   ChevronDown,
   ChevronUp,
+  Eye,
+  Fingerprint,
   GitBranch,
+  Hash,
   LayoutGrid,
   Lightbulb,
   Pencil,
@@ -10,6 +14,8 @@ import {
   Search,
   Table2,
   Trash2,
+  Type,
+  type LucideIcon,
 } from 'lucide-react';
 
 import { Button, EmptyState } from '@/components/ui';
@@ -21,8 +27,13 @@ import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 
 import type { AttributeGroup, TypeAttribute } from '../api/citype';
+import {
+  ATTRIBUTE_DISPLAY_TYPE_ORDER,
+  ATTRIBUTE_TYPE_META,
+  attributeDisplayType,
+  type AttributeDisplayType,
+} from '../lib/attribute-type';
 import { DataTable, type Column } from './DataTable';
-import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
 
 // The model's attribute workspace, styled as a scoped liquid-glass surface.
 //
@@ -78,23 +89,28 @@ export function ModelAttributesPanel({
   const [query, setQuery] = useState('');
   const [onlyInherited, setOnlyInherited] = useState(false);
   const [onlyRequired, setOnlyRequired] = useState(false);
+  const [types, setTypes] = useState<AttributeDisplayType[]>([]);
   const [view, setView] = useState<View>(() =>
     window.matchMedia?.('(max-width: 1279px)')?.matches ? 'grid' : 'table',
   );
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const needle = query.trim().toLowerCase();
-  const filtering = needle.length > 0 || onlyInherited || onlyRequired;
+  const filtering = needle.length > 0 || onlyInherited || onlyRequired || types.length > 0;
 
   const filtered = useMemo(
     () =>
       rows.filter((row) => {
         if (onlyInherited && !row.inherited) return false;
         if (onlyRequired && !row.is_required) return false;
+        if (types.length > 0) {
+          const type = attributeDisplayType(row);
+          if (!type || !types.includes(type)) return false;
+        }
         if (!needle) return true;
         return row.name.toLowerCase().includes(needle) || row.alias.toLowerCase().includes(needle);
       }),
-    [rows, onlyInherited, onlyRequired, needle],
+    [rows, onlyInherited, onlyRequired, needle, types],
   );
 
   const sections = useMemo<Section[]>(() => {
@@ -141,6 +157,13 @@ export function ModelAttributesPanel({
     setQuery('');
     setOnlyInherited(false);
     setOnlyRequired(false);
+    setTypes([]);
+  };
+
+  const toggleType = (type: AttributeDisplayType) => {
+    setTypes((current) =>
+      current.includes(type) ? current.filter((item) => item !== type) : [...current, type],
+    );
   };
 
   const allCollapsed = sections.length > 0 && sections.every((section) => collapsed.has(section.key));
@@ -157,8 +180,8 @@ export function ModelAttributesPanel({
   };
 
   const typeLabel = (row: TypeAttribute) => {
-    const label = isValueTypeCode(row.value_type) ? VALUE_TYPE_LABELS[row.value_type] : null;
-    return label ? tr(label[0], label[1]) : row.value_type;
+    const type = attributeDisplayType(row);
+    return type ? tr(ATTRIBUTE_TYPE_META[type].label[0], ATTRIBUTE_TYPE_META[type].label[1]) : row.value_type;
   };
 
   const columns: Column<TypeAttribute>[] = [
@@ -183,15 +206,24 @@ export function ModelAttributesPanel({
     {
       key: 'type',
       header: tr('数据类型', 'Data type'),
-      width: 'min-w-[4.5rem]',
-      cell: (row) => (
-        <span className="flex items-center gap-1 whitespace-nowrap">
-          <Chip>{typeLabel(row)}</Chip>
-          {row.is_list && <Chip>{tr('多值', 'Multi')}</Chip>}
-          {row.is_password && <Chip tone="warning">{tr('密码', 'Secret')}</Chip>}
-          {row.is_reference && <Chip tone="info">{tr('引用', 'Reference')}</Chip>}
-        </span>
-      ),
+      width: 'min-w-[6.5rem]',
+      cell: (row) => {
+        const type = attributeDisplayType(row);
+        return (
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <AttributeTypeGlyph type={type} />
+              <span className="text-[11px] font-medium text-text-muted">{typeLabel(row)}</span>
+            </span>
+            {(row.is_list || row.is_choice) && (
+              <span className="flex flex-wrap items-center gap-1">
+                {row.is_list && <Chip dense>{tr('多值', 'Multi')}</Chip>}
+                {row.is_choice && <Chip dense>{tr('选项', 'Choice')}</Chip>}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: 'index',
@@ -259,63 +291,91 @@ export function ModelAttributesPanel({
             </div>
           </div>
 
-          <div className="cmdb-liquid-divider mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-3">
-            <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 sm:w-auto">
-              <label className="cmdb-liquid-filter inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
-                <Checkbox
-                  checked={onlyRequired}
-                  onCheckedChange={(next) => setOnlyRequired(next === true)}
-                  aria-label={tr('只看必填属性', 'Required only')}
-                />
-                {tr('只看必填属性', 'Required only')}
-              </label>
-              <label className="cmdb-liquid-filter inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
-                <Checkbox
-                  checked={onlyInherited}
-                  onCheckedChange={(next) => setOnlyInherited(next === true)}
-                  aria-label={tr('只看继承', 'Inherited only')}
-                />
-                {tr('只看继承', 'Inherited only')}
-              </label>
+          <div className="cmdb-liquid-divider mt-3 border-t pt-3">
+            <div
+              role="group"
+              aria-label={tr('按数据类型筛选', 'Filter by data type')}
+              className="flex flex-wrap items-center gap-1"
+            >
+              {ATTRIBUTE_DISPLAY_TYPE_ORDER.map((type) => {
+                const meta = ATTRIBUTE_TYPE_META[type];
+                const Icon = meta.icon;
+                const active = types.includes(type);
+                const label = tr(meta.label[0], meta.label[1]);
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => toggleType(type)}
+                    title={tr(`只看${meta.label[0]}`, `Show ${meta.label[1]} only`)}
+                    className={cn('cmdb-liquid-type-filter inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]', active && 'is-active')}
+                  >
+                    <Icon size={13} aria-hidden="true" />
+                    {label}
+                  </button>
+                );
+              })}
             </div>
-            <div className="relative w-full min-w-0 sm:w-60">
-              <Search
-                size={13}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
-                aria-hidden="true"
-              />
-              <Input
-                type="search"
-                aria-label={tr('搜索属性', 'Search attributes')}
-                placeholder={tr('搜索属性名或 Key…', 'Search name or key…')}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                className="w-full pl-7 text-xs"
-              />
-            </div>
-            <div className="cmdb-liquid-segment ms-auto flex shrink-0 items-center gap-1 p-1">
-              <Button
-                variant="plain"
-                size="sm"
-                type="button"
-                aria-pressed={view === 'table'}
-                onClick={() => setView('table')}
-                className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'table' && 'is-active')}
-              >
-                <Table2 size={12} aria-hidden="true" />
-                {tr('列表', 'List')}
-              </Button>
-              <Button
-                variant="plain"
-                size="sm"
-                type="button"
-                aria-pressed={view === 'grid'}
-                onClick={() => setView('grid')}
-                className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'grid' && 'is-active')}
-              >
-                <LayoutGrid size={12} aria-hidden="true" />
-                {tr('网格', 'Grid')}
-              </Button>
+
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 sm:w-auto">
+                <label className="cmdb-liquid-filter inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
+                  <Checkbox
+                    checked={onlyRequired}
+                    onCheckedChange={(next) => setOnlyRequired(next === true)}
+                    aria-label={tr('只看必填属性', 'Required only')}
+                  />
+                  {tr('只看必填属性', 'Required only')}
+                </label>
+                <label className="cmdb-liquid-filter inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
+                  <Checkbox
+                    checked={onlyInherited}
+                    onCheckedChange={(next) => setOnlyInherited(next === true)}
+                    aria-label={tr('只看继承', 'Inherited only')}
+                  />
+                  {tr('只看继承', 'Inherited only')}
+                </label>
+              </div>
+              <div className="relative w-full min-w-0 sm:w-60">
+                <Search
+                  size={13}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
+                  aria-hidden="true"
+                />
+                <Input
+                  type="search"
+                  aria-label={tr('搜索属性', 'Search attributes')}
+                  placeholder={tr('搜索属性名或 Key…', 'Search name or key…')}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="w-full pl-7 text-xs"
+                />
+              </div>
+              <div className="cmdb-liquid-segment ms-auto flex shrink-0 items-center gap-1 p-1">
+                <Button
+                  variant="plain"
+                  size="sm"
+                  type="button"
+                  aria-pressed={view === 'table'}
+                  onClick={() => setView('table')}
+                  className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'table' && 'is-active')}
+                >
+                  <Table2 size={12} aria-hidden="true" />
+                  {tr('列表', 'List')}
+                </Button>
+                <Button
+                  variant="plain"
+                  size="sm"
+                  type="button"
+                  aria-pressed={view === 'grid'}
+                  onClick={() => setView('grid')}
+                  className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'grid' && 'is-active')}
+                >
+                  <LayoutGrid size={12} aria-hidden="true" />
+                  {tr('网格', 'Grid')}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -334,6 +394,15 @@ export function ModelAttributesPanel({
                 <span className="text-text-faint">
                   {tr(`显示 ${filtered.length} / ${rows.length}`, `showing ${filtered.length} of ${rows.length}`)}
                 </span>
+                <Button
+                  variant="plain"
+                  size="sm"
+                  type="button"
+                  onClick={clearFilters}
+                  className="cmdb-liquid-plain-action text-[11px]"
+                >
+                  {tr('清除筛选', 'Clear filters')}
+                </Button>
               </>
             )}
           </div>
@@ -426,6 +495,9 @@ export function ModelAttributesPanel({
                         </button>
                       </h3>
                       <Chip tone="accent">{tr(`${section.rows.length} 项`, `${section.rows.length} items`)}</Chip>
+                      {(section.key === 'other' || section.key === 'ungrouped') && (
+                        <span className="text-[11px] text-text-faint">{tr('未分组属性', 'Ungrouped attributes')}</span>
+                      )}
                       {section.inherited && (
                         <span className="cmdb-liquid-source inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/20 bg-indigo-500/10 px-2 py-0.5 text-[11px] font-medium text-indigo-500">
                           <GitBranch size={10} aria-hidden="true" />
@@ -464,12 +536,11 @@ export function ModelAttributesPanel({
                           )}
                         />
                       ) : (
-                        <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                           {section.rows.map((row) => (
                             <AttributeCard
                               key={row.id}
                               row={row}
-                              typeLabel={typeLabel(row)}
                               isAdmin={isAdmin}
                               adminTip={adminTip}
                               onEdit={onEdit}
@@ -573,9 +644,58 @@ function ActionButtons({
   );
 }
 
+function AttributeTypeGlyph({
+  type,
+  size = 'sm',
+}: {
+  type: AttributeDisplayType | null;
+  size?: 'sm' | 'lg';
+}) {
+  const Icon = type ? ATTRIBUTE_TYPE_META[type].icon : Type;
+  return (
+    <span
+      data-attribute-type-icon={type ?? 'unknown'}
+      aria-hidden="true"
+      className={cn(
+        'flex shrink-0 items-center justify-center border border-sky-500/10 bg-sky-500/10 text-sky-500 dark:border-sky-400/10 dark:bg-sky-400/10 dark:text-sky-300',
+        size === 'lg' ? 'h-10 w-10 rounded-xl' : 'h-6 w-6 rounded-md',
+      )}
+    >
+      <Icon size={size === 'lg' ? 18 : 13} strokeWidth={1.8} />
+    </span>
+  );
+}
+
+function AttributeFlags({ row }: { row: TypeAttribute }) {
+  const { tr } = useI18n();
+  const flags: { key: string; label: string; icon: LucideIcon }[] = [];
+  if (row.is_unique) {
+    flags.push({ key: 'unique', label: tr('唯一', 'Unique'), icon: Fingerprint });
+  }
+  if (row.default_show) {
+    flags.push({ key: 'shown', label: tr('默认显示', 'Shown by default'), icon: Eye });
+  }
+  if (row.is_sortable) {
+    flags.push({ key: 'sortable', label: tr('可排序', 'Sortable'), icon: ArrowUpDown });
+  }
+  if (row.is_indexed) {
+    flags.push({ key: 'indexed', label: tr('可检索', 'Searchable'), icon: Hash });
+  }
+  if (flags.length === 0) return null;
+
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 text-sky-500/80 dark:text-sky-300/80">
+      {flags.map(({ key, label, icon: Icon }) => (
+        <span key={key} role="img" aria-label={label} title={label} className="inline-flex">
+          <Icon size={12} strokeWidth={1.8} aria-hidden="true" />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function AttributeCard({
   row,
-  typeLabel,
   isAdmin,
   adminTip,
   onEdit,
@@ -583,7 +703,6 @@ function AttributeCard({
   onFlag,
 }: {
   row: TypeAttribute;
-  typeLabel: string;
   isAdmin: boolean;
   adminTip?: string;
   onEdit(row: TypeAttribute): void;
@@ -591,42 +710,66 @@ function AttributeCard({
   onFlag(row: TypeAttribute, patch: { is_required?: boolean; default_show?: boolean }): void;
 }) {
   const { tr } = useI18n();
+  const type = attributeDisplayType(row);
+  const typeLabel = type
+    ? tr(ATTRIBUTE_TYPE_META[type].label[0], ATTRIBUTE_TYPE_META[type].label[1])
+    : row.value_type;
+
   return (
-    <div className="cmdb-liquid-card flex min-w-0 flex-col justify-between rounded-xl p-4">
-      <div>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h4 className="truncate text-sm font-bold text-text">{row.alias || row.name}</h4>
-            <p className="mt-0.5 truncate font-mono text-[11px] text-text-faint">{row.name}</p>
-          </div>
-          <Chip tone={row.is_indexed ? 'success' : 'default'}>
-            {row.is_indexed ? tr('可检索', 'Searchable') : tr('非索引', 'Unindexed')}
-          </Chip>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <Chip>{typeLabel}</Chip>
-          {row.is_list && <Chip>{tr('多值', 'Multi')}</Chip>}
-          {row.is_password && <Chip tone="warning">{tr('密码', 'Secret')}</Chip>}
-          {row.is_reference && <Chip tone="info">{tr('引用', 'Reference')}</Chip>}
-        </div>
-        <div className="mt-3">
-          <PolicyControls row={row} isAdmin={isAdmin} onFlag={onFlag} />
-        </div>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
-        <span className="text-[11px] text-text-faint">
-          {row.inherited
-            ? tr(`继承自 ${row.inherited_from || tr('父模型', 'a parent model')}`, `from ${row.inherited_from || 'a parent model'}`)
-            : tr('本模型独立属性', 'This model')}
+    <article className="cmdb-liquid-card relative flex min-w-0 flex-col rounded-xl p-4">
+      {row.is_unique && (
+        <span className="absolute end-0 top-0 z-10 rounded-bl-lg rounded-tr-xl bg-amber-500 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
+          {tr('唯一', 'Unique')}
         </span>
-        <ActionButtons
-          row={row}
-          isAdmin={isAdmin}
-          adminTip={adminTip}
-          onEdit={onEdit}
-          onUnbind={onUnbind}
-        />
+      )}
+
+      <div className="flex min-w-0 items-start gap-3">
+        <AttributeTypeGlyph type={type} size="lg" />
+        <div className={cn('min-w-0 flex-1', row.is_unique && 'pe-12')}>
+          <h4 className="truncate text-sm font-bold text-text">
+            {row.is_required && (
+              <span aria-hidden="true" className="me-0.5 text-rose-500 dark:text-rose-400">
+                *
+              </span>
+            )}
+            {row.alias || row.name}
+          </h4>
+          <p className="mt-0.5 truncate text-xs text-text-muted">{typeLabel}</p>
+          <code className="cmdb-liquid-key mt-1 inline-block max-w-full truncate" title={row.name}>
+            {row.name}
+          </code>
+          {(row.is_list || row.is_choice) && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              {row.is_list && <Chip dense>{tr('多值', 'Multi')}</Chip>}
+              {row.is_choice && <Chip dense>{tr('选项', 'Choice')}</Chip>}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+
+      <div className="mt-3">
+        <PolicyControls row={row} isAdmin={isAdmin} onFlag={onFlag} />
+      </div>
+
+      <div className="mt-auto pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <AttributeFlags row={row} />
+            <span className="min-w-0 truncate text-[11px] text-text-faint">
+              {row.inherited
+                ? tr(`继承自 ${row.inherited_from || tr('父模型', 'a parent model')}`, `from ${row.inherited_from || 'a parent model'}`)
+                : tr('本模型独立属性', 'This model')}
+            </span>
+          </div>
+          <ActionButtons
+            row={row}
+            isAdmin={isAdmin}
+            adminTip={adminTip}
+            onEdit={onEdit}
+            onUnbind={onUnbind}
+          />
+        </div>
+      </div>
+    </article>
   );
 }

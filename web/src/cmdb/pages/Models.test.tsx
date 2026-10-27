@@ -40,6 +40,23 @@ const attributes = [
   { id: 11, name: 'cpu', alias: '核数', value_type: '0', is_list: false, is_index: true },
 ];
 
+const database = {
+  id: 3,
+  name: 'database',
+  alias: '数据库',
+  enabled: true,
+  is_attached: true,
+  icon: '',
+  order: 2,
+  unique_key: 'db_name',
+  parent_ids: [],
+};
+
+const modelGroups = [
+  { id: 10, name: '服务器', ci_types: [models[0], database] },
+  { id: 11, name: '网络', ci_types: [models[1]] },
+];
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -54,6 +71,10 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem('ongrid-locale', 'zh-CN');
   useAuth.setState({ token: null, role: 'admin' });
+  // THE SHELL ALSO LOADS GROUPS, and MSW treats an unhandled request as an
+  // error. A default empty answer keeps the flat-list cases honest; grouped
+  // cases override it.
+  server.use(http.get('/api/v1/cmdb/preferences/model-groups', () => HttpResponse.json({ items: [], total: 0 })));
 });
 
 describe('the list', () => {
@@ -91,6 +112,36 @@ describe('the list', () => {
     expect(screen.getByRole('link', { name: '交换机' })).toBeInTheDocument();
   });
 
+  it('presents the schema as cards and keeps the actions', async () => {
+    const user = userEvent.setup();
+    server.use(http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })));
+    renderPage();
+
+    await screen.findByRole('link', { name: '主机' });
+    await user.click(screen.getByRole('button', { name: '网格' }));
+
+    expect(await screen.findByRole('heading', { name: '主机' })).toBeInTheDocument();
+    expect(screen.getByText('host')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '编辑 host' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '停用 host' })).toBeInTheDocument();
+  });
+
+  it('does not turn cantor’s stored is_attached flag into a usability claim', async () => {
+    // THE FLAG IS NOT "HAS BOUND ATTRIBUTES". cantor data carries false on
+    // models with dozens of bindings, so the list must not tell an operator a
+    // model cannot hold instances based on it.
+    const user = userEvent.setup();
+    server.use(http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })));
+    renderPage();
+
+    await screen.findByRole('link', { name: '交换机' });
+    expect(screen.queryByText('不可存实例')).not.toBeInTheDocument();
+    expect(screen.getByText('含继承')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '网格' }));
+    expect(screen.queryByText('不可存实例')).not.toBeInTheDocument();
+  });
+
   it('disables the writes for a non-administrator', async () => {
     useAuth.setState({ token: null, role: 'user' });
     server.use(http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })));
@@ -112,6 +163,150 @@ describe('the list', () => {
     await screen.findByText('还没有模型。可以先创建内建模型，或新建一个。');
     await user.click(screen.getByRole('button', { name: /内建模型/ }));
     expect(await screen.findByText('已创建 1 个内建模型')).toBeInTheDocument();
+  });
+});
+
+describe('grouping', () => {
+  function groupedHandlers() {
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () =>
+        HttpResponse.json({ items: [...models, database], total: 3 }),
+      ),
+      http.get('/api/v1/cmdb/preferences/model-groups', () =>
+        HttpResponse.json({ items: modelGroups, total: modelGroups.length }),
+      ),
+    );
+  }
+
+  it('groups the table rows by the shared groups when asked', async () => {
+    const user = userEvent.setup();
+    groupedHandlers();
+    renderPage();
+
+    await screen.findByRole('link', { name: '主机' });
+    // THE DEFAULT IS STILL FLAT: the feature is an opt-in display mode.
+    expect(screen.queryByRole('rowheader')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: '按分组显示' }));
+
+    const headers = screen.getAllByRole('rowheader');
+    expect(headers).toHaveLength(2);
+    expect(headers[0]).toHaveTextContent('服务器');
+    expect(headers[1]).toHaveTextContent('网络');
+
+    const serverBody = headers[0].closest('tbody');
+    const networkBody = headers[1].closest('tbody');
+    expect(serverBody).not.toBeNull();
+    expect(networkBody).not.toBeNull();
+    if (!serverBody || !networkBody) return;
+
+    expect(within(serverBody).getByRole('link', { name: '主机' })).toBeInTheDocument();
+    expect(within(serverBody).getByRole('link', { name: '数据库' })).toBeInTheDocument();
+    expect(within(networkBody).getByRole('link', { name: '交换机' })).toBeInTheDocument();
+    expect(within(serverBody).getByText('2 个模型')).toBeInTheDocument();
+    expect(within(networkBody).getByText('1 个模型')).toBeInTheDocument();
+
+    const table = screen.getByRole('table');
+    // ONE ROW PER MODEL, not one flat row set plus one grouped row set.
+    expect(within(table).getAllByRole('link', { name: '主机' })).toHaveLength(1);
+    expect(within(table).getByRole('button', { name: '编辑 host' })).toBeInTheDocument();
+  });
+
+  it('keeps the group sections in the grid view', async () => {
+    const user = userEvent.setup();
+    groupedHandlers();
+    renderPage();
+
+    await screen.findByRole('link', { name: '主机' });
+    await user.click(screen.getByRole('checkbox', { name: '按分组显示' }));
+    await user.click(screen.getByRole('button', { name: '网格' }));
+
+    const serverRegion = await screen.findByRole('region', { name: '服务器' });
+    const networkRegion = screen.getByRole('region', { name: '网络' });
+    expect(within(serverRegion).getByRole('heading', { name: '主机' })).toBeInTheDocument();
+    expect(within(serverRegion).getByRole('heading', { name: '数据库' })).toBeInTheDocument();
+    expect(within(networkRegion).getByRole('heading', { name: '交换机' })).toBeInTheDocument();
+    expect(within(serverRegion).getByRole('button', { name: '编辑 host' })).toBeInTheDocument();
+  });
+
+  it('filters within groups and hides groups with no match', async () => {
+    const user = userEvent.setup();
+    groupedHandlers();
+    renderPage();
+
+    await screen.findByRole('link', { name: '主机' });
+    await user.click(screen.getByRole('checkbox', { name: '按分组显示' }));
+    await user.type(screen.getByLabelText('搜索模型列表'), '数据');
+
+    expect(screen.getByRole('rowheader', { name: /服务器/ })).toBeInTheDocument();
+    expect(screen.queryByRole('rowheader', { name: /网络/ })).not.toBeInTheDocument();
+    const table = screen.getByRole('table');
+    expect(within(table).getByRole('link', { name: '数据库' })).toBeInTheDocument();
+    expect(within(table).queryByRole('link', { name: '主机' })).not.toBeInTheDocument();
+    expect(screen.getByText('显示 1 / 3')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '清除筛选' }));
+    expect(await screen.findByRole('rowheader', { name: /网络/ })).toBeInTheDocument();
+  });
+
+  it('applies only-enabled inside every group', async () => {
+    const user = userEvent.setup();
+    groupedHandlers();
+    renderPage();
+
+    await screen.findByRole('link', { name: '主机' });
+    await user.click(screen.getByRole('checkbox', { name: '按分组显示' }));
+    await user.click(screen.getByRole('button', { name: '只看启用' }));
+
+    const serverHeader = screen.getByRole('rowheader', { name: /服务器/ });
+    expect(screen.queryByRole('rowheader', { name: /网络/ })).not.toBeInTheDocument();
+    const serverBody = serverHeader.closest('tbody');
+    expect(serverBody).not.toBeNull();
+    if (!serverBody) return;
+    expect(serverBody).toHaveTextContent('主机');
+    expect(serverBody).toHaveTextContent('数据库');
+    expect(serverBody).not.toHaveTextContent('交换机');
+    expect(screen.getByText('显示 2 / 3')).toBeInTheDocument();
+  });
+
+  it('assembles a fallback list when the groups cannot be loaded, then retries', async () => {
+    const user = userEvent.setup();
+    let failed = true;
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [...models, database], total: 3 })),
+      http.get('/api/v1/cmdb/preferences/model-groups', () =>
+        failed
+          ? new HttpResponse(null, { status: 500 })
+          : HttpResponse.json({ items: modelGroups, total: modelGroups.length }),
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByRole('link', { name: '主机' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/模型分组/);
+    expect(screen.queryByRole('checkbox', { name: '按分组显示' })).not.toBeInTheDocument();
+
+    failed = false;
+    await user.click(screen.getByRole('button', { name: '重试分组' }));
+    expect(await screen.findByRole('checkbox', { name: '按分组显示' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('lets a non-administrator view groups while keeping writes disabled', async () => {
+    const user = userEvent.setup();
+    useAuth.setState({ token: null, role: 'user' });
+    groupedHandlers();
+    renderPage();
+
+    await screen.findByRole('link', { name: '主机' });
+    const toggle = screen.getByRole('checkbox', { name: '按分组显示' });
+    expect(toggle).not.toBeDisabled();
+    await user.click(toggle);
+
+    expect(screen.getByRole('rowheader', { name: /服务器/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '编辑 host' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '停用 host' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '删除 host' })).toBeDisabled();
   });
 });
 

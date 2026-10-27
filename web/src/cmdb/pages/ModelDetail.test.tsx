@@ -165,6 +165,109 @@ describe('the attribute tab', () => {
     expect(screen.queryByText('序列号')).not.toBeInTheDocument();
   });
 
+  it('filters by the effective data type, alone and together with another type', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/attributes', () =>
+        HttpResponse.json({
+          type_id: 1,
+          unique_id: 10,
+          unique: 'hostname',
+          attributes: [
+            { ...ownAttribute, is_index: true },
+            { ...ownAttribute, id: 30, name: 'cpu', alias: '核数', value_type: '0', is_required: false },
+            {
+              ...ownAttribute,
+              id: 40,
+              name: 'root_password',
+              alias: '根密码',
+              value_type: '2',
+              is_index: false,
+              is_password: true,
+              is_required: false,
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    await screen.findByText('主机名');
+    const integerFilter = screen.getByRole('button', { name: '整数' });
+    expect(integerFilter).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(integerFilter);
+    expect(integerFilter).toHaveAttribute('aria-pressed', 'true');
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('核数')).toBeInTheDocument();
+    expect(within(table).queryByText('主机名')).not.toBeInTheDocument();
+    expect(within(table).queryByText('根密码')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '短文本' }));
+    expect(within(table).getByText('主机名')).toBeInTheDocument();
+    expect(within(table).getByText('核数')).toBeInTheDocument();
+    expect(within(table).queryByText('根密码')).not.toBeInTheDocument();
+
+    await user.click(integerFilter);
+    expect(within(table).getByText('主机名')).toBeInTheDocument();
+    expect(within(table).queryByText('核数')).not.toBeInTheDocument();
+    expect(within(table).queryByText('根密码')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '密码' }));
+    expect(within(table).getByText('主机名')).toBeInTheDocument();
+    expect(within(table).getByText('根密码')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '清除筛选' }));
+    expect(within(table).getByText('主机名')).toBeInTheDocument();
+    expect(within(table).getByText('核数')).toBeInTheDocument();
+    expect(within(table).getByText('根密码')).toBeInTheDocument();
+  });
+
+  it('shows the effective type icon and its flags in both list and grid views', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/attributes', () =>
+        HttpResponse.json({
+          type_id: 1,
+          unique_id: 10,
+          unique: 'hostname',
+          attributes: [
+            { ...ownAttribute, is_index: true, is_unique: true },
+            {
+              ...ownAttribute,
+              id: 40,
+              name: 'root_password',
+              alias: '根密码',
+              value_type: '2',
+              is_index: false,
+              is_password: true,
+              is_required: true,
+              is_unique: true,
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('短文本')).toBeInTheDocument();
+    expect(within(table).getByText('密码')).toBeInTheDocument();
+    expect(table.querySelector('[data-attribute-type-icon="2"]')).not.toBeNull();
+    expect(table.querySelector('[data-attribute-type-icon="7"]')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '网格' }));
+    const card = screen.getByRole('heading', { name: '根密码' }).closest('article');
+    expect(card).not.toBeNull();
+    const cardElement = card as HTMLElement;
+    expect(cardElement.querySelector('[data-attribute-type-icon="7"]')).not.toBeNull();
+    expect(within(cardElement).getByText('密码')).toBeInTheDocument();
+    expect(within(cardElement).getByText('唯一')).toBeInTheDocument();
+    expect(within(cardElement).getByText('*')).toBeInTheDocument();
+  });
+
   it('refuses to unbind an inherited attribute', async () => {
     baseHandlers();
     renderPage();
@@ -409,6 +512,57 @@ describe('the other tabs', () => {
     // signal that the rule references something gone. cantor dropped those
     // silently; here the gap is visible.
     expect(await screen.findByText('1 个属性已不存在')).toBeInTheDocument();
+  });
+});
+
+describe('the model definition', () => {
+  it('opens the read-only JSON snapshot from the header', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/unique-constraints', () =>
+        HttpResponse.json({
+          items: [{ id: 3, type_id: 1, attr_ids: [10], attributes: [ownAttribute] }],
+          total: 1,
+        }),
+      ),
+      http.get('/api/v1/cmdb/ci-types/1/triggers', () => HttpResponse.json({ items: [], total: 0 })),
+    );
+    renderPage();
+
+    await screen.findByText('主机名');
+    await user.click(screen.getByRole('button', { name: '模型定义' }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const json = await screen.findByLabelText('模型定义 JSON');
+    expect(json).toHaveTextContent('"format": "ongrid.cmdb.model"');
+    expect(json).toHaveTextContent('"hostname"');
+    expect(json).toHaveTextContent('"unique_constraints"');
+  });
+
+  it('offers the definition to a non-administrator without calling admin-only reads', async () => {
+    const user = userEvent.setup();
+    useAuth.setState({ token: null, role: 'user' });
+    baseHandlers();
+    // No handlers for unique-constraints or triggers: an attempt to read them
+    // would fail the test through MSW, and the UI must not depend on them.
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+    );
+    renderPage();
+
+    await screen.findByText('主机名');
+    const button = screen.getByRole('button', { name: '模型定义' });
+    expect(button).toBeEnabled();
+    await user.click(button);
+
+    const json = await screen.findByLabelText('模型定义 JSON');
+    expect(json).toHaveTextContent('"unique_constraints": null');
+    expect(json).toHaveTextContent('"triggers": null');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
 

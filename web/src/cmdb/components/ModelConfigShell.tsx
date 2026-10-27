@@ -68,14 +68,19 @@ export function ModelConfigShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-2 lg:hidden">
-            <Button variant="outline" size="sm" type="button" onClick={() => setMobileOpen(true)}>
-              {tr('选择模型', 'Choose model')}
-            </Button>
-            <span className="min-w-0 truncate text-xs text-text-muted">
-              {selected ? selected.alias || selected.name : tr('未选择模型', 'No model selected')}
-            </span>
-          </div>
+          {/* THE LIST IS NOT A MODEL DETAIL. On /cmdb/models there is no
+              selected model, so the narrow-screen picker would offer a choice
+              the page itself already shows. Detail pages keep it. */}
+          {selectedID !== undefined && (
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2 lg:hidden">
+              <Button variant="outline" size="sm" type="button" onClick={() => setMobileOpen(true)}>
+                {tr('选择模型', 'Choose model')}
+              </Button>
+              <span className="min-w-0 truncate text-xs text-text-muted">
+                {selected ? selected.alias || selected.name : tr('未选择模型', 'No model selected')}
+              </span>
+            </div>
+          )}
           <div className="min-h-0 flex-1">{children}</div>
         </div>
       </div>
