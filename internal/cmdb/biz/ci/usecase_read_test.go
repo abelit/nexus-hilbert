@@ -196,6 +196,29 @@ func TestReadsNeverReturnAPasswordValue(t *testing.T) {
 	assertNoSecret(t, "detail without fields", all.Values)
 }
 
+// A CI adopted from cantor has no rendered snapshot until its next write, and
+// an import produces the same rows. With no field projection there is nothing
+// for the snapshot check to look for, so a list would render every instance
+// with an empty value map; the fallback must run for an empty document even
+// when the caller asked for no particular fields.
+func TestListByTypeFallsBackWhenSnapshotsAreEmpty(t *testing.T) {
+	repo, res, _ := readFixture(t)
+	repo.listed[0].PropsJSON = ""
+	uc := NewUsecase(repo, res, nil)
+
+	page, err := uc.ListByType(context.Background(), "host", 1, 0, nil, RetKeyName)
+	if err != nil {
+		t.Fatalf("ListByType() error = %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(page.Items))
+	}
+	if page.Items[0].Values["hostname"] != "web-01" {
+		t.Fatalf("values = %+v, want the value-table fallback for an empty snapshot", page.Items[0].Values)
+	}
+	assertNoSecret(t, "list with an empty snapshot", page.Items[0].Values)
+}
+
 // The secret is absent even when the caller asks for it by name and by alias —
 // a `fields` filter is a projection, not an authorisation.
 //

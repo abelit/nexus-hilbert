@@ -123,6 +123,19 @@ func (u *Usecase) ListByType(ctx context.Context, ref string, page, size int, fi
 	// was asked for that a snapshot cannot answer.
 	wanted := fieldSet(fields)
 	missing := false
+	// AN EMPTY PROJECTION STILL NEEDS THE FALLBACK WHEN THE SNAPSHOT IS EMPTY.
+	// The loop below has nothing to check for a caller that asked for no fields,
+	// so an adopted or imported row — whose document column was never rendered —
+	// would come back with no values at all. Get() already treats an empty
+	// snapshot as a cache miss; the list must do the same.
+	if len(wanted) == 0 {
+		for _, row := range rows {
+			if snapshotEmpty(row) {
+				missing = true
+				break
+			}
+		}
+	}
 	for name := range wanted {
 		if spec, ok := specByName(set, name); ok && !spec.Modifiers().IsPasswordSafe() {
 			// A secret is never in the snapshot BY DESIGN, so asking for one is

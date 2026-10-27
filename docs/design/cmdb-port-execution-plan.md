@@ -283,6 +283,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - [x] 属性编辑：`AttributeForm` 覆盖名称/别名/值类型、索引/唯一/列表/密码/引用/文件/计算等标志、引用模型、默认值、静态选项（值/标签/颜色）、`choice_web_hook`/`choice_other`/`compute_script`、正则 `re_check`、展示 `option` JSON；已有属性的值类型和列表标志不可改；JSON 非法时不发请求；底部操作固定。
 - [x] 关系属性映射：模型详情关系抽屉和全局关系页都可为父/子属性按位置配对，提交 `parent_attr_ids`/`child_attr_ids`，空映射不发送；切换父/对端模型时先清空旧映射，避免新属性加载期间提交上一组属性 id；新增 `RelationAttributePairs`。
 - [x] 关系页空白修复：`relation-children`/`relation-parents` 返回的是单端 `RelatedType`，不是全局关系列表的 `{parent, child}`。详情页按对端模型渲染，删除改用 `ctr_id`；`ModelDetail` 测试改用真实响应并覆盖 `?tab=relations` 深链、空态、子/父关系与按边 id 删除，避免 mock 形状掩盖真实契约。
+- [x] 导入实例读取：cantor 导入的 `c_cis.props_json` 为空；`ListByType` 在没有字段投影时也要对空快照回退到值表，否则资源数据页所有列都显示为空。新增 `TestListByTypeFallsBackWhenSnapshotsAreEmpty`，并用本地导入的 `product` 模型验证 80 条实例返回 `values`。
 - [x] 运行时修复：自定义图标加载失败回退到中性图标并固定尺寸；`Chip` 改为 `forwardRef` 以配合 Tooltip/Base UI；属性视图返回 `re_check`/`option`；`is_attached` 注释纠正为 cantor 的陈旧标志。
 - [x] 属性展示：参考 [model_attribute_management_apple_liquid_glass.html](./cmdb/model_attribute_management_apple_liquid_glass.html)，模型详情属性页使用 scoped `.cmdb-liquid` 玻璃面板：分区玻璃卡、表格/网格切换、属性/类型/索引/配置策略/来源信息、搜索、只看必填/只看继承、分组折叠、统计摘要和空态；操作保留编辑/解绑及行内必填/默认显示开关。桌面默认表格，1280 以下默认网格；只采用参考的视觉方向，不引入 CDN、Font Awesome、全局 Tailwind 配置或新主题。
 - [x] 表格响应式：`DataTable` 的操作列表头与操作单元格一起 `sticky right-0`，避免横向滚动时被覆盖列的表头从按钮上方透出；模型列表在 `sm` 以下把编辑/启停/删除收进“更多操作”菜单，避免固定操作列遮挡模型名。
