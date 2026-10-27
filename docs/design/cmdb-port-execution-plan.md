@@ -103,6 +103,7 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - 真实浏览器：`npx playwright test e2e/cmdb-pages-responsive.spec.ts --no-deps`（`E2E_BASE_URL=http://127.0.0.1:5173`，Vite dev server）**144 passed**；历史页子集 16 passed。
 - 全量 `npm run lint`：53 problems（9 errors / 44 warnings），与基线一致，改动文件不在错误列表。
 - `bash scripts/test-compose-release-package.sh` 通过（含新增的 uninstall 镜像断言）；`docker compose -f deploy/docker-compose.yml config` 通过。
+- `make test-release-package` 通过（含 `test-upgrade-data-permissions.sh`、`test-compose-release-package.sh`）；`test-release-manifest-filter`、`test-release-image-publish`、`verify-compose-images` 通过。`test-upgrade-data-permissions.sh` 的断言已与新 CMDB 健康消息对齐。
 - 组合栈：`deploy/docker-compose.yml`（project `deploy`）运行中；`/cmdb-readyz` 200、认证后 `/api/v1/cmdb/health` 200、`/api/v1/cmdb/ci-types` 200，容器 `--healthcheck` exit 0。
 - 合并 `origin/main` 后重新验证：`go test ./...`、`go vet ./...`、`make test-race`（193 包）、`make test-integration`、前端 170 tests、`typecheck`、`build`、Playwright 144、release-package 脚本、`docker compose config` 全部通过。
 - `git diff --check` 通过；人工 import 边界核对通过（`cmdb/biz`→`cmdb/data`/其它 BC、`cmdb/server`→`cmdb/data`、`pkg`→BC、`cmd/ongrid`→`cmdb` 均为空）。
