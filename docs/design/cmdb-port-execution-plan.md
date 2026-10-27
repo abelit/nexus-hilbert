@@ -1,10 +1,10 @@
 # CMDB 移植与独立服务实施计划
 
-- 状态：代码与最终评审修复完成，待推送/PR
-- 分支：`feat/cmdb-standalone-service`
+- 状态：PR #553 已推送并等待评审；模型配置增量待提交/PR
+- 分支：`feat/cmdb-standalone-service`；增量分支 `feat/cmdb-model-config-ux`（基于 `193dad3`）
 - 基线：`main` @ `fe0a108`
 - 关联：[ADR-035](../../docs/adr/ADR-035-cmdb-standalone-service.md)、[CMDB 服务部署说明](../install/cmdb-service.md)
-- 最后更新：2026-10-26
+- 最后更新：2026-10-27
 
 本文件是 CMDB 移植的**可恢复执行清单**。上下文被压缩或换人接手时，按下面的顺序恢复：
 
@@ -271,6 +271,23 @@ PR1–PR9 的代码与验证已完成。最终评审的 17 条 CONFIRMED（1 cri
 - 验收：全量 `go test ./...`、`go vet ./...`；CMDB 前端 29 文件/161 tests；`npm run typecheck`、`npm run build`、改动文件 `eslint`；Playwright 144 tests。
 - [x] `deploy/docker-compose.yml` 原样栈已在本机运行（project `deploy`：`ongrid`、`ongrid-cmdb`、`ongrid-nginx`、`ongrid-frontier`）。验收：`/cmdb-readyz` 200、`/healthz` 200、未认证 `/api/v1/version` 401、认证后 `/api/v1/cmdb/health` 200（`{"generation":"fresh","origin":"mysql","fresh":true}`）、`/api/v1/cmdb/ci-types` 200、`docker exec ongrid-cmdb /ongrid-cmdb --healthcheck` exit 0。CMDB 镜像通过 `RUNTIME_IMAGE` 覆盖构建（提交 `9063f79`）。停止 CMDB 的网关隔离早前实测为 504，本轮未重复停服。
 - [ ] 未创建/推送 PR；`gh pr checks` 未运行。
+
+## 增量：模型配置体验（`feat/cmdb-model-config-ux`）
+
+范围：核对 cantor 模型配置的移植完整度，补齐 P0 配置能力，并把模型列表/详情改成“左侧模型树 + 右侧工作区”。分支基于 PR #553 的 `193dad3`，应在 #553 合并后合并/变基。
+
+- [x] 布局：新增 `ModelConfigShell`、`ModelTree`、`model-tree-context`；桌面 264px 模型树 + 右侧工作区，窄屏收进“选择模型”弹窗；搜索跨分组、选中项自动展开并滚入视野；列表 `?new=1` 打开新建表单；详情/偏好使用 `?tab=` 保持当前页签；新建模型后跳转详情并刷新树。
+- [x] 显示属性：`CreateTypeInput.ShowKey`/`UpdateTypeInput.ShowKey`（id 或 name），store 写 `show_id`；表单支持选择和清空；列表增加“展示属性”列并移除无意义的 `is_attached` 列/过滤，实例页和发现目标改用有效属性集判断模型是否可挂载。
+- [x] 继承编辑：更新模型时可传 `parent_ids`（`ParentsSet`），store 在同一更新中替换 `c_ci_type_inheritance`；拒绝自引用；未传字段保持原值。表单提供父模型搜索和多选。
+- [x] 属性字典：`AttributeDictionary` 使用服务端搜索/分页（50 行），显示总数；新建/编辑/删除复用 `AttributeForm`；`listAllAttributes` 按 200 行服务端分页循环，供模型表单使用。
+- [x] 属性编辑：`AttributeForm` 覆盖名称/别名/值类型、索引/唯一/列表/密码/引用/文件/计算等标志、引用模型、默认值、静态选项（值/标签/颜色）、`choice_web_hook`/`choice_other`/`compute_script`、正则 `re_check`、展示 `option` JSON；已有属性的值类型和列表标志不可改；JSON 非法时不发请求；底部操作固定。
+- [x] 关系属性映射：模型详情关系抽屉和全局关系页都可为父/子属性按位置配对，提交 `parent_attr_ids`/`child_attr_ids`，空映射不发送；切换父/对端模型时先清空旧映射，避免新属性加载期间提交上一组属性 id；新增 `RelationAttributePairs`。
+- [x] 运行时修复：自定义图标加载失败回退到中性图标并固定尺寸；`Chip` 改为 `forwardRef` 以配合 Tooltip/Base UI；属性视图返回 `re_check`/`option`；`is_attached` 注释纠正为 cantor 的陈旧标志。
+- [x] 表格响应式：`DataTable` 的操作列表头与操作单元格一起 `sticky right-0`，避免横向滚动时被覆盖列的表头从按钮上方透出；模型列表在 `sm` 以下把编辑/启停/删除收进“更多操作”菜单，避免固定操作列遮挡模型名。
+- [x] 测试：后端 citype 的 show_key 创建/更新/清空、继承替换/保留/清空、自引用 400、HTTP DTO；前端 `Models`/`ModelDetail`/`Instances`/`ModelTree`/`AttributeForm`/`AttributeDictionary` 及关系映射；新增两条真实 Chromium 断言（1280 操作列表头固定、390 操作菜单压缩）。
+- 验收：`go test -race ./internal/cmdb/biz/citype ./internal/cmdb/data/citype/store ./internal/cmdb/server/citype`；`go test ./...`；`go vet ./...`；`make arch-lint`（`go-arch-lint` v1.19.0，`OK - No warnings found`）；CMDB Vitest **34 文件 / 183 tests**；`npm run build`；`npm run lint`（0 errors / 44 既有 warnings）；新增 Playwright 2 tests 通过。
+- 真实浏览器：模型列表 390/768/1280/1920，模型详情 390/768/1280/1920，属性字典和属性表单 390；覆盖 zh/en 与 light/dark 的关键组合。所有页面 `documentElement` 无横向溢出，密集表格只在自身容器滚动；移动端操作列不再遮挡模型名。
+- 已知限制：完整前端套件（118 文件/684 tests）中 `src/api/skills.test.ts` 仍失败，原因是实现已改用 `device_id` 而测试仍断言 `edge_id`，属于分支基线既有问题；其余 7 个失败文件单独运行均通过，是全量并发超时，不是本次回归。P1 的模型组拖拽、触发器日期/过滤/通知投递、模型级自动发现、快捷启停开关和更完整的 choice webhook/脚本编辑器不在本次范围。cantor 数据迁移在独立的 `feat/cmdb-cantor-data-migration` 分支处理，不在本分支混入。
 
 ## 每个 PR 的完成定义
 
