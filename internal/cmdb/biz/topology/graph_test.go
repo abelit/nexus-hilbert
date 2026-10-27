@@ -213,3 +213,24 @@ func TestBuildGraphKeepsEdgesIntoRoots(t *testing.T) {
 		t.Fatalf("nodes = %+v, want the two roots once each", got.Nodes)
 	}
 }
+
+// cantor writes the central model at path level "0" and walks only the
+// positive and negative levels. A view saved by cantor therefore must not be
+// rejected as invalid: level 0 describes the roots already seeded from the
+// central model, so it is a no-op for the walk.
+func TestBuildGraphIgnoresTheCentralLevelZero(t *testing.T) {
+	q := graphFixture()
+	got, err := BuildGraph(context.Background(), q, GraphInput{
+		CentralNodeType: 1,
+		Path: map[string][]model.ID{
+			"0": {1},
+			"1": {2},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildGraph() error = %v", err)
+	}
+	if len(got.Nodes) != 3 || len(got.Links) != 1 {
+		t.Fatalf("graph = %d nodes / %d links, want the roots and one child", len(got.Nodes), len(got.Links))
+	}
+}

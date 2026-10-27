@@ -240,8 +240,15 @@ func levelsOf(path map[string][]model.ID) ([]graphLevel, error) {
 	out := make([]graphLevel, 0, len(path))
 	for key, typeIDs := range path {
 		level, err := strconv.Atoi(key)
-		if err != nil || level == 0 {
+		if err != nil {
 			return nil, fmt.Errorf("%w: path level %q", errs.ErrInvalid, key)
+		}
+		// LEVEL 0 IS THE CENTRAL MODEL. cantor's editor writes it and its walk
+		// skips it (`if int(i) > 0` / `if int(i) < 0`); rejecting it would make
+		// every view saved by cantor unreadable. The roots already come from
+		// CentralNodeType, so there is no edge to walk at level 0.
+		if level == 0 {
+			continue
 		}
 		if level > MaxDepth || level < -MaxDepth {
 			return nil, fmt.Errorf("%w: path level %d exceeds %d", ErrGraphTooLarge, level, MaxDepth)
