@@ -275,7 +275,7 @@ services:
     volumes:
       - ./install/frontier.yaml:/usr/conf/frontier.yaml:ro
     ports:
-      - "40012:40012"
+      - "${ONGRID_FRONTIER_PORT:-40012}:40012"
     networks:
       - ongrid_net
 
