@@ -102,6 +102,23 @@ const (
 
 	// AttrFreeCount is the capacity the addresses leave.
 	AttrFreeCount = "free_count"
+
+	// The address and subnet annotations cantor's dialogs edit. They are
+	// ordinary attributes: a deployment that does not declare them simply gets
+	// a dialog with fewer fields, because the write path drops unknown keys.
+	AttrDescription       = "description"
+	AttrGateway           = "gateway"
+	AttrSubnetMask        = "subnet_mask"
+	AttrMACAddress        = "mac_address"
+	AttrUsage             = "usage"
+	AttrUseObj            = "use_obj"
+	AttrOperationalStatus = "operational_status"
+	AttrVLANID            = "vlan_id"
+	AttrVRF               = "vrf"
+	AttrSubnetUsage       = "subnet_usage"
+	AttrComments          = "comments"
+	AttrIPRangeStart      = "ip_range_start"
+	AttrIPRangeEnd        = "ip_range_end"
 )
 
 // AddressStatus is an address's assignment state.
@@ -387,17 +404,21 @@ func BuiltinDeviceAttributes() []BuiltinAttributeSpec {
 // is a tightening: cantor's surrogate key let the SAME address exist as two
 // rows in two subnets, measured.
 func IPAMBuiltinModels() []BuiltinModelSpec {
+	// CANTOR'S MODELS CALL THE LABEL `name`. The port's first spec used
+	// `scope_name`/`subnet_name`, while the console sends `name`; a deployment
+	// built from the spec could not create a node the console could address.
+	// The attribute is shared by both models, so it is indexed but not marked
+	// unique — the MODEL's unique key is what identifies an instance.
+	name := BuiltinAttributeSpec{Name: "name", ValueType: builtinTextType, IsIndex: true}
 	return []BuiltinModelSpec{
 		{
-			Name: string(ModelIPAMScope), Alias: "scope", UniqueKey: "scope_name",
-			Attributes: []BuiltinAttributeSpec{
-				{Name: "scope_name", ValueType: builtinTextType, IsIndex: true, IsUnique: true},
-			},
+			Name: string(ModelIPAMScope), Alias: "scope", UniqueKey: "name",
+			Attributes: []BuiltinAttributeSpec{name},
 		},
 		{
-			Name: string(ModelIPAMSubnet), Alias: "subnet", UniqueKey: "subnet_name",
+			Name: string(ModelIPAMSubnet), Alias: "subnet", UniqueKey: "name",
 			Attributes: []BuiltinAttributeSpec{
-				{Name: "subnet_name", ValueType: builtinTextType, IsIndex: true, IsUnique: true},
+				name,
 				{Name: AttrCIDR, ValueType: builtinTextType, IsIndex: true},
 				// The four numbers are NUMERIC: the arithmetic that maintains
 				// them compares and subtracts.
@@ -405,17 +426,35 @@ func IPAMBuiltinModels() []BuiltinModelSpec {
 				{Name: AttrAssignCount, ValueType: builtinIntType, IsIndex: true},
 				{Name: AttrUsedCount, ValueType: builtinIntType, IsIndex: true},
 				{Name: AttrFreeCount, ValueType: builtinIntType, IsIndex: true},
+				// The rest of cantor's subnet shape. The console edits only the
+				// ones it shows; import and the instance form can use the rest.
+				{Name: AttrSubnetMask, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrGateway, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrOperationalStatus, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrVLANID, ValueType: builtinIntType, IsIndex: true},
+				{Name: AttrVRF, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrSubnetUsage, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrComments, ValueType: builtinTextType, IsIndex: false},
+				{Name: AttrIPRangeStart, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrIPRangeEnd, ValueType: builtinTextType, IsIndex: true},
 			},
 		},
 		{
 			Name: string(ModelIPAMAddress), Alias: "address", UniqueKey: AttrIP,
 			Attributes: []BuiltinAttributeSpec{
 				{Name: AttrIP, ValueType: builtinTextType, IsIndex: true, IsUnique: true},
+				name,
+				{Name: AttrDescription, ValueType: builtinTextType, IsIndex: false},
 				// A status is an ordinary indexable number here; making it a
 				// choice would need the choice tables populated, and cantor's
 				// own deployment stores it as a number.
 				{Name: AttrAssignStatus, ValueType: builtinIntType, IsIndex: true},
 				{Name: AttrIsUsed, ValueType: builtinBoolType, IsIndex: true},
+				{Name: AttrGateway, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrSubnetMask, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrMACAddress, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrUsage, ValueType: builtinTextType, IsIndex: true},
+				{Name: AttrUseObj, ValueType: builtinTextType, IsIndex: true},
 			},
 		},
 	}

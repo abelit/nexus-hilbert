@@ -90,7 +90,10 @@ type IPAMSubnetScanHistory struct {
 
 	// IPs is the addresses the scan observed, capped by the reporter to the
 	// last handful rather than the whole range.
-	IPs map[string]any `gorm:"column:ips;serializer:json"`
+	//
+	// IT IS THE RAW JSON, not a map: cantor's own rows hold both objects and
+	// arrays, and typing it as a map made every list-shaped row fail to scan.
+	IPs string `gorm:"column:ips"`
 }
 
 func (IPAMSubnetScanHistory) TableName() string { return "c_ipam_subnet_scan_histories" }

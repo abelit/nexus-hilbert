@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/cmdb/biz/search"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
@@ -271,9 +272,12 @@ func (u *Usecase) CreateIPScope(ctx context.Context, in IPScopeInput) (*WriteRes
 	}
 	scope, _ := builtins.Get(ModelIPAMScope)
 
+	// THE MODEL'S OWN IDENTIFYING ATTRIBUTE, not a name this package guessed.
+	// cantor deployments call it `name`; the built-in fixture used to call it
+	// `scope_name`, and a hardcoded key silently made one of the two fail.
 	write := WriteRequest{
 		TypeRef:     string(ModelIPAMScope),
-		Values:      map[string]any{"scope_name": in.Name},
+		Values:      map[string]any{scope.UniqueAttr.Name: in.Name},
 		ExistPolicy: ExistReject,
 		Audit:       in.Audit,
 	}
@@ -312,7 +316,7 @@ func (u *Usecase) CreateIPScope(ctx context.Context, in IPScopeInput) (*WriteRes
 	if err != nil {
 		return nil, err
 	}
-	return u.repo.WriteCI(ctx, WriteSpec{
+	got, err := u.repo.WriteCI(ctx, WriteSpec{
 		TypeRef: set.Type.Name, TypeID: set.Type.ID,
 		UniqueAttrID: set.UniqueAttrID, UniqueValue: unique,
 		Policy: ExistReject,
@@ -327,10 +331,61 @@ func (u *Usecase) CreateIPScope(ctx context.Context, in IPScopeInput) (*WriteRes
 			Actor:          in.Audit.Actor,
 		},
 	})
+	if err != nil {
+		return nil, err
+	}
+	// BOTH BRANCHES LOG. A nested scope used to skip the operation record
+	// because the root branch returned before this could run.
+	u.recordIPAMOperation(ctx, in.Audit, "", cimodel.OperateAddScope, in.Name)
+	return got, nil
+}
+
+// UpdateIPScope renames a grouping node.
+//
+// The row is named by its id, which is what lets the name change; the write
+// path's unique-value lookup would otherwise treat a rename as a new instance.
+func (u *Usecase) UpdateIPScope(ctx context.Context, id model.ID, in IPScopeInput) (*WriteResult, error) {
+	if u.repo == nil || u.types == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	name := trimSpace(in.Name)
+	if name == "" {
+		return nil, fmt.Errorf("%w: name", errs.ErrInvalid)
+	}
+	builtins, err := u.ResolveBuiltin(ctx, ModelIPAMScope)
+	if err != nil {
+		return nil, err
+	}
+	scope, _ := builtins.Get(ModelIPAMScope)
+	instance, err := u.loadInstance(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if instance.TypeID != scope.Type.ID {
+		return nil, fmt.Errorf("%w: %d", ErrScopeNotFound, id)
+	}
+	before, err := u.Get(ctx, id, []string{scope.UniqueAttr.Name}, RetKeyName)
+	if err != nil {
+		return nil, err
+	}
+	old := ""
+	if raw, ok := before.Values[scope.UniqueAttr.Name]; ok && raw != nil {
+		old = fmt.Sprint(raw)
+	}
+
+	got, err := u.Update(ctx, id, WriteRequest{
+		Values: map[string]any{scope.UniqueAttr.Name: name},
+		Audit:  in.Audit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	u.recordIPAMOperation(ctx, in.Audit, "", cimodel.OperateUpdateScope, old+" -> "+name)
+	return got, nil
 }
 
 // DeleteIPScope removes a grouping node that holds nothing.
-func (u *Usecase) DeleteIPScope(ctx context.Context, id model.ID) error {
+func (u *Usecase) DeleteIPScope(ctx context.Context, id model.ID, audit AuditInfo) error {
 	if u.repo == nil || u.types == nil {
 		return errs.ErrNotWiredYet
 	}
@@ -356,10 +411,18 @@ func (u *Usecase) DeleteIPScope(ctx context.Context, id model.ID) error {
 	if len(children) > 0 {
 		return fmt.Errorf("%w: %d instances", ErrSubnetHasChildren, len(children))
 	}
+	before, err := u.Get(ctx, id, []string{scope.UniqueAttr.Name}, RetKeyName)
+	if err != nil {
+		return err
+	}
+	name := ""
+	if raw, ok := before.Values[scope.UniqueAttr.Name]; ok && raw != nil {
+		name = fmt.Sprint(raw)
+	}
 	if err := u.Delete(ctx, id); err != nil {
 		return err
 	}
-	u.recordIPAMOperation(ctx, AuditInfo{}, "", cimodel.OperateDeleteScope, "")
+	u.recordIPAMOperation(ctx, audit, "", cimodel.OperateDeleteScope, name)
 	return nil
 }
 
@@ -370,7 +433,9 @@ func (u *Usecase) DeleteIPScope(ctx context.Context, id model.ID) error {
 // THE RANGE IS AN INPUT, not a stored row: the console asks for the addresses a
 // range WOULD have while the operator is still filling the form in.
 func (u *Usecase) SubnetHosts(ctx context.Context, cidr string, limit int) ([]string, error) {
-	if limit <= 0 {
+	// THE CALLER'S LIMIT IS A PAGE SIZE, NOT A WAY AROUND THE CEILING. An
+	// unbounded `limit` let one request enumerate a /8.
+	if limit <= 0 || limit > MaxSubnetHosts {
 		limit = MaxSubnetHosts
 	}
 	normalized, err := ParseCIDR(cidr)
@@ -420,13 +485,14 @@ func (u *Usecase) IPAMSummary(ctx context.Context, parentID model.ID) (*SubnetSu
 	if u.repo == nil || u.types == nil {
 		return nil, errs.ErrNotWiredYet
 	}
-	builtins, err := u.ResolveBuiltin(ctx, ModelIPAMSubnet)
+	builtins, err := u.ResolveBuiltin(ctx, ModelIPAMSubnet, ModelIPAMScope)
 	if err != nil {
 		return nil, err
 	}
 	subnet, _ := builtins.Get(ModelIPAMSubnet)
+	scope, hasScope := builtins.Get(ModelIPAMScope)
 
-	leaves, err := u.subnetLeaves(ctx, subnet, parentID)
+	leaves, err := u.subnetLeaves(ctx, subnet, scope, hasScope, parentID)
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +557,7 @@ func (u *Usecase) IPAMSummary(ctx context.Context, parentID model.ID) (*SubnetSu
 //
 // A PARENT OF ZERO MEANS EVERY SUBNET, and the answer is every subnet minus the
 // ones that hold a subnet — one grouped query rather than a walk per parent.
-func (u *Usecase) subnetLeaves(ctx context.Context, subnet *AttributeSet, parentID model.ID) ([]model.ID, error) {
+func (u *Usecase) subnetLeaves(ctx context.Context, subnet, scope *AttributeSet, hasScope bool, parentID model.ID) ([]model.ID, error) {
 	all, err := u.repo.InstancesOfModels(ctx, []model.ID{subnet.Type.ID})
 	if err != nil {
 		return nil, err
@@ -532,17 +598,41 @@ func (u *Usecase) subnetLeaves(ctx context.Context, subnet *AttributeSet, parent
 	// another subnet. The walk is bounded by the subnet count, which is the
 	// only finite thing here — cantor's version looped until an empty frontier
 	// with nothing stopping a cycle but the rules that prevent one.
+	// A SCOPE HOLDS SUBNETS TOO. Walking only subnet→subnet edges made a
+	// selected scope — the page's default when an operator picks a folder —
+	// report zero subnets and zero capacity.
+	types := []model.ID{subnet.Type.ID}
+	if hasScope && scope != nil {
+		types = append(types, scope.Type.ID)
+	}
 	children := map[model.ID][]model.ID{}
-	edges, err := u.repo.RelationsWithin(ctx, []model.ID{subnet.Type.ID})
+	edges, err := u.repo.RelationsWithin(ctx, types)
 	if err != nil {
 		return nil, err
 	}
-	inSet := make(map[model.ID]bool, len(ids))
+	// A NESTED SCOPE IS A CONTAINER TOO. Only subnets are counted, but the walk
+	// has to pass through scopes to reach the subnets they hold.
+	subnetSet := make(map[model.ID]bool, len(ids))
 	for _, id := range ids {
-		inSet[id] = true
+		subnetSet[id] = true
+	}
+	known := make(map[model.ID]bool, len(ids))
+	for id := range subnetSet {
+		known[id] = true
+	}
+	if hasScope && scope != nil {
+		scopes, err := u.repo.InstancesOfModels(ctx, []model.ID{scope.Type.ID})
+		if err != nil {
+			return nil, err
+		}
+		for _, ref := range scopes {
+			known[ref.ID] = true
+		}
 	}
 	for _, edge := range edges {
-		if inSet[edge.FirstCIID] && inSet[edge.SecondCIID] {
+		// THE PARENT MAY BE A SCOPE, so only the child has to be known to this
+		// tree. Requiring both ends to be subnets hid every scope's contents.
+		if known[edge.SecondCIID] {
 			children[edge.FirstCIID] = append(children[edge.FirstCIID], edge.SecondCIID)
 		}
 	}
@@ -556,10 +646,15 @@ func (u *Usecase) subnetLeaves(ctx context.Context, subnet *AttributeSet, parent
 				continue
 			}
 			seen[child] = true
-			if !hasSubnetChild[child] {
-				out = append(out, child)
+			if subnetSet[child] {
+				if !hasSubnetChild[child] {
+					out = append(out, child)
+				}
+				walk(child)
+			} else {
+				// A scope: descend, but do not count the container itself.
+				walk(child)
 			}
-			walk(child)
 		}
 	}
 	walk(parentID)
@@ -855,7 +950,7 @@ func (u *Usecase) recordIPAMOperation(ctx context.Context, audit AuditInfo, cidr
 }
 
 // DeleteSubnet removes a range that holds nothing.
-func (u *Usecase) DeleteSubnet(ctx context.Context, id model.ID) error {
+func (u *Usecase) DeleteSubnet(ctx context.Context, id model.ID, audit AuditInfo) error {
 	if u.repo == nil || u.types == nil {
 		return errs.ErrNotWiredYet
 	}
@@ -890,7 +985,7 @@ func (u *Usecase) DeleteSubnet(ctx context.Context, id model.ID) error {
 	if err := u.Delete(ctx, id); err != nil {
 		return err
 	}
-	u.recordIPAMOperation(ctx, AuditInfo{}, stored, cimodel.OperateDeleteSubnet, stored)
+	u.recordIPAMOperation(ctx, audit, stored, cimodel.OperateDeleteSubnet, stored)
 	return nil
 }
 
@@ -963,13 +1058,27 @@ func (u *Usecase) AssignAddresses(ctx context.Context, in AddressAssignInput) (*
 		if instance.TypeID != subnetSet.Type.ID {
 			return nil, fmt.Errorf("%w: %d is not a subnet", ErrSubnetNotFound, subnetID)
 		}
-		if cdr == "" {
-			if got, ok, err := u.subnetCIDR(ctx, subnetSet, subnetID); err != nil {
+		// THE STORED RANGE IS THE AUTHORITY. Trusting a caller-supplied `cidr`
+		// let a request assign an address that is outside the real subnet and
+		// have the counters measured against a fabricated capacity. A caller
+		// that sends one is checked against the row instead.
+		stored, ok, err := u.subnetCIDR(ctx, subnetSet, subnetID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("%w: %d has no range", ErrSubnetNotFound, subnetID)
+		}
+		if cdr != "" {
+			normalized, err := ParseCIDR(cdr)
+			if err != nil {
 				return nil, err
-			} else if ok {
-				cdr = got
+			}
+			if normalized != stored {
+				return nil, fmt.Errorf("%w: cidr %s does not match the subnet's %s", errs.ErrInvalid, normalized, stored)
 			}
 		}
+		cdr = stored
 	} else {
 		normalized, err := ParseCIDR(in.CIDR)
 		if err != nil {
@@ -985,6 +1094,15 @@ func (u *Usecase) AssignAddresses(ctx context.Context, in AddressAssignInput) (*
 			return nil, fmt.Errorf("%w: %s", ErrSubnetNotFound, normalized)
 		}
 		subnetID = ids[0]
+	}
+
+	// THE RANGE'S OWN TWO EDGES ARE NOT HOSTS. The host list excludes the
+	// network and broadcast addresses, so accepting them here would create rows
+	// the page can never show.
+	for _, ip := range in.IPs {
+		if !IsUsableHost(cdr, ip) {
+			return nil, fmt.Errorf("%w: %s", ErrAddressOutsideSubnet, ip)
+		}
 	}
 
 	hosts, err := HostCount(cdr)
@@ -1126,6 +1244,7 @@ func (u *Usecase) UpdateSubnet(ctx context.Context, id model.ID, in SubnetInput)
 		return nil, err
 	}
 	subnet, _ := builtins.Get(ModelIPAMSubnet)
+	scope, hasScope := builtins.Get(ModelIPAMScope)
 	addressSet, _ := builtins.Get(ModelIPAMAddress)
 
 	instance, err := u.loadInstance(ctx, id)
@@ -1162,6 +1281,19 @@ func (u *Usecase) UpdateSubnet(ctx context.Context, id model.ID, in SubnetInput)
 	for k, v := range in.Values {
 		values[k] = v
 	}
+	// A PARTIAL UPDATE DOES NOT HAVE TO REPEAT THE NAME. The model's unique
+	// attribute identifies the row, and the write path resolves it before it
+	// writes; omitting it from a CIDR-only or scan-only update would otherwise
+	// be read as "no identifier" and refused.
+	if _, supplied := values[set.UniqueAttr.Name]; !supplied {
+		current, err := u.Get(ctx, id, []string{set.UniqueAttr.Name}, RetKeyName)
+		if err != nil {
+			return nil, err
+		}
+		if raw, ok := current.Values[set.UniqueAttr.Name]; ok {
+			values[set.UniqueAttr.Name] = raw
+		}
+	}
 	values[AttrCIDR] = normalized
 	if normalized != stored {
 		// THE CAPACITY IS RECOMPUTED WHEN THE RANGE CHANGES. cantor's update
@@ -1182,6 +1314,24 @@ func (u *Usecase) UpdateSubnet(ctx context.Context, id model.ID, in SubnetInput)
 		return nil, err
 	}
 
+	// THE PARENT IS THE ROW'S OWN when the caller names none. A CIDR-only
+	// update used to be validated as a root, so a child could take a range
+	// that collided with a sibling; the containment edge is the fact, and the
+	// caller's parent_id is only a check hint.
+	validateParent := in.ParentID
+	if validateParent == 0 {
+		parents, _, err := u.repo.WalkParents(ctx, []model.ID{id})
+		if err != nil {
+			return nil, err
+		}
+		for _, parent := range parents {
+			if parent.TypeID == subnet.Type.ID || (hasScope && parent.TypeID == scope.Type.ID) {
+				validateParent = parent.Node
+				break
+			}
+		}
+	}
+
 	spec := SubnetWrite{
 		WriteSpec: WriteSpec{
 			TypeRef: set.Type.Name, TypeID: set.Type.ID,
@@ -1193,7 +1343,7 @@ func (u *Usecase) UpdateSubnet(ctx context.Context, id model.ID, in SubnetInput)
 		},
 		CIDR:             normalized,
 		SubnetTypeID:     set.Type.ID,
-		ValidateParentID: in.ParentID,
+		ValidateParentID: validateParent,
 		Attrs: SubnetWriteAttrs{
 			CIDR:        attrIDOf(subnet, AttrCIDR),
 			HostsCount:  attrIDOf(subnet, AttrHostsCount),
@@ -1418,12 +1568,14 @@ func (u *Usecase) GetSubnet(ctx context.Context, id model.ID) (map[string]any, e
 
 // ScanReportInput is one scanner's report.
 type ScanReportInput struct {
-	ExecID string
-	CIDR   string
-	Stdout string
-	Status int
-	IPNum  int32
-	IPs    map[string]any
+	ExecID  string
+	CIDR    string
+	Stdout  string
+	Status  int
+	IPNum   int32
+	IPs     any
+	StartAt *time.Time
+	EndAt   *time.Time
 }
 
 // RecordScan stores a scanner's report.
@@ -1438,31 +1590,43 @@ func (u *Usecase) RecordScan(ctx context.Context, in ScanReportInput) error {
 	if in.ExecID == "" {
 		return fmt.Errorf("%w: exec_id", errs.ErrInvalid)
 	}
-	var ruleID model.ID
-	if in.CIDR != "" {
+	cdr := strings.TrimSpace(in.CIDR)
+	if cdr != "" {
+		normalized, err := ParseCIDR(cdr)
+		if err != nil {
+			return err
+		}
+		cdr = normalized
+	}
+	var ruleID, subnetID model.ID
+	if cdr != "" {
 		builtins, err := u.ResolveBuiltin(ctx, ModelIPAMSubnet)
 		if err != nil {
 			return err
 		}
 		subnet, _ := builtins.Get(ModelIPAMSubnet)
 		ids, err := u.instanceIDs(ctx, scopedQuery("_type", []model.ID{subnet.Type.ID},
-			AttrCIDR+":"+in.CIDR), nil, 1)
+			AttrCIDR+":"+cdr), nil, 1)
 		if err != nil {
 			return err
 		}
 		if len(ids) > 0 {
+			subnetID = ids[0]
 			rules, err := u.repo.SubnetScans(ctx, ids)
 			if err != nil {
 				return err
 			}
+			// THE HISTORY POINTS AT THE RULE ROW, not at the subnet. They are
+			// different ids, and an agent's scan is filed under the rule.
 			if rule, ok := rules[ids[0]]; ok {
-				ruleID = rule.SubnetID
+				ruleID = rule.ID
 			}
 		}
 	}
 	return u.repo.InsertScanHistory(ctx, ScanHistorySpec{
-		ScanRuleID: ruleID, ExecID: in.ExecID, CIDR: in.CIDR,
+		ScanRuleID: ruleID, SubnetID: subnetID, ExecID: in.ExecID, CIDR: cdr,
 		Status: in.Status, Stdout: in.Stdout, IPNum: in.IPNum, IPs: in.IPs,
+		StartAt: in.StartAt, EndAt: in.EndAt,
 	})
 }
 
@@ -1485,7 +1649,7 @@ type IPAMScanRecord struct {
 	Stdout string    `json:"stdout,omitempty"`
 	IPNum  *model.ID `json:"ip_num,omitempty"`
 
-	IPs map[string]any `json:"ips,omitempty"`
+	IPs any `json:"ips,omitempty"`
 
 	StartAt   string `json:"start_at,omitempty"`
 	EndAt     string `json:"end_at,omitempty"`
@@ -1496,6 +1660,19 @@ type IPAMScanRecord struct {
 type IPAMScanPage struct {
 	NumFound int64            `json:"numfound"`
 	Items    []IPAMScanRecord `json:"result"`
+}
+
+// decodeJSON returns a stored report payload in whichever shape the scanner
+// wrote: an object, a list, or nothing.
+func decodeJSON(raw string) any {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // IPAMScanHistory lists recorded scans, newest first.
@@ -1514,7 +1691,7 @@ func (u *Usecase) IPAMScanHistory(ctx context.Context, q IPAMScanQuery) (*IPAMSc
 	for _, row := range rows {
 		record := IPAMScanRecord{
 			ID: row.ID, ExecID: row.ExecID, CIDR: row.CIDR,
-			Status: row.Status, IPs: row.IPs, IPNum: row.IPNum,
+			Status: row.Status, IPs: decodeJSON(row.IPs), IPNum: row.IPNum,
 			CreatedAt: row.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 		if row.Stdout != nil {

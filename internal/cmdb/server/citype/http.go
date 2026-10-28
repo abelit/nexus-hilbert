@@ -309,8 +309,12 @@ func (h *Handler) ensureBuiltinModels(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// BOTH BUILT-IN FEATURES. The endpoint creates what is absent and binds
+	// missing attributes to existing models, so an installation that already
+	// has DCIM models gains the IPAM shape without them being touched.
+	models := append(cibiz.DCIMBuiltinModels(), cibiz.IPAMBuiltinModels()...)
 	got, err := h.uc.EnsureBuiltinModels(r.Context(), citypebiz.BuiltinEnsureInput{
-		Models: cibiz.DCIMBuiltinModels(),
+		Models: models,
 		Actor:  actor.UserID,
 	})
 	if err != nil {

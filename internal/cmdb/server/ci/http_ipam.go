@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -28,6 +29,7 @@ import (
 //	DELETE /v1/cmdb/ipam/subnets/{id}                    (any authed) — remove an empty range
 //	PUT    /v1/cmdb/ipam/subnets/{id}/move               (any authed) — re-parent a range
 //	POST   /v1/cmdb/ipam/scopes                          (any authed) — create a grouping
+//	PUT    /v1/cmdb/ipam/scopes/{id}                     (any authed) — rename a grouping
 //	DELETE /v1/cmdb/ipam/scopes/{id}                     (any authed) — remove an empty grouping
 //	GET    /v1/cmdb/ipam/addresses                       (any authed) — a range's addresses
 //	POST   /v1/cmdb/ipam/addresses                       (any authed) — assign or release
@@ -55,6 +57,7 @@ func (h *Handler) registerIPAM(r chi.Router) {
 	r.Put("/v1/cmdb/ipam/subnets/{id}/move", h.ipamMoveSubnet)
 
 	r.Post("/v1/cmdb/ipam/scopes", h.ipamCreateScope)
+	r.Put("/v1/cmdb/ipam/scopes/{id}", h.ipamUpdateScope)
 	r.Delete("/v1/cmdb/ipam/scopes/{id}", h.ipamDeleteScope)
 
 	r.Get("/v1/cmdb/ipam/addresses", h.ipamAddresses)
@@ -101,10 +104,16 @@ func (h *Handler) ipamSubnetHosts(w http.ResponseWriter, r *http.Request) {
 	// The list is returned as-is rather than wrapped: it is a RANGE's contents,
 	// and the caller asked for the range's addresses, not a page of them. The
 	// bound is reported so a truncated list cannot be mistaken for the whole
-	// range.
+	// range — and it is measured against the RANGE, not the ceiling, because a
+	// caller that asked for 512 hosts of a /16 got 512 of 65534.
+	hosts, err := cibiz.HostCount(q.Get("cidr"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"hosts":     got,
-		"truncated": len(got) >= cibiz.MaxSubnetHosts,
+		"truncated": int64(hosts) > int64(len(got)),
 	})
 }
 
@@ -191,7 +200,12 @@ func (h *Handler) ipamDeleteSubnet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if err := h.uc.DeleteSubnet(r.Context(), id); err != nil {
+	audit, err := actor(r, &instanceRequest{})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := h.uc.DeleteSubnet(r.Context(), id, audit); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -319,13 +333,52 @@ func (h *Handler) ipamCreateScope(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"ci_id": got.CIID})
 }
 
+// ipamUpdateScope renames a grouping.
+//
+// PUT /v1/cmdb/ipam/scopes/{id} (any authenticated caller)
+// Request: {"name": "..."}; the model's identifying attribute is updated.
+// Response: {"ci_id": id}. Operation history receives UPDATE_SCOPE with
+// "old -> new".
+func (h *Handler) ipamUpdateScope(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	body, err := decodeNodeBody(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	audit, err := actor(r, &instanceRequest{})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	name, _ := body["name"].(string)
+	if name == "" {
+		name = asString(body["scope_name"])
+	}
+	got, err := h.uc.UpdateIPScope(r.Context(), id, cibiz.IPScopeInput{Name: name, Audit: audit})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ci_id": got.CIID})
+}
+
 func (h *Handler) ipamDeleteScope(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	if err := h.uc.DeleteIPScope(r.Context(), id); err != nil {
+	audit, err := actor(r, &instanceRequest{})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := h.uc.DeleteIPScope(r.Context(), id, audit); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -368,24 +421,15 @@ func (h *Handler) ipamAddresses(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-// ipamAddressBody is the assignment body.
-type ipamAddressBody struct {
-	// IPs is a list, and a single string is accepted as a list of one because
-	// the console's form sends whichever the operator typed.
-	IPs []string `json:"ips"`
-
-	SubnetID model.ID `json:"subnet_id"`
-	ParentID model.ID `json:"parent_id"`
-	CIDR     string   `json:"cidr"`
-
-	// AssignStatus and IsUsed are pointers, because "not mentioned" and
-	// "explicitly zero" are different requests.
-	AssignStatus *int32 `json:"assign_status"`
-	IsUsed       *bool  `json:"is_used"`
-}
-
+// ipamAssignAddresses assigns, releases or annotates a batch of addresses.
+//
+// THE BODY IS READ AS A MAP because the address model is the deployment's:
+// cantor's dialog sends `usage`, `use_obj`, `mac_address`, `gateway`,
+// `subnet_mask` and `description`, and a struct here would drop every one of
+// them. The fields this module owns are consumed; everything else is passed to
+// the instance write path, which ignores attributes the model does not carry.
 func (h *Handler) ipamAssignAddresses(w http.ResponseWriter, r *http.Request) {
-	var body ipamAddressBody
+	var body map[string]any
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxWriteBody))
 	dec.UseNumber()
 	if err := dec.Decode(&body); err != nil {
@@ -396,32 +440,18 @@ func (h *Handler) ipamAssignAddresses(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errs.ErrInvalid)
 		return
 	}
-	if len(body.IPs) == 0 {
-		writeErr(w, fmt.Errorf("%w: ips", errs.ErrInvalid))
-		return
-	}
 	audit, err := actor(r, &instanceRequest{})
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 
-	// Values carries everything else the caller sent, which for this endpoint
-	// is nothing — the console's dialog sends the addresses and the state. The
-	// field exists because a deployment may have declared more attributes on
-	// its address model.
-	in := cibiz.AddressAssignInput{
-		SubnetID: body.SubnetID, CIDR: body.CIDR, IPs: body.IPs,
-		Values: map[string]any{}, Audit: audit,
+	in, err := addressAssignInput(body)
+	if err != nil {
+		writeErr(w, err)
+		return
 	}
-	if in.SubnetID == 0 {
-		in.SubnetID = body.ParentID
-	}
-	if body.AssignStatus != nil {
-		status := cibiz.AddressStatus(*body.AssignStatus)
-		in.Status = &status
-	}
-	in.IsUsed = body.IsUsed
+	in.Audit = audit
 
 	got, err := h.uc.AssignAddresses(r.Context(), in)
 	if err != nil {
@@ -522,14 +552,115 @@ func (h *Handler) ipamRecordScan(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(asString(body["ip_num"])); err == nil {
 		in.IPNum = int32(n)
 	}
-	if ips, ok := body["ips"].(map[string]any); ok {
+	if ips, ok := body["ips"]; ok {
+		// A scanner may report a map OR a list; both are the report, and
+		// keeping either is more useful than dropping the shape this build did
+		// not expect.
 		in.IPs = ips
 	}
+	in.StartAt = parseTimeValue(body["start_at"])
+	in.EndAt = parseTimeValue(body["end_at"])
 	if err := h.uc.RecordScan(r.Context(), in); err != nil {
 		writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"code": 200})
+}
+
+// parseTimeValue accepts the two spellings a scanner has sent: RFC3339 and the
+// database's own "YYYY-MM-DD HH:MM:SS".
+func parseTimeValue(raw any) *time.Time {
+	text := strings.TrimSpace(asString(raw))
+	if text == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		if got, err := time.Parse(layout, text); err == nil {
+			return &got
+		}
+	}
+	return nil
+}
+
+// addressAssignInput separates the fields the IPAM module owns from the
+// attributes the address model owns. The caller's other keys travel as values;
+// the instance write path drops those the model does not declare.
+func addressAssignInput(body map[string]any) (cibiz.AddressAssignInput, error) {
+	in := cibiz.AddressAssignInput{
+		SubnetID: idValue(body["subnet_id"]), CIDR: asString(body["cidr"]),
+		IPs: ipList(body["ips"]), Values: map[string]any{},
+	}
+	if in.SubnetID == 0 {
+		in.SubnetID = idValue(body["parent_id"])
+	}
+	if len(in.IPs) == 0 {
+		return in, fmt.Errorf("%w: ips", errs.ErrInvalid)
+	}
+	if raw, ok := body["assign_status"]; ok && raw != nil {
+		n, err := strconv.Atoi(asString(raw))
+		if err != nil {
+			return in, fmt.Errorf("%w: assign_status", errs.ErrInvalid)
+		}
+		status := cibiz.AddressStatus(n)
+		in.Status = &status
+	}
+	if raw, ok := body["is_used"]; ok && raw != nil {
+		used := truthy(raw)
+		in.IsUsed = &used
+	}
+	for key, value := range body {
+		switch key {
+		case "ips", "subnet_id", "parent_id", "cidr", "assign_status", "is_used":
+			continue
+		}
+		in.Values[key] = value
+	}
+	return in, nil
+}
+
+// idValue reads a model id from a decoded JSON value.
+func idValue(raw any) model.ID {
+	switch v := raw.(type) {
+	case nil:
+		return 0
+	case json.Number:
+		n, _ := v.Int64()
+		return model.ID(n)
+	case float64:
+		return model.ID(v)
+	case string:
+		n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return model.ID(n)
+	default:
+		return 0
+	}
+}
+
+// ipList accepts the list shapes cantor's forms have sent: an array, one
+// address, or a comma/space separated string. The order is the caller's and
+// duplicates are kept, because the assignment path reports one result per
+// entry it was given.
+func ipList(raw any) []string {
+	var items []string
+	switch v := raw.(type) {
+	case string:
+		items = strings.FieldsFunc(v, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
+		})
+	case []any:
+		for _, item := range v {
+			items = append(items, asString(item))
+		}
+	case []string:
+		items = v
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // asString renders a JSON value for a text field, tolerating the number a

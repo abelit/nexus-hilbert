@@ -212,6 +212,25 @@ func lastAddr(prefix netip.Prefix) netip.Addr {
 	return netip.AddrFrom4(b)
 }
 
+// IsUsableHost reports whether an address is one a range can hand out: inside
+// it, and neither its network nor its broadcast address. A /31 and /32 have no
+// reserved pair, matching Hosts.
+func IsUsableHost(cidr, raw string) bool {
+	prefix, err := netip.ParsePrefix(trimSpace(cidr))
+	if err != nil {
+		return false
+	}
+	prefix = prefix.Masked()
+	addr, err := netip.ParseAddr(trimSpace(raw))
+	if err != nil || !prefix.Contains(addr) {
+		return false
+	}
+	if 32-prefix.Bits() <= 1 {
+		return true
+	}
+	return addr != prefix.Addr() && addr != lastAddr(prefix)
+}
+
 // ContainsAddress reports whether a range holds one address.
 func (r SubnetRange) ContainsAddress(raw string) bool {
 	addr, err := netip.ParseAddr(trimSpace(raw))

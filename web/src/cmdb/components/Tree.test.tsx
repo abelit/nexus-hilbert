@@ -116,6 +116,32 @@ describe('the keyboard', () => {
   });
 });
 
+describe('row ornaments', () => {
+  it('draws an icon and an action, and the action does not also select the node', async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <Tree
+        nodes={[
+          {
+            id: 'a',
+            label: 'a',
+            icon: <span data-testid="icon">i</span>,
+            actions: <button type="button">menu</button>,
+          },
+        ]}
+        label="tree"
+        onSelect={onSelect}
+      />,
+    );
+    expect(screen.getByTestId('icon')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'menu' }));
+    expect(onSelect).not.toHaveBeenCalled();
+    await user.click(screen.getByText('a'));
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+  });
+});
+
 describe('empty', () => {
   it('says so rather than drawing an empty box', () => {
     render(<Tree nodes={[]} label="tree" empty="还没有节点" />);

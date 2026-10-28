@@ -55,6 +55,48 @@ func writeCITx(tx *gorm.DB, in cibiz.WriteSpec) (cibiz.WriteResult, error) {
 		return result, err
 	}
 
+	// AN UPDATE NAMES THE ROW, NOT JUST ITS IDENTIFIER. A rename changes the
+	// unique value, so looking the row up by that value would miss it and
+	// create a second instance — while the one the caller meant stayed behind
+	// with its old name. ValidatingID is the row the caller is updating, and is
+	// set by the paths that know it (a subnet's own write).
+	if in.ValidatingID != 0 {
+		var ci cimodel.CI
+		if err := tx.Where("delete_marker = 0").First(&ci, in.ValidatingID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return result, fmt.Errorf("%w: instance %d", cibiz.ErrNotFound, in.ValidatingID)
+			}
+			return result, fmt.Errorf("load the instance being updated: %w", err)
+		}
+		if ci.TypeID != in.TypeID {
+			return result, fmt.Errorf("%w: instance %d belongs to model %d",
+				cibiz.ErrAlreadyExists, ci.ID, ci.TypeID)
+		}
+		// The new identifier must not already name another row. The database
+		// carries no unique index for this, so the check belongs here, under
+		// the model row lock.
+		other, err := findCIByUnique(tx, in.TypeID, in.UniqueAttrID, in.Specs, in.UniqueValue)
+		if err != nil {
+			return result, err
+		}
+		if other != nil && other.ID != ci.ID {
+			return result, fmt.Errorf("%w: %v", cibiz.ErrAlreadyExists, in.UniqueValue)
+		}
+		changes, err := applyValues(tx, ci.ID, in.TypeID, in.Specs, in.Values, in.Audit)
+		if err != nil {
+			return result, err
+		}
+		if in.MarkAutoDiscovery {
+			if err := tx.Model(&cimodel.CI{}).Where("id = ?", ci.ID).Update("a", true).Error; err != nil {
+				return result, fmt.Errorf("mark discovered instance: %w", err)
+			}
+		}
+		if err := writeRelationSpecsTx(tx, ci.ID, in); err != nil {
+			return result, err
+		}
+		return cibiz.WriteResult{CIID: ci.ID, Created: false, Changes: changes}, nil
+	}
+
 	existing, err := findCIByUnique(tx, in.TypeID, in.UniqueAttrID, in.Specs, in.UniqueValue)
 	if err != nil {
 		return result, err

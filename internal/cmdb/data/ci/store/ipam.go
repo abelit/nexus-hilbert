@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -32,6 +34,7 @@ func (r *Repo) SubnetScans(ctx context.Context, subnetIDs []model.ID) (map[model
 	}
 	for _, row := range rows {
 		out[row.CIID] = cibiz.ScanRule{
+			ID:            row.ID,
 			SubnetID:      row.CIID,
 			ScanEnabled:   row.ScanEnabled,
 			AgentID:       derefString(row.AgentID),
@@ -99,22 +102,77 @@ func (r *Repo) DeleteSubnetScan(ctx context.Context, subnetID model.ID) error {
 
 // InsertScanHistory records one scan's outcome.
 func (r *Repo) InsertScanHistory(ctx context.Context, in cibiz.ScanHistorySpec) error {
-	row := cimodel.IPAMSubnetScanHistory{
-		ExecID: nullableString(in.ExecID),
-		CIDR:   nullableString(in.CIDR),
-		Status: in.Status,
-		Stdout: nullableString(in.Stdout),
-		IPs:    in.IPs,
-	}
-	if in.ScanRuleID != 0 {
-		row.SubnetScanID = &in.ScanRuleID
-	}
-	if in.IPNum > 0 {
-		n := model.ID(in.IPNum)
-		row.IPNum = &n
-	}
-	row.StartAt, row.EndAt = in.StartAt, in.EndAt
-	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		apply := func(row *cimodel.IPAMSubnetScanHistory) {
+			row.ExecID = nullableString(in.ExecID)
+			row.CIDR = nullableString(in.CIDR)
+			row.Status = in.Status
+			row.Stdout = nullableString(in.Stdout)
+			row.IPs = jsonText(in.IPs)
+			row.StartAt, row.EndAt = in.StartAt, in.EndAt
+			if in.ScanRuleID != 0 {
+				id := in.ScanRuleID
+				row.SubnetScanID = &id
+			}
+			if in.IPNum > 0 {
+				n := model.ID(in.IPNum)
+				row.IPNum = &n
+			}
+		}
+
+		// A SCAN IS ONE EXECUTION. Agents retry, and a second report of the
+		// same exec_id is the same scan, not another one.
+		var row cimodel.IPAMSubnetScanHistory
+		findErr := tx.Where("exec_id = ?", in.ExecID).Order("id").First(&row).Error
+		switch {
+		case findErr == nil:
+			apply(&row)
+			if err := tx.Save(&row).Error; err != nil {
+				return fmt.Errorf("update scan history: %w", err)
+			}
+		case errors.Is(findErr, gorm.ErrRecordNotFound):
+			apply(&row)
+			if err := tx.Create(&row).Error; err != nil {
+				return fmt.Errorf("record scan: %w", err)
+			}
+		default:
+			return fmt.Errorf("find scan history: %w", findErr)
+		}
+
+		// THE RULE REMEMBERS WHEN IT LAST RAN. Nothing else wrote this column,
+		// so every overview row reported "never scanned".
+		if in.SubnetID != 0 {
+			stamp := in.StartAt
+			if stamp == nil {
+				now := time.Now()
+				stamp = &now
+			}
+			if err := tx.Model(&cimodel.IPAMSubnetScan{}).
+				Where("ci_id = ? AND delete_marker = 0", in.SubnetID).
+				Update("last_scan_time", stamp).Error; err != nil {
+				return fmt.Errorf("stamp the scan rule: %w", err)
+			}
+		}
+
+		// KEEP THE MOST RECENT 100 PER RULE. Scan history is a diagnostic log;
+		// an agent reporting every five minutes would otherwise grow it without
+		// bound.
+		if in.ScanRuleID != 0 {
+			var stale []model.ID
+			if err := tx.Model(&cimodel.IPAMSubnetScanHistory{}).
+				Where("subnet_scan_id = ?", in.ScanRuleID).
+				Order("id DESC").Offset(100).Limit(1000).Pluck("id", &stale).Error; err != nil {
+				return fmt.Errorf("trim scan history: %w", err)
+			}
+			if len(stale) > 0 {
+				if err := tx.Where("id IN ?", stale).Delete(&cimodel.IPAMSubnetScanHistory{}).Error; err != nil {
+					return fmt.Errorf("trim scan history: %w", err)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("cmdb ci: record scan: %w", err)
 	}
 	return nil
@@ -124,7 +182,7 @@ func (r *Repo) InsertScanHistory(ctx context.Context, in cibiz.ScanHistorySpec) 
 func (r *Repo) ScanHistories(ctx context.Context, f cibiz.ScanHistoryFilter) ([]cimodel.IPAMSubnetScanHistory, int64, error) {
 	q := r.db.WithContext(ctx).Model(&cimodel.IPAMSubnetScanHistory{})
 	if f.CIDR != "" {
-		q = q.Where("cidr = ?", f.CIDR)
+		q = filterCIDR(q, f.CIDR)
 	}
 	if f.ExecID != "" {
 		q = q.Where("exec_id = ?", f.ExecID)
@@ -144,7 +202,7 @@ func (r *Repo) ScanHistories(ctx context.Context, f cibiz.ScanHistoryFilter) ([]
 func (r *Repo) IPAMHistory(ctx context.Context, f cibiz.IPAMHistoryFilter) ([]cimodel.IPAMOperationHistory, int64, error) {
 	q := r.db.WithContext(ctx).Model(&cimodel.IPAMOperationHistory{})
 	if f.CIDR != "" {
-		q = q.Where("cidr = ?", f.CIDR)
+		q = filterCIDR(q, f.CIDR)
 	}
 	if len(f.OperateTypes) > 0 {
 		q = q.Where("operate_type IN ?", f.OperateTypes)
@@ -158,6 +216,37 @@ func (r *Repo) IPAMHistory(ctx context.Context, f cibiz.IPAMHistoryFilter) ([]ci
 		return nil, 0, fmt.Errorf("cmdb ci: ipam history: %w", err)
 	}
 	return rows, total, nil
+}
+
+// filterCIDR matches a range exactly, or as a contains pattern when the caller
+// wrote one with `*` — cantor's history box sends `*term*`. `!` is the escape
+// character because MySQL and SQLite both accept it and neither treats a
+// backslash the same way.
+func filterCIDR(q *gorm.DB, raw string) *gorm.DB {
+	text := strings.TrimSpace(raw)
+	if !strings.Contains(text, "*") {
+		return q.Where("cidr = ?", text)
+	}
+	pattern := strings.NewReplacer(
+		"!", "!!",
+		"%", "!%",
+		"_", "!_",
+		"*", "%",
+	).Replace(text)
+	return q.Where("cidr LIKE ? ESCAPE '!'", pattern)
+}
+
+// jsonText stores a scanner's report payload as it arrived. A nil payload is
+// the empty column, not the four bytes "null".
+func jsonText(value any) string {
+	if value == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func derefString(s *string) string {

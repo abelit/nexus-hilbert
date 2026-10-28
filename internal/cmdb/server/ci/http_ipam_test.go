@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
@@ -101,34 +102,66 @@ func TestSubnetBodyConsumesTheScanFields(t *testing.T) {
 // The assignment body distinguishes "not mentioned" from "explicitly zero", for
 // both the status and the in-use flag.
 func TestAddressBodyDistinguishesAbsentFromZero(t *testing.T) {
-	decode := func(body string) (ipamAddressBody, error) {
+	decode := func(body string) (cibiz.AddressAssignInput, error) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/cmdb/ipam/addresses", strings.NewReader(body))
-		var got ipamAddressBody
-		if err := jsonDecode(req, &got); err != nil {
-			return got, err
+		var raw map[string]any
+		if err := jsonDecode(req, &raw); err != nil {
+			return cibiz.AddressAssignInput{}, err
 		}
-		return got, nil
+		return addressAssignInput(raw)
 	}
 
 	absent, err := decode(`{"ips":["10.0.0.1"],"subnet_id":3}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if absent.AssignStatus != nil || absent.IsUsed != nil {
+	if absent.Status != nil || absent.IsUsed != nil {
 		t.Fatalf("absent fields decoded as set: %+v", absent)
 	}
 	given, err := decode(`{"ips":["10.0.0.1"],"subnet_id":3,"assign_status":0,"is_used":false}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if given.AssignStatus == nil || *given.AssignStatus != 0 {
-		t.Fatalf("an explicit zero was lost: %+v", given.AssignStatus)
+	if given.Status == nil || *given.Status != cibiz.AddressAssigned {
+		t.Fatalf("an explicit zero was lost: %+v", given.Status)
 	}
 	if given.IsUsed == nil || *given.IsUsed {
 		t.Fatalf("an explicit false was lost: %+v", given.IsUsed)
 	}
 	if len(given.IPs) != 1 || given.IPs[0] != "10.0.0.1" || given.SubnetID != 3 {
 		t.Fatalf("decoded %+v", given)
+	}
+}
+
+// THE ADDRESS MODEL'S OWN FIELDS REACH THE WRITE PATH. The handler used to
+// pass an empty Values map, so usage/use_obj/MAC/gateway/mask/description sent
+// by the editor were silently discarded.
+func TestAddressBodyCarriesModelAttributes(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/cmdb/ipam/addresses", strings.NewReader(
+		`{"ips":"10.0.0.1, 10.0.0.2","parent_id":"7","assign_status":"0",`+
+			`"usage":"web","use_obj":"server","mac_address":"aa:bb:cc:dd:ee:ff",`+
+			`"gateway":"10.0.0.1","subnet_mask":"255.255.255.0","description":"edge"}`))
+	var raw map[string]any
+	if err := jsonDecode(req, &raw); err != nil {
+		t.Fatal(err)
+	}
+	got, err := addressAssignInput(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.IPs) != 2 || got.IPs[1] != "10.0.0.2" {
+		t.Fatalf("ips = %v", got.IPs)
+	}
+	if got.SubnetID != 7 {
+		t.Fatalf("subnet = %d, want the parent_id 7", got.SubnetID)
+	}
+	for key, want := range map[string]string{
+		"usage": "web", "use_obj": "server", "mac_address": "aa:bb:cc:dd:ee:ff",
+		"gateway": "10.0.0.1", "subnet_mask": "255.255.255.0", "description": "edge",
+	} {
+		if got.Values[key] != want {
+			t.Fatalf("Values[%q] = %v, want %q", key, got.Values[key], want)
+		}
 	}
 }
 

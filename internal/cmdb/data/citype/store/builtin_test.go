@@ -156,3 +156,36 @@ func containsString(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// The IPAM bootstrap creates the models and attributes the IPAM feature
+// resolves — including the console's `name` contract and the address fields
+// the editor writes. A model created without them answers "unknown attribute"
+// on the first save.
+func TestEnsuredModelsResolveForIPAM(t *testing.T) {
+	uc := newBuiltinUsecase(t)
+	ctx := context.Background()
+	if _, err := uc.EnsureBuiltinModels(ctx, citypebiz.BuiltinEnsureInput{
+		Models: cibiz.IPAMBuiltinModels(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := citypebiz.NewCIResolver(uc)
+	for _, spec := range cibiz.IPAMBuiltinModels() {
+		set, err := resolver.ResolveForCI(ctx, spec.Name)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", spec.Name, err)
+		}
+		if set == nil {
+			t.Fatalf("%s was created but does not resolve", spec.Name)
+		}
+		if set.UniqueAttr.Name != spec.UniqueKey {
+			t.Fatalf("%s identifies by %q, want %q", spec.Name, set.UniqueAttr.Name, spec.UniqueKey)
+		}
+		for _, attr := range spec.Attributes {
+			if _, ok := set.ByName[attr.Name]; !ok {
+				t.Fatalf("%s does not carry %s", spec.Name, attr.Name)
+			}
+		}
+	}
+}

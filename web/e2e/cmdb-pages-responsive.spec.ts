@@ -477,6 +477,39 @@ const TOPOLOGY_VIEW = {
   central_node_instances: 'hostname:web*', path: { '1': [2] }, order: 1,
 };
 const TOPOLOGY_GROUP = { id: 1, name: '网络', order: 1, views: [TOPOLOGY_VIEW] };
+const IPAM_SCOPE = {
+  _id: 1, _type: 11, ci_type: 'ipam_scope', ci_type_alias: '地址分组', name: '生产网',
+  children: [{
+    _id: 2, _type: 12, ci_type: 'ipam_subnet', ci_type_alias: '子网',
+    name: '办公网段', cidr: '10.0.0.0/24', children: [],
+  }],
+};
+const IPAM_TREE = { result: [IPAM_SCOPE], type2name: { '11': 'name', '12': 'name' } };
+const IPAM_SUMMARY = {
+  subnet_num: 1, address_num: 254, address_free_num: 250, address_assign_num: 4,
+  address_unassign_num: 250, address_used_num: 2, address_used_free_num: 252,
+  subnets: [{
+    _id: 2, _type: 12, ci_type: 'ipam_subnet', ci_type_alias: '子网',
+    name: '办公网段', cidr: '10.0.0.0/24', hosts_count: 254, assign_count: 4,
+    used_count: 2, free_count: 250, scan_enabled: true, last_scan_time: '2026-10-18 03:00:00',
+  }],
+};
+const IPAM_HOSTS = Array.from({ length: 254 }, (_, index) => `10.0.0.${index + 1}`);
+const IPAM_ADDRESSES = {
+  numfound: 2, total: 2, page: 1, counter: {},
+  result: [
+    { _id: 21, _type: 13, ci_id: 21, ci_type: 'ipam_address', ci_type_alias: '地址', ip: '10.0.0.11', assign_status: 0, is_used: 1, name: '10.0.0.11', usage: 'web', use_obj: '服务器', mac_address: 'aa:bb:cc:dd:ee:ff' },
+    { _id: 22, _type: 13, ci_id: 22, ci_type: 'ipam_address', ci_type_alias: '地址', ip: '10.0.0.12', assign_status: 1, is_used: 0, name: '10.0.0.12' },
+  ],
+};
+const IPAM_OPERATIONS = {
+  numfound: 1,
+  result: [{ _id: 9, cidr: '10.0.0.0/24', uid: 7, operate_type: '6', description: '10.0.0.11', created_at: '2026-10-18 09:00:00' }],
+};
+const IPAM_SCANS = {
+  numfound: 1,
+  result: [{ _id: 5, exec_id: 'abc123', cidr: '10.0.0.0/24', status: 0, ip_num: 2, stdout: '2 hosts up', start_at: '2026-10-18 03:00:00', end_at: '2026-10-18 03:00:11', created_at: '2026-10-18 03:00:00' }],
+};
 const POOL_ENTRY = {
   id: 1, type_id: 1, adt_id: 5, unique_value: 'i-1',
   instance: { hostname: 'i-1', cpu: 4 }, oneagent_id: 'agent-1', oneagent_name: 'agent one',
@@ -501,6 +534,7 @@ const PAGES: PageCase[] = [
   { path: '/cmdb/relations', heading: '模型关系', headingEn: 'Model relations', name: 'relations' },
   { path: '/cmdb/batch', heading: '批量导入', headingEn: 'Batch import', name: 'batch-import' },
   { path: '/cmdb/service-tree', heading: '服务树', headingEn: 'Service tree', name: 'relation-views' },
+  { path: '/cmdb/ipam', heading: 'IP 地址空间', headingEn: 'IP address space', name: 'ipam' },
 ];
 
 async function mockAPI(page: import('@playwright/test').Page) {
@@ -515,6 +549,57 @@ async function mockAPI(page: import('@playwright/test').Page) {
         return;
       case '/api/v1/cmdb/ci-types':
         await route.fulfill({ json: { items: [HOST], total: 1 } });
+        return;
+      case '/api/v1/cmdb/ci-types/ipam_subnet':
+        await route.fulfill({ json: { id: 12, name: 'ipam_subnet', alias: '子网', enabled: true } });
+        return;
+      case '/api/v1/cmdb/ci-types/ipam_address':
+        await route.fulfill({ json: { id: 13, name: 'ipam_address', alias: 'IP地址', enabled: true } });
+        return;
+      case '/api/v1/cmdb/ci-types/ipam_address/attributes':
+        await route.fulfill({ json: {
+          type_id: 13, unique_id: 118, unique: 'ip',
+          attributes: [
+            {
+              id: 1, name: 'use_obj', alias: '使用对象', is_choice: true,
+              choice_value: [
+                { value: '服务器', option: { label: '服务器' } },
+                { value: '交换机', option: { label: '交换机' } },
+              ],
+            },
+            { id: 2, name: 'usage', alias: '用途', is_choice: false },
+            { id: 3, name: 'description', alias: '描述', is_choice: false },
+            { id: 4, name: 'mac_address', alias: 'MAC地址', is_choice: false },
+            { id: 5, name: 'gateway', alias: '网关', is_choice: false },
+            { id: 6, name: 'subnet_mask', alias: '子网掩码', is_choice: false },
+          ],
+        } });
+        return;
+      case '/api/v1/cmdb/ipam/tree-view':
+        await route.fulfill({ json: IPAM_TREE });
+        return;
+      case '/api/v1/cmdb/ipam/stats':
+        await route.fulfill({ json: IPAM_SUMMARY });
+        return;
+      case '/api/v1/cmdb/ipam/addresses':
+        await route.fulfill({ json: IPAM_ADDRESSES });
+        return;
+      case '/api/v1/cmdb/ipam/subnets/hosts':
+        await route.fulfill({ json: { hosts: IPAM_HOSTS, truncated: false } });
+        return;
+      case '/api/v1/cmdb/ipam/subnets/2':
+        await route.fulfill({ json: {
+          ...IPAM_SUMMARY.subnets[0], scan_enabled: true, agent_id: '0x0000', cron: '0 3 * * *',
+        } });
+        return;
+      case '/api/v1/cmdb/ipam/history/operations':
+        await route.fulfill({ json: IPAM_OPERATIONS });
+        return;
+      case '/api/v1/cmdb/ipam/history/scans':
+        await route.fulfill({ json: IPAM_SCANS });
+        return;
+      case '/api/v1/cmdb/ci/s':
+        await route.fulfill({ json: { numfound: 0, total: 0, page: 1, result: [] } });
         return;
       case '/api/v1/cmdb/discovery/rules':
         await route.fulfill({ json: { items: [RULE], total: 1 } });
@@ -1032,6 +1117,130 @@ test('resource data searches the whole model on the server', async ({ page }, te
   await expect(page.getByText(/命中 1 条/)).toHaveCount(0);
 });
 
+test('the new relation form defines both sides, a constraint and attribute associations', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+  const DISK = { ...HOST, id: 2, name: 'disk', alias: '磁盘', order: 1, unique_key: 'sn' };
+  const attr = (id: number, name: string, alias: string) => ({
+    id, name, alias, value_type: '2', is_list: false, is_choice: false, is_unique: false,
+    is_index: true, is_indexed: true, is_password: false, is_bool: false, is_reference: false,
+    is_sortable: false, is_computed: false, is_required: false, order: id,
+    default_show: true, inherited: false,
+  });
+  let posted: unknown = null;
+  await page.route('**/api/v1/cmdb/ci-types', (route) =>
+    route.fulfill({ json: { items: [HOST, DISK], total: 2 } }),
+  );
+  await page.route('**/api/v1/cmdb/ci-types/1/attributes', (route) =>
+    route.fulfill({ json: { type_id: 1, unique_id: 10, unique: 'hostname', attributes: [attr(10, 'hostname', '主机名')] } }),
+  );
+  await page.route('**/api/v1/cmdb/ci-types/2/attributes', (route) =>
+    route.fulfill({ json: { type_id: 2, unique_id: 20, unique: 'sn', attributes: [attr(20, 'sn', '序列号')] } }),
+  );
+  await page.route('**/api/v1/cmdb/relation-types', (route) =>
+    route.fulfill({ json: { items: [{ id: 5, name: '包含', color: '#6366f1' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/cmdb/ci-types/1/relation-children/2', async (route) => {
+    posted = route.request().postDataJSON();
+    return route.fulfill({ json: { ctr_id: 1 } });
+  });
+
+  await page.goto('/cmdb/relations');
+  await page.getByRole('button', { name: '新增关系' }).click();
+  const dialog = page.getByRole('dialog', { name: '新增关系' });
+  await expect(dialog).toBeVisible();
+  for (const label of ['源 CI 类型', '目标 CI 类型', '关联类型', '关系约束', '属性关联']) {
+    await expect(dialog.getByText(label, { exact: true }).first()).toBeVisible();
+  }
+
+  await dialog.getByRole('combobox', { name: '源 CI 类型' }).click();
+  await page.getByRole('option', { name: '主机' }).click();
+  await dialog.getByRole('combobox', { name: '目标 CI 类型' }).click();
+  await page.getByRole('option', { name: '磁盘' }).click();
+  await dialog.getByRole('combobox', { name: '关联类型' }).click();
+  await page.getByRole('option', { name: '包含' }).click();
+  await expect(dialog.getByRole('combobox', { name: '关系约束' })).toHaveText('一对多');
+
+  // One mapping row is present from the start; both sides are combinable.
+  const sourceAttr = dialog.getByRole('combobox', { name: '源属性 1' });
+  await expect(sourceAttr).toBeEnabled();
+  await sourceAttr.click();
+  await page.getByRole('option', { name: '主机名（hostname）' }).click();
+  await dialog.getByRole('combobox', { name: '目标属性 1' }).click();
+  await page.getByRole('option', { name: '序列号（sn）' }).click();
+
+  // Add and remove a second association; the first one survives.
+  await dialog.getByRole('button', { name: '添加属性关联' }).first().click();
+  await expect(dialog.getByRole('combobox', { name: '源属性 2' })).toBeVisible();
+  await dialog.getByRole('button', { name: '删除第 2 条属性关联' }).click();
+  await expect(dialog.getByRole('combobox', { name: '源属性 2' })).toHaveCount(0);
+  await expect(dialog.getByRole('combobox', { name: '源属性 1' })).toHaveText('主机名（hostname）');
+  await page.screenshot({ path: testInfo.outputPath('relation-create-form-1440-light-zh-CN.png') });
+
+  await dialog.getByRole('button', { name: '保存' }).click();
+  await expect.poll(() => posted).toEqual({
+    relation_type_id: 5,
+    constraint: '0',
+    parent_attr_ids: [10],
+    child_attr_ids: [20],
+  });
+});
+
+test('the relation table shows model icons and the attribute association', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+  const DISK = { ...HOST, id: 2, name: 'disk', alias: '磁盘', order: 1, unique_key: 'sn' };
+  const attr = (id: number, name: string, alias: string) => ({
+    id, name, alias, value_type: '2', is_list: false, is_choice: false, is_unique: false,
+    is_index: true, is_indexed: true, is_password: false, is_bool: false, is_reference: false,
+    is_sortable: false, is_computed: false, is_required: false, order: id,
+    default_show: true, inherited: false,
+  });
+  const edge = (type: typeof HOST, attributes: unknown[]) => ({
+    ctr_id: 11, type, attributes,
+    relation_type: { id: 5, name: '包含', color: '#6366f1' },
+    constraint: '0',
+    parent_attr_ids: [10],
+    child_attr_ids: [20],
+  });
+  await page.route('**/api/v1/cmdb/ci-type-relations', (route) =>
+    route.fulfill({
+      json: { items: [{
+        id: 11,
+        parent: edge(HOST, [attr(10, 'hostname', '主机名')]),
+        child: edge(DISK, [attr(20, 'sn', '序列号')]),
+      }], total: 1 },
+    }),
+  );
+
+  await page.goto('/cmdb/relations');
+  await expect(page.getByRole('columnheader', { name: '源 CI 类型' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '属性关联' })).toBeVisible();
+  const source = page.getByRole('link', { name: '主机' });
+  await expect(source).toBeVisible();
+  await expect(source.locator('svg')).toBeVisible();
+  await expect(page.getByRole('link', { name: '磁盘' })).toBeVisible();
+  await expect(page.getByText('主机名 → 序列号')).toBeVisible();
+  await expect(page.getByRole('button', { name: '删除 host → disk' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('relations-table-1440-light-zh-CN.png') });
+});
+
 test('resource data hides the rail and uses the model Select on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
@@ -1538,6 +1747,88 @@ for (const width of ATTRIBUTE_WIDTHS) {
     }
   }
 }
+
+test('IPAM workspace: merge, filter, edit, history', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+
+  await page.goto('/cmdb/ipam?tab=address&node=2');
+  await expect(page.getByRole('heading', { name: 'IP 地址空间' })).toBeVisible();
+
+  const tree = page.getByRole('tree');
+  await expect(tree.getByText('办公网段')).toBeVisible();
+  // Both the group and the range show their host count.
+  await expect(tree.getByText('254').first()).toBeVisible();
+
+  // The whole range is shown: a host nobody registered is still a row.
+  await expect(page.getByText('10.0.0.11', { exact: true })).toBeVisible();
+  await expect(page.getByText('10.0.0.13', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /未使用 \(253\)/ })).toBeVisible();
+
+  await page.screenshot({ path: testInfo.outputPath('ipam-address-1440-light-zh.png') });
+
+  // The table scrolls in its own container, never the page.
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+
+  await page.getByRole('button', { name: '网格视图' }).click();
+  await expect(page.getByRole('button', { name: '10.0.0.11', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '表格视图' }).click();
+
+  // A plain row click opens the editor seeded from that row.
+  await page.getByText('10.0.0.11', { exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('已选择 1 个 IP')).toBeVisible();
+  await expect(dialog.getByLabel('用途')).toHaveValue('web');
+  await dialog.getByRole('button', { name: '取消' }).click();
+
+  await page.getByRole('tab', { name: '历史' }).click();
+  await expect(page.getByText('分配地址')).toBeVisible();
+  await expect(page.getByRole('table').getByText('运维')).toBeVisible();
+  await page.getByRole('tab', { name: '扫描日志' }).click();
+  await page.getByRole('button', { name: '查看扫描结果' }).click();
+  await expect(page.getByText('2 hosts up')).toBeVisible();
+});
+
+test('IPAM address table stays inside the page at phone width', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'dark');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+
+  await page.goto('/cmdb/ipam?tab=address&node=2');
+  await expect(page.getByText('10.0.0.11', { exact: true })).toBeVisible();
+  const metrics = await page.evaluate(() => {
+    const table = document.querySelector('table');
+    const scroller = table?.parentElement;
+    return {
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      tableOverflow: scroller ? scroller.scrollWidth - scroller.clientWidth : 0,
+      actionPosition: table ? getComputedStyle(table.querySelector('td.sticky') ?? table).position : '',
+    };
+  });
+  // The page does not widen; the table scrolls inside its card. Below `sm` the
+  // action column is static so it cannot cover the only visible data column.
+  expect(metrics.pageOverflow).toBeLessThanOrEqual(1);
+  expect(metrics.tableOverflow).toBeGreaterThan(0);
+  expect(metrics.actionPosition).toBe('static');
+});
 
 for (const pageDef of PAGES) {
   const widths = [390, 768, 1280, 1920];

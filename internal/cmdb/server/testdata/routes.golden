@@ -160,6 +160,7 @@ PUT /v1/cmdb/discovery/rules/{ref}/accounts
 PUT /v1/cmdb/discovery/targets/{id}
 PUT /v1/cmdb/instances
 PUT /v1/cmdb/instances/{id}
+PUT /v1/cmdb/ipam/scopes/{id}
 PUT /v1/cmdb/ipam/subnets/{id}
 PUT /v1/cmdb/ipam/subnets/{id}/move
 PUT /v1/cmdb/model-groups/order

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -40,13 +41,17 @@ var ipamTypes = []ipamTypeSpec{
 		name: "ipam_subnet", alias: "subnet", unique: 3,
 		attrs: []model.ID{3, 2, 4, 5, 6, 7},
 	},
-	{name: "ipam_address", alias: "address", unique: 8, attrs: []model.ID{8, 9, 10}},
+	{
+		name: "ipam_address", alias: "address", unique: 8,
+		attrs: []model.ID{8, 9, 10, 11, 12, 13, 14, 15, 16},
+	},
 }
 
 var ipamAttrNames = map[model.ID]string{
 	1: "scope_name", 2: "cidr", 3: "subnet_name",
 	4: "hosts_count", 5: "assign_count", 6: "used_count", 7: "free_count",
 	8: "ip", 9: "assign_status", 10: "is_used",
+	11: "name", 12: "description", 13: "usage", 14: "use_obj", 15: "mac_address", 16: "gateway",
 }
 
 // ipamResolver answers the model side from the fixture's tables.
@@ -130,7 +135,7 @@ func newIPAMFixture(t *testing.T) (*cibiz.Usecase, *gorm.DB) {
 			t.Fatalf("seed type: %v", err)
 		}
 	}
-	for id := model.ID(1); id <= 10; id++ {
+	for id := model.ID(1); id <= 16; id++ {
 		vt := "2"
 		switch id {
 		case 4, 5, 6, 7, 9, 10:
@@ -531,11 +536,11 @@ func TestSubnetDeleteGuard(t *testing.T) {
 	ctx := context.Background()
 
 	// The /24 holds two /25s.
-	if err := uc.DeleteSubnet(ctx, ids["a"]); !errors.Is(err, cibiz.ErrSubnetHasChildren) {
+	if err := uc.DeleteSubnet(ctx, ids["a"], cibiz.AuditInfo{}); !errors.Is(err, cibiz.ErrSubnetHasChildren) {
 		t.Fatalf("err = %v, want a has-children refusal", err)
 	}
 	// The scope holds the /24.
-	if err := uc.DeleteIPScope(ctx, ids["scope"]); !errors.Is(err, cibiz.ErrSubnetHasChildren) {
+	if err := uc.DeleteIPScope(ctx, ids["scope"], cibiz.AuditInfo{}); !errors.Is(err, cibiz.ErrSubnetHasChildren) {
 		t.Fatalf("scope delete err = %v, want a has-children refusal", err)
 	}
 
@@ -546,7 +551,7 @@ func TestSubnetDeleteGuard(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := uc.DeleteSubnet(ctx, ids["a1"]); !errors.Is(err, cibiz.ErrSubnetHasChildren) {
+	if err := uc.DeleteSubnet(ctx, ids["a1"], cibiz.AuditInfo{}); !errors.Is(err, cibiz.ErrSubnetHasChildren) {
 		t.Fatalf("err = %v; a subnet holding an address is not empty", err)
 	}
 
@@ -557,7 +562,7 @@ func TestSubnetDeleteGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := uc.DeleteSubnet(ctx, leaf.CIID); err != nil {
+	if err := uc.DeleteSubnet(ctx, leaf.CIID, cibiz.AuditInfo{}); err != nil {
 		t.Fatalf("an empty subnet should be removable: %v", err)
 	}
 }
@@ -714,5 +719,265 @@ func TestIPAMRecordsOperations(t *testing.T) {
 		OperateTypes: []string{"nonsense"}, Count: 50,
 	}); err == nil {
 		t.Fatal("an unknown operation kind was accepted as a filter")
+	}
+}
+
+// --- regressions found by the cantor parity audit ---
+
+// A RENAME UPDATES THE ROW IT NAMED. Resolving the target by its identifier
+// instead would miss a row whose identifier is exactly what the rename changes,
+// create a second subnet with the new name, and leave the old one behind.
+func TestSubnetRenameUpdatesTheSameInstance(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+	ctx := context.Background()
+
+	got, err := uc.UpdateSubnet(ctx, ids["a2"], cibiz.SubnetInput{
+		Values: map[string]any{"subnet_name": "a2-renamed"},
+	})
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if got.CIID != ids["a2"] {
+		t.Fatalf("rename wrote instance %d, want the row it named (%d)", got.CIID, ids["a2"])
+	}
+	inst, err := uc.Get(ctx, ids["a2"], nil, cibiz.RetKeyName)
+	if err != nil {
+		t.Fatalf("read the renamed subnet: %v", err)
+	}
+	if inst.Values["subnet_name"] != "a2-renamed" {
+		t.Fatalf("stored name = %v, want a2-renamed", inst.Values["subnet_name"])
+	}
+	all, err := uc.SearchIDs(ctx, "_type:ipam_subnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("subnet count = %d after a rename, want the original 3", len(all))
+	}
+}
+
+// AN UPDATE IS CHECKED AGAINST THE ROW'S REAL PARENT. The console sends the
+// parent it knows about, but a CIDR-only update does not, and validating that
+// as a root would let a child take a range that collides with its sibling.
+func TestSubnetUpdateChecksTheRealParent(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+	ctx := context.Background()
+
+	_, err := uc.UpdateSubnet(ctx, ids["a2"], cibiz.SubnetInput{
+		CIDR:   "10.0.0.0/25",
+		Values: map[string]any{"subnet_name": "a2"},
+	})
+	if !errors.Is(err, cibiz.ErrSubnetOverlap) {
+		t.Fatalf("err = %v, want the sibling-overlap refusal", err)
+	}
+}
+
+// STATS UNDER A SCOPE COUNT THE SUBNETS BELOW IT, through the scope→subnet
+// edge. Walking only subnet→subnet edges made a selected scope report zero.
+func TestIPAMSummaryUnderAScope(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+	ctx := context.Background()
+
+	got, err := uc.IPAMSummary(ctx, ids["scope"])
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if got.SubnetNum != 2 {
+		t.Fatalf("subnet_num = %d, want the two leaf /25s", got.SubnetNum)
+	}
+	if got.AddressNum != 252 {
+		t.Fatalf("address_num = %d, want 126+126", got.AddressNum)
+	}
+	if len(got.Subnets) != 2 {
+		t.Fatalf("rows = %d, want the two leaf subnets", len(got.Subnets))
+	}
+}
+
+// A SCOPE IS NAMED BY THE MODEL'S OWN IDENTIFYING ATTRIBUTE. A deployment
+// migrated from cantor calls it `name`; a built-in fixture may call it
+// `scope_name`. Writing a hardcoded key made one of the two impossible.
+func TestScopeCreateUsesTheModelsIdentifyingAttribute(t *testing.T) {
+	old := ipamAttrNames[1]
+	ipamAttrNames[1] = "name"
+	t.Cleanup(func() { ipamAttrNames[1] = old })
+
+	uc, _ := newIPAMFixture(t)
+	got, err := uc.CreateIPScope(context.Background(), cibiz.IPScopeInput{Name: "dc1"})
+	if err != nil {
+		t.Fatalf("create scope against a `name` model: %v", err)
+	}
+	inst, err := uc.Get(context.Background(), got.CIID, nil, cibiz.RetKeyName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Values["name"] != "dc1" {
+		t.Fatalf("stored name = %v, want dc1", inst.Values["name"])
+	}
+}
+
+func TestScopeRenameUpdatesTheSameInstance(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+	ctx := context.Background()
+
+	got, err := uc.UpdateIPScope(ctx, ids["scope"], cibiz.IPScopeInput{Name: "dc-renamed"})
+	if err != nil {
+		t.Fatalf("rename scope: %v", err)
+	}
+	if got.CIID != ids["scope"] {
+		t.Fatalf("rename wrote instance %d, want %d", got.CIID, ids["scope"])
+	}
+	inst, err := uc.Get(ctx, ids["scope"], nil, cibiz.RetKeyName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Values["scope_name"] != "dc-renamed" {
+		t.Fatalf("stored name = %v, want dc-renamed", inst.Values["scope_name"])
+	}
+	page, err := uc.IPAMHistory(ctx, cibiz.IPAMHistoryQuery{
+		OperateTypes: []string{cimodel.OperateUpdateScope}, Count: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.NumFound != 1 {
+		t.Fatalf("update-scope history = %d, want 1", page.NumFound)
+	}
+}
+
+func TestAddressAttributesArePersisted(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+	ctx := context.Background()
+
+	assigned := cibiz.AddressAssigned
+	got, err := uc.AssignAddresses(ctx, cibiz.AddressAssignInput{
+		SubnetID: ids["a1"], IPs: []string{"10.0.0.1"}, Status: &assigned,
+		Values: map[string]any{
+			"usage": "web", "use_obj": "server", "description": "edge",
+			"mac_address": "aa:bb:cc:dd:ee:ff", "gateway": "10.0.0.1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("assign with attributes: %v", err)
+	}
+	inst, err := uc.Get(ctx, got.AddressIDs[0], nil, cibiz.RetKeyName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]any{
+		"usage": "web", "use_obj": "server", "description": "edge",
+		"mac_address": "aa:bb:cc:dd:ee:ff", "gateway": "10.0.0.1",
+	} {
+		if inst.Values[key] != want {
+			t.Fatalf("%s = %v, want %v", key, inst.Values[key], want)
+		}
+	}
+}
+
+// A CALLER'S `cidr` CANNOT WIDEN THE RANGE. Trusting it made the capacity and
+// the range check describe a subnet that is not the one being written.
+func TestAssignRejectsAMismatchedCIDR(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+
+	assigned := cibiz.AddressAssigned
+	_, err := uc.AssignAddresses(context.Background(), cibiz.AddressAssignInput{
+		SubnetID: ids["a1"], CIDR: "10.0.0.0/16",
+		IPs: []string{"10.0.9.9"}, Status: &assigned,
+	})
+	if err == nil {
+		t.Fatal("an address outside the stored range was accepted through a fabricated cidr")
+	}
+}
+
+func TestScanReportIsIdempotentAndStampsTheRule(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+	ctx := context.Background()
+
+	if _, err := uc.UpdateSubnet(ctx, ids["a1"], cibiz.SubnetInput{
+		CIDR: "10.0.0.0/25", Values: map[string]any{"subnet_name": "a1"},
+		SetScan: true, Enabled: true, AgentID: "0x0000", Cron: "0 3 * * *",
+	}); err != nil {
+		t.Fatalf("enable scanning: %v", err)
+	}
+
+	start := time.Now().Add(-time.Minute).Truncate(time.Second)
+	end := start.Add(10 * time.Second)
+	if err := uc.RecordScan(ctx, cibiz.ScanReportInput{
+		ExecID: "exec-1", CIDR: "10.0.0.0/25", Status: 0, IPNum: 2,
+		StartAt: &start, EndAt: &end,
+	}); err != nil {
+		t.Fatalf("record scan: %v", err)
+	}
+	// The agent retries: the same exec_id is the same scan.
+	if err := uc.RecordScan(ctx, cibiz.ScanReportInput{
+		ExecID: "exec-1", CIDR: "10.0.0.0/25", Status: 1, IPNum: 3,
+		StartAt: &start, EndAt: &end,
+	}); err != nil {
+		t.Fatalf("record the retry: %v", err)
+	}
+
+	page, err := uc.IPAMScanHistory(ctx, cibiz.IPAMScanQuery{Count: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.NumFound != 1 {
+		t.Fatalf("scan rows = %d, want the one exec_id", page.NumFound)
+	}
+	if page.Items[0].Status != 1 || page.Items[0].IPNum == nil || *page.Items[0].IPNum != 3 {
+		t.Fatalf("the retry did not update the row: %+v", page.Items[0])
+	}
+	if page.Items[0].StartAt == "" || page.Items[0].EndAt == "" {
+		t.Fatalf("timestamps were dropped: %+v", page.Items[0])
+	}
+
+	detail, err := uc.GetSubnet(ctx, ids["a1"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := detail["last_scan_time"]; got != start.Format("2006-01-02 15:04:05") {
+		t.Fatalf("last_scan_time = %v, want %v", got, start.Format("2006-01-02 15:04:05"))
+	}
+}
+
+// STATS PASS THROUGH A NESTED SCOPE. Scopes can hold scopes; counting only the
+// direct subnet children of the selected node would miss the ranges one level
+// further down.
+func TestIPAMSummaryUnderANestedScope(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+	ctx := context.Background()
+
+	nested, err := uc.CreateIPScope(ctx, cibiz.IPScopeInput{ParentID: ids["scope"], Name: "nested"})
+	if err != nil {
+		t.Fatalf("create nested scope: %v", err)
+	}
+	if err := uc.MoveSubnet(ctx, ids["a2"], nested.CIID, cibiz.AuditInfo{}); err != nil {
+		t.Fatalf("move a subnet into the nested scope: %v", err)
+	}
+
+	got, err := uc.IPAMSummary(ctx, ids["scope"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SubnetNum != 2 {
+		t.Fatalf("subnet_num = %d, want both leaf /25s through the nested scope", got.SubnetNum)
+	}
+}
+
+func TestSubnetRenameToAnExistingNameConflicts(t *testing.T) {
+	uc, _ := newIPAMFixture(t)
+	ids := ipamSeed(t, uc)
+
+	_, err := uc.UpdateSubnet(context.Background(), ids["a2"], cibiz.SubnetInput{
+		Values: map[string]any{"subnet_name": "a1"},
+	})
+	if !errors.Is(err, cibiz.ErrAlreadyExists) {
+		t.Fatalf("err = %v, want the duplicate-name refusal", err)
 	}
 }

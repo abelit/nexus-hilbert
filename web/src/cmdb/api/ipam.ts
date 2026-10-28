@@ -53,6 +53,10 @@ export function createIPScope(input: { parent_id?: number; name: string }): Prom
   });
 }
 
+export function updateIPScope(id: number, name: string): Promise<{ ci_id: number }> {
+  return cmdbPut<{ ci_id: number }>(`/ipam/scopes/${id}`, { name });
+}
+
 export function deleteIPScope(id: number): Promise<void> {
   return cmdbDelete(`/ipam/scopes/${id}`);
 }
@@ -72,6 +76,12 @@ export type SubnetInput = {
   scan_enabled?: boolean;
   agent_id?: string;
   cron?: string;
+  /**
+   * The subnet model's identifying attribute. A deployment may call it
+   * `subnet_name`; the caller writes the model's own key rather than assuming
+   * the console's `name`.
+   */
+  [attribute: string]: unknown;
 };
 
 export function createSubnet(input: SubnetInput): Promise<{ ci_id: number }> {
@@ -149,7 +159,41 @@ export type AddressAssignInput = {
   ips: string[];
   /** Omitted means "leave the stored state alone". */
   assign_status?: number;
+  /**
+   * The address model's own attributes. A blank value is omitted by the caller:
+   * "leave it alone" and "write an empty string" are different requests, and a
+   * batch edit must not clear a field it never showed.
+   */
+  name?: string;
+  description?: string;
+  usage?: string;
+  use_obj?: string;
+  mac_address?: string;
+  gateway?: string;
+  subnet_mask?: string;
 };
+
+/**
+ * Every registered address of a subnet, page by page.
+ *
+ * THE ENDPOINT PAGES AT 500; the workspace needs the whole set to overlay on
+ * the host list, as cantor's did. The bound is the range's own host ceiling, so
+ * a /16 does not become an unbounded read.
+ */
+export async function listAllAddresses(subnetID: number, cap = 4096): Promise<SearchPage> {
+  const pageSize = 500;
+  const rows: SearchPage['result'] = [];
+  let page = 1;
+  let numFound = 0;
+  for (;;) {
+    const got = await listAddresses(subnetID, { page, count: pageSize });
+    numFound = got.numfound ?? 0;
+    rows.push(...(got.result ?? []));
+    if (rows.length >= Math.min(numFound, cap) || (got.result ?? []).length < pageSize) break;
+    page += 1;
+  }
+  return { numfound: numFound, total: rows.length, page: 1, result: rows };
+}
 
 export type AddressChange = {
   ci_ids: number[];
@@ -193,7 +237,7 @@ export function ipamStats(parentID?: number): Promise<SubnetSummary> {
 // --- logs ---
 
 /** The operation kinds the log records. */
-export const IPAM_OPERATE_TYPES = ['3', '4', '5', '6', '7', '8'] as const;
+export const IPAM_OPERATE_TYPES = ['0', '1', '2', '3', '4', '5', '6', '7', '8'] as const;
 
 export type IPAMHistoryRecord = {
   _id: number;
@@ -230,7 +274,7 @@ export type IPAMScanRecord = {
   status: number;
   stdout?: string;
   ip_num?: number;
-  ips?: Record<string, unknown>;
+  ips?: unknown;
   start_at?: string;
   end_at?: string;
   created_at: string;

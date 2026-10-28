@@ -21,8 +21,12 @@ export type TreeNode = {
   /** Stable identity, and the value `onSelect` reports. */
   id: string;
   label: ReactNode;
+  /** A leading mark — a folder or an address range. */
+  icon?: ReactNode;
   /** Rows drawn beside the label — a count, a chip. */
   trailing?: ReactNode;
+  /** Row actions. The wrapper stops a click from also selecting the node. */
+  actions?: ReactNode;
   /** Whether the node has children, before they are loaded. */
   hasChildren?: boolean;
   /** Children, when they are already here. */
@@ -185,7 +189,7 @@ export function Tree({
               if (hasChildren && !node.disabled) toggle(node, !open);
             }}
             className={cn(
-              'flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs',
+              'group flex min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs',
               selected ? 'bg-indigo-500/10 text-text' : 'text-text-muted hover:bg-card hover:text-text',
               node.disabled && 'cursor-not-allowed opacity-50',
             )}
@@ -214,8 +218,20 @@ export function Tree({
             ) : (
               <span className="w-[18px] shrink-0" />
             )}
+            {node.icon && <span className="shrink-0" aria-hidden="true">{node.icon}</span>}
             <span className="min-w-0 flex-1 truncate">{node.label}</span>
             {node.trailing && <span className="shrink-0 text-text-faint">{node.trailing}</span>}
+            {node.actions && (
+              // THE ACTION IS NOT A SECOND SELECTION. A menu trigger inside the
+              // row must open itself, not select the node and open the menu.
+              <span
+                className="shrink-0"
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                {node.actions}
+              </span>
+            )}
           </div>
         );
       })}

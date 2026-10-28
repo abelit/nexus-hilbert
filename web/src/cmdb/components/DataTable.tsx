@@ -86,7 +86,15 @@ type Props<T> = {
   selection?: {
     selected: ReadonlySet<string | number>;
     onChange(next: ReadonlySet<string | number>): void;
+    /**
+     * A click with the keyboard's shift state, so a caller can extend a range.
+     * Without it the checkbox is a plain toggle, which is all most tables need.
+     */
+    onSelect?(key: string | number, gesture: { shift: boolean }): void;
   };
+
+  /** A plain click on a row's body. Interactive children are excluded. */
+  onRowClick?: (row: T) => void;
 
   /** Persists column visibility under this key. */
   storageKey?: string;
@@ -106,6 +114,7 @@ export function DataTable<T>({
   actions,
   actionsHeader,
   selection,
+  onRowClick,
   storageKey,
 }: Props<T>) {
   const { tr } = useI18n();
@@ -214,12 +223,36 @@ export function DataTable<T>({
     const key = rowKey(row);
     const checked = selection?.selected.has(key) ?? false;
     return (
-      <tr key={key} data-selected={checked || undefined}>
+      <tr
+        key={key}
+        data-selected={checked || undefined}
+        onClick={
+          onRowClick
+            ? (event) => {
+                // A BUTTON IN THE ROW IS NOT THE ROW. Opening the editor because
+                // the operator pressed "recycle" would be a second action.
+                const target = event.target as HTMLElement | null;
+                if (target?.closest('button, a, input, select, textarea, label, [role="checkbox"]')) return;
+                onRowClick(row);
+              }
+            : undefined
+        }
+        className={onRowClick ? 'cursor-pointer' : undefined}
+      >
         {selectable && (
           <td className="w-px">
             <Checkbox
               checked={checked}
-              onCheckedChange={() => toggleRow(key)}
+              onCheckedChange={(_checked, details) => {
+                if (selection?.onSelect) {
+                  // Base UI wraps the native event; the shift key lives on it.
+                  const native = (details as unknown as { event?: Event } | undefined)?.event;
+                  const shift = native instanceof MouseEvent && native.shiftKey;
+                  selection.onSelect(key, { shift });
+                  return;
+                }
+                toggleRow(key);
+              }}
               aria-label={tr('选择这一行', 'Select this row')}
             />
           </td>
@@ -230,7 +263,7 @@ export function DataTable<T>({
           </td>
         ))}
         {actions && (
-          <td className="sticky right-0 w-px whitespace-nowrap px-4 py-2 text-left align-middle">
+          <td className="sticky right-0 w-px whitespace-nowrap px-4 py-2 text-left align-middle max-sm:static">
             <div className="flex items-center gap-1">{actions(row)}</div>
           </td>
         )}
@@ -356,7 +389,7 @@ export function DataTable<T>({
                   // THE HEADER IS PINNED WITH THE CELLS. Without `sticky
                   // right-0` the cells cover the headers of the columns they
                   // scroll over while their own header sits off-screen.
-                  <th scope="col" className="sticky right-0 w-px whitespace-nowrap">
+                  <th scope="col" className="sticky right-0 w-px whitespace-nowrap max-sm:static">
                     {actionsHeader ?? tr('操作', 'Actions')}
                   </th>
                 )}

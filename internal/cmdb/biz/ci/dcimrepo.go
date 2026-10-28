@@ -350,6 +350,9 @@ type IPAMRepo interface {
 
 // ScanRule is one subnet's scan configuration as the API presents it.
 type ScanRule struct {
+	// ID is the RULE row, which is what scan history points at. SubnetID is the
+	// subnet it configures; they are different ids and must not be substituted.
+	ID            model.ID
 	SubnetID      model.ID
 	ScanEnabled   bool
 	AgentID       string
@@ -373,14 +376,16 @@ type ScanRuleSpec struct {
 // ScanHistorySpec is one recorded scan.
 type ScanHistorySpec struct {
 	ScanRuleID model.ID
-	ExecID     string
-	CIDR       string
-	StartAt    *time.Time
-	EndAt      *time.Time
-	Status     int
-	Stdout     string
-	IPNum      int32
-	IPs        map[string]any
+	// SubnetID is the subnet whose rule's last-scan time the report stamps.
+	SubnetID model.ID
+	ExecID   string
+	CIDR     string
+	StartAt  *time.Time
+	EndAt    *time.Time
+	Status   int
+	Stdout   string
+	IPNum    int32
+	IPs      any
 }
 
 // ScanHistoryFilter narrows a scan-history listing.
