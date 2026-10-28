@@ -8,6 +8,8 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Power,
+  PowerOff,
   RefreshCw,
   Search,
   Table2,
@@ -844,45 +846,51 @@ function ActionLinks({
   onDelete(): void;
 }) {
   const { tr } = useI18n();
+  const editLabel = tr(`编辑 ${row.name}`, `Edit ${row.name}`);
+  const toggleLabel = row.enabled ? tr(`停用 ${row.name}`, `Disable ${row.name}`) : tr(`启用 ${row.name}`, `Enable ${row.name}`);
+  const deleteLabel = tr(`删除 ${row.name}`, `Delete ${row.name}`);
   return (
-    <span className="flex items-center gap-2 whitespace-nowrap">
+    <span className="flex items-center gap-1 whitespace-nowrap">
       <Hint content={adminTip}>
         <Button
-          variant="link"
+          variant="plain"
           size="sm"
           type="button"
           onClick={onEdit}
           disabled={!isAdmin}
-          aria-label={tr(`编辑 ${row.name}`, `Edit ${row.name}`)}
-          className="cmdb-liquid-action-edit"
+          aria-label={editLabel}
+          title={editLabel}
+          className="cmdb-liquid-action-edit inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
         >
-          {tr('编辑', 'Edit')}
+          <Pencil size={13} aria-hidden="true" />
         </Button>
       </Hint>
       <Hint content={adminTip}>
         <Button
-          variant="link"
+          variant="plain"
           size="sm"
           type="button"
           onClick={onToggle}
           disabled={!isAdmin}
-          aria-label={row.enabled ? tr(`停用 ${row.name}`, `Disable ${row.name}`) : tr(`启用 ${row.name}`, `Enable ${row.name}`)}
-          className="cmdb-liquid-plain-action"
+          aria-label={toggleLabel}
+          title={toggleLabel}
+          className="cmdb-liquid-plain-action inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
         >
-          {row.enabled ? tr('停用', 'Disable') : tr('启用', 'Enable')}
+          {row.enabled ? <PowerOff size={13} aria-hidden="true" /> : <Power size={13} aria-hidden="true" />}
         </Button>
       </Hint>
       <Hint content={adminTip}>
         <Button
-          variant="link"
+          variant="plain"
           size="sm"
           type="button"
           onClick={onDelete}
           disabled={!isAdmin}
-          aria-label={tr(`删除 ${row.name}`, `Delete ${row.name}`)}
-          className="cmdb-liquid-action-danger"
+          aria-label={deleteLabel}
+          title={deleteLabel}
+          className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
         >
-          {tr('删除', 'Delete')}
+          <Trash2 size={13} aria-hidden="true" />
         </Button>
       </Hint>
     </span>
