@@ -18,6 +18,8 @@ type Props = {
   id?: string;
   name?: string;
   required?: boolean;
+  /** Shown when no option is selected; the menu itself is unchanged. */
+  placeholder?: string;
   'aria-label'?: string;
   'aria-labelledby'?: string;
   disabled?: boolean;
@@ -44,7 +46,7 @@ function collectOptions(children: ReactNode): Option[] {
   });
 }
 
-export function Select({ value: rawValue, onValueChange, options: suppliedOptions, children, label, disabled, searchable, className, variant = 'default', id, name, required, 'aria-label': ariaLabel, 'aria-labelledby': labelledBy, open, onOpenChange }: Props) {
+export function Select({ value: rawValue, onValueChange, options: suppliedOptions, children, label, disabled, searchable, className, variant = 'default', id, name, required, placeholder, 'aria-label': ariaLabel, 'aria-labelledby': labelledBy, open, onOpenChange }: Props) {
   const value = String(rawValue);
   const options = suppliedOptions ?? collectOptions(children);
   const accessibleLabel = label ?? ariaLabel;
@@ -66,7 +68,10 @@ export function Select({ value: rawValue, onValueChange, options: suppliedOption
         autoHighlight
       >
         <Combobox.Trigger aria-label={accessibleLabel} aria-labelledby={labelledBy} data-variant={variant} className={cn('og-select-trigger', className)}>
-          {selected?.icon}<span className="min-w-0 flex-1 truncate text-left">{selected?.label ?? value}</span>
+          {selected?.icon}
+          <span className={cn('min-w-0 flex-1 truncate text-left', !selected && !value && 'text-text-faint')}>
+            {selected?.label ?? (value || placeholder)}
+          </span>
           <ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
         </Combobox.Trigger>
         <Combobox.Portal>
@@ -94,7 +99,14 @@ export function Select({ value: rawValue, onValueChange, options: suppliedOption
   return (
     <SelectPrimitive.Root open={open} onOpenChange={onOpenChange} id={id} name={name} required={required} value={value} onValueChange={(next) => { if (next !== null) onValueChange(next); }} items={options} disabled={disabled}>
       <SelectPrimitive.Trigger aria-label={accessibleLabel} aria-labelledby={labelledBy} data-variant={variant} className={cn('og-select-trigger', className)}>
-        {selected?.icon}<SelectPrimitive.Value className="min-w-0 flex-1 truncate text-left" />
+        {selected?.icon}
+        {selected ? (
+          <SelectPrimitive.Value className="min-w-0 flex-1 truncate text-left" />
+        ) : (
+          <span className={cn('min-w-0 flex-1 truncate text-left', !value && 'text-text-faint')}>
+            {value || placeholder}
+          </span>
+        )}
         <SelectPrimitive.Icon><ChevronDown size={14} className="text-text-faint" aria-hidden="true" /></SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>

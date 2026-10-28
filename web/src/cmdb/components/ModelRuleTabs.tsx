@@ -177,7 +177,7 @@ export function RelationsTab({
       header: tr('基数', 'Cardinality'),
       cell: (row) => (
         <code className="font-mono text-[11px] text-text-muted">
-          {relationConstraintLabel(row.relation.constraint)}
+          {relationConstraintLabel(row.relation.constraint, tr)}
         </code>
       ),
     },
@@ -280,7 +280,7 @@ function RelationModal({
   const [relationTypeID, setRelationTypeID] = useState('');
   const [constraint, setConstraint] = useState('0');
   const [peerAttributes, setPeerAttributes] = useState<TypeAttribute[]>([]);
-  const [pairs, setPairs] = useState<AttributePair[]>([]);
+  const [pairs, setPairs] = useState<AttributePair[]>([{ source: '', target: '' }]);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -296,14 +296,14 @@ function RelationModal({
   useEffect(() => {
     if (!peer) {
       setPeerAttributes([]);
-      setPairs([]);
+      setPairs([{ source: '', target: '' }]);
       return;
     }
     let cancelled = false;
     // Clear the positional mapping before the request settles so a pair from
     // the previous peer cannot be submitted against the new one.
     setPeerAttributes([]);
-    setPairs([]);
+    setPairs([{ source: '', target: '' }]);
     void listTypeAttributes(peer)
       .then((got) => {
         if (!cancelled) setPeerAttributes(got.attributes ?? []);
@@ -325,6 +325,10 @@ function RelationModal({
       setErr(tr('先选一个关系类型', 'Pick a relation type first'));
       return;
     }
+    if (pairs.some((pair) => Boolean(pair.source) !== Boolean(pair.target))) {
+      setErr(tr('属性关联需要同时选择源属性和目标属性', 'An attribute association needs both a source and a target attribute'));
+      return;
+    }
     setSubmitting(true);
     setErr(null);
     try {
@@ -332,14 +336,14 @@ function RelationModal({
       // other, which is the only thing "direction" means here.
       const parentRef = direction === 'children' ? modelRef : peer;
       const childRef = direction === 'children' ? peer : modelRef;
-      const filled = pairs.filter((pair) => pair.parent && pair.child);
+      const filled = pairs.filter((pair) => pair.source && pair.target);
       await saveRelation(parentRef, childRef, {
         relation_type_id: Number(relationTypeID),
         constraint,
         ...(filled.length > 0
           ? {
-              parent_attr_ids: filled.map((pair) => Number(pair.parent)),
-              child_attr_ids: filled.map((pair) => Number(pair.child)),
+              parent_attr_ids: filled.map((pair) => Number(pair.source)),
+              child_attr_ids: filled.map((pair) => Number(pair.target)),
             }
           : {}),
       });
@@ -409,13 +413,17 @@ function RelationModal({
         </div>
 
         <div>
-          <Label htmlFor="cmdb-rel-constraint">{tr('基数', 'Cardinality')}</Label>
+          <Label htmlFor="cmdb-rel-constraint">{tr('关系约束', 'Constraint')}</Label>
           <Select
             id="cmdb-rel-constraint"
-            label={tr('基数', 'Cardinality')}
+            label={tr('关系约束', 'Constraint')}
             value={constraint}
-            onValueChange={setConstraint}
-            options={RELATION_CONSTRAINTS.map((item) => ({ value: item.value, label: item.label }))}
+            onValueChange={(next) => {
+              setConstraint(next);
+              // The list rules depend on the constraint, so clear the mappings.
+              setPairs((current) => current.map((pair) => ({ ...pair, source: '', target: '' })));
+            }}
+            options={RELATION_CONSTRAINTS.map((item) => ({ value: item.value, label: tr(item.zh, item.en) }))}
             className="mt-1 w-40"
           />
           <p className="mt-1 text-[11px] text-text-faint">
@@ -428,11 +436,16 @@ function RelationModal({
 
         {peer && (
           <RelationAttributePairs
-            parentAttributes={direction === 'children' ? attributes : peerAttributes}
-            childAttributes={direction === 'children' ? peerAttributes : attributes}
+            sourceAttributes={direction === 'children' ? attributes : peerAttributes}
+            targetAttributes={direction === 'children' ? peerAttributes : attributes}
             pairs={pairs}
             onChange={setPairs}
+            constraint={constraint}
             disabled={submitting}
+            hint={tr(
+              '可选；源属性来自父模型，目标属性来自子模型。',
+              'Optional; source attributes come from the parent model and target attributes from the child.',
+            )}
           />
         )}
       </div>

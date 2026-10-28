@@ -29,6 +29,7 @@ import {
   type TypeAttribute,
 } from '../api/citype';
 import { listRelationTypes, type RelationType } from '../api/relationtype';
+import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { useToast } from '../components/Toast';
 import { RelationAttributePairs, type AttributePair } from '../components/RelationAttributePairs';
@@ -85,9 +86,10 @@ export default function ModelRelationsPage() {
     const needle = query.trim().toLowerCase();
     if (!needle) return rows;
     return rows.filter((row) => {
-      const parent = `${row.parent.type.alias} ${row.parent.type.name}`.toLowerCase();
-      const child = `${row.child.type.alias} ${row.child.type.name}`.toLowerCase();
-      return parent.includes(needle) || child.includes(needle);
+      const source = `${row.parent.type.alias} ${row.parent.type.name}`.toLowerCase();
+      const target = `${row.child.type.alias} ${row.child.type.name}`.toLowerCase();
+      const relation = `${row.child.relation_type.name ?? ''} ${row.child.relation_type.id ?? ''}`.toLowerCase();
+      return source.includes(needle) || target.includes(needle) || relation.includes(needle);
     });
   }, [rows, query]);
 
@@ -126,21 +128,60 @@ export default function ModelRelationsPage() {
     }
   };
 
+  // The icon is the model's own stored glyph. The accessible name stays the
+  // alias, so the extra identifier line does not turn the link into "主机 host".
   const modelLink = (model: ModelRelation['parent']['type']) => (
     <Link
       to={`/cmdb/models/${model.id}`}
-      className="truncate font-medium text-text hover:text-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+      aria-label={model.alias || model.name}
+      className="flex min-w-0 items-center gap-2 rounded-md text-text hover:text-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
     >
-      {model.alias || model.name}
+      <CMDBIcon value={model.icon} size={16} label={model.alias || model.name} />
+      <span className="min-w-0">
+        <span className="block truncate text-xs font-medium">{model.alias || model.name}</span>
+        <span className="block truncate font-mono text-[10px] text-text-faint">{model.name}</span>
+      </span>
     </Link>
   );
 
+  // The mapping is positional; both ends of the list response carry the pair.
+  // Show the attribute names (two at most) instead of a bare count, and fall
+  // back to the count when an attribute has since been deleted.
+  const mappingText = (row: ModelRelation): { text: string; count: number } => {
+    const parentIDs = row.child.parent_attr_ids?.length ? row.child.parent_attr_ids : row.parent.parent_attr_ids;
+    const childIDs = row.child.child_attr_ids?.length ? row.child.child_attr_ids : row.parent.child_attr_ids;
+    const count = Math.max(parentIDs?.length ?? 0, childIDs?.length ?? 0);
+    const pairs = (parentIDs ?? []).slice(0, 2).map((id, index) => {
+      const source = row.parent.attributes.find((attribute) => attribute.id === id);
+      const target = row.child.attributes.find((attribute) => attribute.id === childIDs?.[index]);
+      const name = (attribute?: TypeAttribute) => (attribute ? attribute.alias || attribute.name : '');
+      const left = name(source);
+      const right = name(target);
+      return left && right ? `${left} → ${right}` : '';
+    }).filter(Boolean);
+    return {
+      count,
+      text: pairs.length ? pairs.join('，') : count ? tr(`${count} 组`, `${count} pairs`) : '',
+    };
+  };
+
   const columns: Column<ModelRelation>[] = [
-    { key: 'parent', header: tr('父模型', 'Parent'), width: 'w-full', cell: (row) => modelLink(row.parent.type) },
-    { key: 'child', header: tr('子模型', 'Child'), width: 'w-full', cell: (row) => modelLink(row.child.type) },
+    {
+      key: 'parent',
+      header: tr('源 CI 类型', 'Source CI type'),
+      width: 'min-w-40',
+      cell: (row) => modelLink(row.parent.type),
+    },
+    {
+      key: 'child',
+      header: tr('目标 CI 类型', 'Target CI type'),
+      width: 'min-w-40',
+      cell: (row) => modelLink(row.child.type),
+    },
     {
       key: 'type',
       header: tr('关系类型', 'Relation type'),
+      width: 'min-w-28',
       cell: (row) => (
         <span className="flex items-center gap-1.5">
           <span
@@ -148,14 +189,29 @@ export default function ModelRelationsPage() {
             className="h-2 w-2 shrink-0 rounded-full border border-border"
             style={{ backgroundColor: row.child.relation_type.color || 'transparent' }}
           />
-          <span className="text-xs text-text-muted">{row.child.relation_type.name || row.child.relation_type.id}</span>
+          <span className="truncate text-xs text-text-muted">{row.child.relation_type.name || row.child.relation_type.id}</span>
         </span>
       ),
     },
     {
       key: 'constraint',
-      header: tr('基数', 'Cardinality'),
-      cell: (row) => <Chip>{relationConstraintLabel(row.child.constraint) || '—'}</Chip>,
+      header: tr('关系约束', 'Constraint'),
+      width: 'min-w-24',
+      cell: (row) => <Chip>{relationConstraintLabel(row.child.constraint, tr) || '—'}</Chip>,
+    },
+    {
+      key: 'mapping',
+      header: tr('属性关联', 'Attribute association'),
+      width: 'w-full',
+      cell: (row) => {
+        const mapping = mappingText(row);
+        if (!mapping.count) return <span className="text-text-faint">—</span>;
+        return (
+          <span className="block max-w-[28rem] truncate text-[11px] text-text-muted" title={mapping.text}>
+            {mapping.text}
+          </span>
+        );
+      },
     },
   ];
 
@@ -164,8 +220,8 @@ export default function ModelRelationsPage() {
       <PageHeader
         title={tr('模型关系', 'Model relations')}
         subtitle={tr(
-          '哪些模型可以挂在哪些模型下面。资源层级的树按这张表展开。',
-          'Which models may nest under which. The hierarchy tree is built from this table.',
+          '源 CI 类型 → 目标 CI 类型（父 → 子）。资源层级的树按这张表展开。',
+          'Source CI type → target CI type (parent → child). The hierarchy tree is built from this table.',
         )}
         actions={
           <div className="flex items-center gap-2">
@@ -179,7 +235,7 @@ export default function ModelRelationsPage() {
                 className="inline-flex items-center gap-1.5"
               >
                 <Plus size={12} aria-hidden="true" />
-                {tr('新建关系', 'New relation')}
+                {tr('新增关系', 'New relation')}
               </Button>
             </Hint>
             <Button
@@ -200,13 +256,13 @@ export default function ModelRelationsPage() {
             <Input
               type="search"
               aria-label={tr('搜索模型关系', 'Search relations')}
-              placeholder={tr('按父模型或子模型搜索', 'Search by either model')}
+              placeholder={tr('按源类型、目标类型或关联类型筛选', 'Filter by source, target or relation type')}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="w-64"
             />
             <p className="text-[11px] text-text-faint">
-              {tr('父模型与子模型在这里直接选择。', 'Choose the parent and child directly here.')}
+              {tr('源、目标与关联类型在这里直接选择。', 'Choose the source, target and relation type directly here.')}
             </p>
           </div>
         }
@@ -214,6 +270,7 @@ export default function ModelRelationsPage() {
 
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
         <Card>
+          <div className="cmdb-relation-table">
           <DataTable
             columns={columns}
             rows={visible}
@@ -230,20 +287,21 @@ export default function ModelRelationsPage() {
             actions={(row) => (
               <Hint content={adminTip}>
                 <Button
-                  variant="dangerGhost"
+                  variant="plain"
                   size="sm"
                   type="button"
                   onClick={() => void remove(row)}
                   disabled={!isAdmin}
                   aria-label={tr(`删除 ${row.parent.type.name} → ${row.child.type.name}`, `Delete ${row.parent.type.name} → ${row.child.type.name}`)}
-                  className="inline-flex items-center gap-1"
+                  title={tr(`删除 ${row.parent.type.name} → ${row.child.type.name}`, `Delete ${row.parent.type.name} → ${row.child.type.name}`)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0 text-red-500 hover:bg-card hover:text-red-600 dark:text-red-300"
                 >
-                  <Trash2 size={12} aria-hidden="true" />
-                  {tr('删除', 'Delete')}
+                  <Trash2 size={13} aria-hidden="true" />
                 </Button>
               </Hint>
             )}
           />
+          </div>
         </Card>
       </div>
 
@@ -277,66 +335,89 @@ function RelationFormModal({
   onSaved(message: string): void | Promise<void>;
 }) {
   const { tr } = useI18n();
-  const [parentID, setParentID] = useState('');
-  const [childID, setChildID] = useState('');
+  const [sourceID, setSourceID] = useState('');
+  const [targetID, setTargetID] = useState('');
   const [typeID, setTypeID] = useState('');
   const [constraint, setConstraint] = useState('0');
-  const [parentAttributes, setParentAttributes] = useState<TypeAttribute[]>([]);
-  const [childAttributes, setChildAttributes] = useState<TypeAttribute[]>([]);
-  const [pairs, setPairs] = useState<AttributePair[]>([]);
+  const [sourceAttributes, setSourceAttributes] = useState<TypeAttribute[]>([]);
+  const [targetAttributes, setTargetAttributes] = useState<TypeAttribute[]>([]);
+  const [pairs, setPairs] = useState<AttributePair[]>([{ source: '', target: '' }]);
+  const [attributesLoading, setAttributesLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    if (!parentID || !childID) {
-      setParentAttributes([]);
-      setChildAttributes([]);
-      setPairs([]);
+    if (!sourceID || !targetID) {
+      setSourceAttributes([]);
+      setTargetAttributes([]);
+      setAttributesLoading(false);
       return;
     }
-    // A PAIR IS POSITIONAL AND MODEL-SPECIFIC. Clear it before the request
-    // settles: otherwise a mapping from the previous parent can be submitted
-    // while the new attributes are still loading.
-    setPairs([]);
-    setParentAttributes([]);
-    setChildAttributes([]);
-    void Promise.all([listTypeAttributes(parentID), listTypeAttributes(childID)])
-      .then(([parent, child]) => {
+    // THE ROWS STAY; ONLY THEIR SELECTIONS BELONG TO THE OLD TYPES. The change
+    // handlers clear the affected side before the fetch settles, so a stale
+    // mapping cannot be submitted while the new attributes are loading.
+    setSourceAttributes([]);
+    setTargetAttributes([]);
+    setAttributesLoading(true);
+    void Promise.all([listTypeAttributes(sourceID), listTypeAttributes(targetID)])
+      .then(([source, target]) => {
         if (cancelled) return;
-        setParentAttributes(parent.attributes ?? []);
-        setChildAttributes(child.attributes ?? []);
+        setSourceAttributes(source.attributes ?? []);
+        setTargetAttributes(target.attributes ?? []);
       })
       .catch(() => {
         if (cancelled) return;
-        setParentAttributes([]);
-        setChildAttributes([]);
+        setSourceAttributes([]);
+        setTargetAttributes([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAttributesLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [parentID, childID]);
+  }, [sourceID, targetID]);
+
+  const chooseSource = (next: string) => {
+    setSourceID(next);
+    setPairs((current) => current.map((pair) => ({ ...pair, source: '' })));
+  };
+  const chooseTarget = (next: string) => {
+    setTargetID(next);
+    setPairs((current) => current.map((pair) => ({ ...pair, target: '' })));
+  };
+  const chooseConstraint = (next: string) => {
+    setConstraint(next);
+    // The list rules depend on the constraint, so every mapping is re-checked.
+    setPairs((current) => current.map((pair) => ({ ...pair, source: '', target: '' })));
+  };
 
   const submit = async () => {
-    if (!parentID || !childID || !typeID) {
-      setErr(tr('请选择父模型、子模型和关系类型', 'Choose the parent, the child and the relation type'));
+    if (!sourceID || !targetID || !typeID) {
+      setErr(tr('请选择源 CI 类型、目标 CI 类型和关联类型', 'Choose the source type, the target type and the relation type'));
       return;
     }
-    if (parentID === childID) {
-      setErr(tr('父模型和子模型不能相同', 'The parent and child must be different'));
+    if (sourceID === targetID) {
+      setErr(tr('源 CI 类型和目标 CI 类型不能相同', 'The source and target types must be different'));
+      return;
+    }
+    const partial = pairs.some((pair) => Boolean(pair.source) !== Boolean(pair.target));
+    if (partial) {
+      setErr(tr('属性关联需要同时选择源属性和目标属性', 'An attribute association needs both a source and a target attribute'));
       return;
     }
     setSubmitting(true);
     setErr(null);
     try {
-      const filled = pairs.filter((pair) => pair.parent && pair.child);
-      await saveRelation(parentID, childID, {
+      const filled = pairs.filter((pair) => pair.source && pair.target);
+      await saveRelation(sourceID, targetID, {
         relation_type_id: Number(typeID),
         constraint,
         ...(filled.length > 0
           ? {
-              parent_attr_ids: filled.map((pair) => Number(pair.parent)),
-              child_attr_ids: filled.map((pair) => Number(pair.child)),
+              parent_attr_ids: filled.map((pair) => Number(pair.source)),
+              child_attr_ids: filled.map((pair) => Number(pair.target)),
             }
           : {}),
       });
@@ -354,7 +435,8 @@ function RelationFormModal({
     <Modal
       open
       onClose={onClose}
-      title={tr('新建模型关系', 'New model relation')}
+      size="lg"
+      title={tr('新增关系', 'New relation')}
       footer={
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
@@ -367,38 +449,49 @@ function RelationFormModal({
       }
     >
       {err && (
-        <div role="alert" className="mb-2 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+        <div role="alert" className="mb-3 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
           {err}
         </div>
       )}
-      <div className="flex flex-col gap-3">
+      <p className="mb-4 text-[11px] leading-5 text-text-faint">
+        {tr(
+          '配置源 CI 类型到目标 CI 类型的关系；完成时点击保存。',
+          'Configure the relation from the source CI type to the target; save when done.',
+        )}
+      </p>
+      <div className="flex flex-col gap-4">
         <div>
-          <Label htmlFor="cmdb-relation-parent">{tr('父模型', 'Parent model')}</Label>
+          <Label htmlFor="cmdb-relation-source">{tr('源 CI 类型', 'Source CI type')}</Label>
           <Select
-            id="cmdb-relation-parent"
-            label={tr('父模型', 'Parent model')}
-            value={parentID}
-            onValueChange={setParentID}
+            id="cmdb-relation-source"
+            label={tr('源 CI 类型', 'Source CI type')}
+            placeholder={tr('选择源 CI 类型', 'Select source CI type')}
+            value={sourceID}
+            onValueChange={chooseSource}
             options={options}
+            searchable
             className="mt-1 w-full"
           />
         </div>
         <div>
-          <Label htmlFor="cmdb-relation-child">{tr('子模型', 'Child model')}</Label>
+          <Label htmlFor="cmdb-relation-target">{tr('目标 CI 类型', 'Target CI type')}</Label>
           <Select
-            id="cmdb-relation-child"
-            label={tr('子模型', 'Child model')}
-            value={childID}
-            onValueChange={setChildID}
+            id="cmdb-relation-target"
+            label={tr('目标 CI 类型', 'Target CI type')}
+            placeholder={tr('选择目标 CI 类型', 'Select target CI type')}
+            value={targetID}
+            onValueChange={chooseTarget}
             options={options}
+            searchable
             className="mt-1 w-full"
           />
         </div>
         <div>
-          <Label htmlFor="cmdb-relation-type">{tr('关系类型', 'Relation type')}</Label>
+          <Label htmlFor="cmdb-relation-type">{tr('关联类型', 'Relation type')}</Label>
           <Select
             id="cmdb-relation-type"
-            label={tr('关系类型', 'Relation type')}
+            label={tr('关联类型', 'Relation type')}
+            placeholder={tr('选择关联类型', 'Select relation type')}
             value={typeID}
             onValueChange={setTypeID}
             options={relationTypes.map((type) => ({ value: String(type.id), label: type.name }))}
@@ -406,25 +499,25 @@ function RelationFormModal({
           />
         </div>
         <div>
-          <Label htmlFor="cmdb-relation-constraint">{tr('基数', 'Cardinality')}</Label>
+          <Label htmlFor="cmdb-relation-constraint">{tr('关系约束', 'Constraint')}</Label>
           <Select
             id="cmdb-relation-constraint"
-            label={tr('基数', 'Cardinality')}
+            label={tr('关系约束', 'Constraint')}
             value={constraint}
-            onValueChange={setConstraint}
-            options={RELATION_CONSTRAINTS.map((item) => ({ value: item.value, label: item.label }))}
-            className="mt-1 w-full"
+            onValueChange={chooseConstraint}
+            options={RELATION_CONSTRAINTS.map((item) => ({ value: item.value, label: tr(item.zh, item.en) }))}
+            className="mt-1 w-full sm:w-56"
           />
         </div>
-        {parentID && childID && (
-          <RelationAttributePairs
-            parentAttributes={parentAttributes}
-            childAttributes={childAttributes}
-            pairs={pairs}
-            onChange={setPairs}
-            disabled={submitting}
-          />
-        )}
+        <RelationAttributePairs
+          sourceAttributes={sourceAttributes}
+          targetAttributes={targetAttributes}
+          pairs={pairs}
+          onChange={setPairs}
+          constraint={constraint}
+          disabled={submitting}
+          loading={attributesLoading}
+        />
       </div>
     </Modal>
   );

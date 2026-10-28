@@ -377,7 +377,7 @@ describe('the other tabs', () => {
 
     expect(await screen.findByRole('link', { name: '磁盘' })).toBeInTheDocument();
     expect(screen.getByText('子模型')).toBeInTheDocument();
-    expect(screen.getByText('1-N')).toBeInTheDocument();
+    expect(screen.getByText('一对多')).toBeInTheDocument();
   });
 
   it('shows the empty state from the relations deep link', async () => {
@@ -424,7 +424,7 @@ describe('the other tabs', () => {
     await user.click(await screen.findByRole('tab', { name: '模型关系' }));
     expect(await screen.findByRole('link', { name: '机柜' })).toBeInTheDocument();
     expect(screen.getByText('父模型')).toBeInTheDocument();
-    expect(screen.getByText('1-1')).toBeInTheDocument();
+    expect(screen.getByText('一对一')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '删除与 rack 的关系' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '确认' }));
@@ -454,7 +454,7 @@ describe('the other tabs', () => {
     await user.click(await screen.findByRole('tab', { name: '模型关系' }));
     await user.click(await screen.findByRole('button', { name: '加子模型' }));
     await selectOption(screen.getByLabelText('对端模型'), '磁盘');
-    await selectOption(screen.getByLabelText('基数'), '1-1');
+    await selectOption(screen.getByLabelText('关系约束'), '一对一');
     await user.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(posted).toEqual({ relation_type_id: 5, constraint: '1' }));
@@ -498,9 +498,9 @@ describe('the other tabs', () => {
     await user.click(await screen.findByRole('tab', { name: '模型关系' }));
     await user.click(await screen.findByRole('button', { name: '加子模型' }));
     await selectOption(screen.getByLabelText('对端模型'), '磁盘');
-    await user.click(screen.getByRole('button', { name: '添加映射' }));
-    await selectOption(screen.getByLabelText('父属性'), '主机名（hostname）');
-    await selectOption(screen.getByLabelText('子属性'), '序列号（sn）');
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '源属性 1' })).toBeEnabled());
+    await selectOption(screen.getByRole('combobox', { name: '源属性 1' }), '主机名（hostname）');
+    await selectOption(screen.getByRole('combobox', { name: '目标属性 1' }), '序列号（sn）');
     await user.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() =>

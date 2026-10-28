@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react';
+import { ArrowRight, Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Label } from '@/components/ui/Label';
@@ -6,120 +6,193 @@ import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/i18n/locale';
 
 import type { TypeAttribute } from '../api/citype';
+import {
+  relationAttributeCandidates,
+  relationAttributeOptions,
+} from '../lib/relation-attributes';
 
-export type AttributePair = { parent: string; child: string };
+export type AttributePair = { source: string; target: string };
 
 // The optional "these two attributes must agree" mapping on a model relation.
 //
-// THE BACKEND ALREADY STORES parent_attr_ids/child_attr_ids and uses them when
-// it derives instance relations from attribute values. The port's relation form
-// did not expose the fields, so the mapping existed in the schema and in
-// imported cantor data but could not be created from the console.
+// CANTOR'S ROW SHAPE: one source select → one target select, with delete and add
+// controls on the row. The candidate list is filtered per side (same value
+// type, no secrets/JSON/booleans/references, plus the constraint's list rules),
+// so an operator cannot build a mapping the backend could never match.
 //
-// A pair is positional: parent_attr_ids[i] matches child_attr_ids[i]. Empty
-// rows are dropped on submit, so an operator can add a row and fill it later.
+// A pair is positional: source_attr_ids[i] matches target_attr_ids[i]. Empty
+// rows are dropped on submit; a half-filled row is an error, not a silent drop.
+// The last row cannot be removed, because the section always needs one.
 
 export function RelationAttributePairs({
-  parentAttributes,
-  childAttributes,
+  sourceAttributes,
+  targetAttributes,
   pairs,
   onChange,
+  constraint,
   disabled = false,
+  loading = false,
+  hint,
 }: {
-  parentAttributes: TypeAttribute[];
-  childAttributes: TypeAttribute[];
+  sourceAttributes: TypeAttribute[];
+  targetAttributes: TypeAttribute[];
   pairs: AttributePair[];
   onChange(next: AttributePair[]): void;
+  constraint: string;
   disabled?: boolean;
+  loading?: boolean;
+  /** Explains the two sides when the surrounding form does not name them. */
+  hint?: string;
 }) {
   const { tr } = useI18n();
-  const parentOptions = parentAttributes.map((attribute) => ({
-    value: String(attribute.id),
-    label: `${attribute.alias || attribute.name}（${attribute.name}）`,
-  }));
-  const childOptions = childAttributes.map((attribute) => ({
-    value: String(attribute.id),
-    label: `${attribute.alias || attribute.name}（${attribute.name}）`,
-  }));
+  const ready = sourceAttributes.length > 0 && targetAttributes.length > 0;
 
   const update = (index: number, patch: Partial<AttributePair>) => {
-    onChange(pairs.map((pair, i) => (i === index ? { ...pair, ...patch } : pair)));
+    const next = pairs.map((pair, i) => (i === index ? { ...pair, ...patch } : pair));
+    const changed = next[index];
+    // A newly chosen attribute can invalidate the other side (type, or the
+    // constraint's list rule); clear it rather than leave an impossible pair.
+    const targets = relationAttributeCandidates(
+      targetAttributes,
+      changed.source,
+      sourceAttributes,
+      'target',
+      constraint,
+    );
+    if (changed.target && !targets.some((attribute) => String(attribute.id) === changed.target)) {
+      changed.target = '';
+    }
+    const sources = relationAttributeCandidates(
+      sourceAttributes,
+      changed.target,
+      targetAttributes,
+      'source',
+      constraint,
+    );
+    if (changed.source && !sources.some((attribute) => String(attribute.id) === changed.source)) {
+      changed.source = '';
+    }
+    onChange(next);
+  };
+
+  const remove = (index: number) => {
+    if (pairs.length <= 1) return;
+    onChange(pairs.filter((_, i) => i !== index));
+  };
+
+  const add = () => {
+    onChange([...pairs, { source: '', target: '' }]);
   };
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <Label>{tr('属性映射（可选）', 'Attribute mapping (optional)')}</Label>
-          <p className="mt-1 text-[11px] text-text-faint">
-            {tr(
-              '建立“父属性 → 子属性”的对应关系，用来从属性值推导实例关系。',
-              'Map a parent attribute to a child attribute; the backend uses it to derive instance relations from values.',
+      <div>
+        <Label>{tr('属性关联', 'Attribute association')}</Label>
+        <p className="mt-1 text-[11px] text-text-faint">
+          {hint ??
+            tr(
+              '可选；用于从属性值推导实例关系。',
+              'Optional; used to derive instance relations from values.',
             )}
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          type="button"
-          disabled={disabled || parentAttributes.length === 0 || childAttributes.length === 0}
-          onClick={() => onChange([...pairs, { parent: '', child: '' }])}
-          className="inline-flex items-center gap-1.5"
-        >
-          <Plus size={12} aria-hidden="true" />
-          {tr('添加映射', 'Add mapping')}
-        </Button>
+        </p>
       </div>
 
-      {pairs.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border px-3 py-3 text-center text-[11px] text-text-faint">
-          {tr('没有属性映射；关系仍可创建。', 'No attribute mapping; the relation can still be created.')}
+      {!ready && (
+        <p className="text-[11px] text-text-faint">
+          {loading
+            ? tr('正在读取属性…', 'Loading attributes…')
+            : tr('先选择源和目标 CI 类型。', 'Choose both CI types first.')}
         </p>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {pairs.map((pair, index) => (
-            <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-border p-2 sm:grid-cols-[1fr_1fr_auto]">
-              <div>
-                <Label htmlFor={`cmdb-pair-parent-${index}`}>{tr('父属性', 'Parent attribute')}</Label>
-                <Select
-                  id={`cmdb-pair-parent-${index}`}
-                  label={tr('父属性', 'Parent attribute')}
-                  value={pair.parent}
-                  onValueChange={(next) => update(index, { parent: next })}
-                  options={parentOptions}
-                  searchable
-                  disabled={disabled}
-                  className="mt-1 w-full"
-                />
-              </div>
-              <div>
-                <Label htmlFor={`cmdb-pair-child-${index}`}>{tr('子属性', 'Child attribute')}</Label>
-                <Select
-                  id={`cmdb-pair-child-${index}`}
-                  label={tr('子属性', 'Child attribute')}
-                  value={pair.child}
-                  onValueChange={(next) => update(index, { child: next })}
-                  options={childOptions}
-                  searchable
-                  disabled={disabled}
-                  className="mt-1 w-full"
-                />
-              </div>
-              <Button
-                variant="dangerGhost"
-                size="sm"
-                type="button"
-                className="mt-5"
-                disabled={disabled}
-                onClick={() => onChange(pairs.filter((_, i) => i !== index))}
-                aria-label={tr(`删除第 ${index + 1} 条属性映射`, `Delete attribute mapping ${index + 1}`)}
-              >
-                <Trash2 size={12} aria-hidden="true" />
-              </Button>
-            </div>
-          ))}
-        </div>
       )}
+
+      <div className="flex flex-col gap-2">
+        {pairs.map((pair, index) => {
+          const sourceOptions = relationAttributeOptions(
+            relationAttributeCandidates(
+              sourceAttributes,
+              pair.target,
+              targetAttributes,
+              'source',
+              constraint,
+            ),
+          );
+          const targetOptions = relationAttributeOptions(
+            relationAttributeCandidates(
+              targetAttributes,
+              pair.source,
+              sourceAttributes,
+              'target',
+              constraint,
+            ),
+          );
+          const partial = Boolean(pair.source) !== Boolean(pair.target);
+          return (
+            <div key={index} className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  aria-label={tr(`源属性 ${index + 1}`, `Source attribute ${index + 1}`)}
+                  placeholder={tr('选择源属性', 'Select source attribute')}
+                  value={pair.source}
+                  onValueChange={(next) => update(index, { source: next })}
+                  options={sourceOptions}
+                  searchable
+                  disabled={disabled || !ready}
+                  className="min-w-0 flex-1"
+                />
+                <ArrowRight
+                  size={14}
+                  className="shrink-0 text-text-faint"
+                  aria-hidden="true"
+                />
+                <Select
+                  aria-label={tr(`目标属性 ${index + 1}`, `Target attribute ${index + 1}`)}
+                  placeholder={tr('选择目标属性', 'Select target attribute')}
+                  value={pair.target}
+                  onValueChange={(next) => update(index, { target: next })}
+                  options={targetOptions}
+                  searchable
+                  disabled={disabled || !ready}
+                  className="min-w-0 flex-1"
+                />
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    disabled={disabled || pairs.length <= 1}
+                    onClick={() => remove(index)}
+                    aria-label={tr(`删除第 ${index + 1} 条属性关联`, `Delete attribute association ${index + 1}`)}
+                    title={tr('删除属性关联', 'Delete attribute association')}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md p-0 text-text-faint hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Trash2 size={13} aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    disabled={disabled}
+                    onClick={add}
+                    aria-label={tr('添加属性关联', 'Add attribute association')}
+                    title={tr('添加属性关联', 'Add attribute association')}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md p-0 text-text-faint hover:text-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Plus size={13} aria-hidden="true" />
+                  </Button>
+                </div>
+              </div>
+              {partial && (
+                <p role="alert" className="text-[11px] text-red-600 dark:text-red-300">
+                  {tr(
+                    '源属性和目标属性需要同时选择。',
+                    'Choose both a source and a target attribute.',
+                  )}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
