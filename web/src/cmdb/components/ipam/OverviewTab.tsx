@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderTree, Pencil, Trash2 } from 'lucide-react';
+import { FolderTree, Network, Pencil, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -96,6 +96,7 @@ export function OverviewTab({
       key: 'hosts',
       header: tr('主机数', 'Hosts'),
       align: 'right',
+      hideBelow: 1400,
       cell: (row) => <span className="tabular-nums text-xs text-text-muted">{row.hostsCount}</span>,
     },
     {
@@ -121,6 +122,7 @@ export function OverviewTab({
       key: 'assigned',
       header: tr('已分配', 'Assigned'),
       align: 'right',
+      hideBelow: 900,
       cell: (row) => <span className="tabular-nums text-xs text-text-muted">{row.assignCount}</span>,
     },
     {
@@ -145,6 +147,7 @@ export function OverviewTab({
       key: 'scan',
       header: tr('扫描', 'Scan'),
       hideable: true,
+      hideBelow: 1400,
       cell: (row) => (
         <Chip tone={row.scanEnabled ? 'info' : 'default'}>{row.scanEnabled ? tr('开', 'On') : tr('关', 'Off')}</Chip>
       ),
@@ -233,14 +236,15 @@ export function OverviewTab({
           actions={(row) => (
             <div className="flex items-center gap-1">
               <Button
-                variant="subtle"
+                variant="plain"
                 size="sm"
                 type="button"
                 onClick={() => onOpenAddresses(row.id)}
                 aria-label={tr(`查看 ${row.name} 的地址`, `Open the addresses of ${row.name}`)}
                 title={tr('查看地址', 'Addresses')}
+                className="inline-flex size-7 items-center justify-center p-0 text-text-faint hover:text-text"
               >
-                {tr('地址', 'Addresses')}
+                <Network size={12} aria-hidden="true" />
               </Button>
               {canMutate && (
                 <>
@@ -277,6 +281,7 @@ export function OverviewTab({
           shown={pageRows.length}
           total={rows.length}
           onPageChange={setPage}
+          sticky={false}
           className="mt-3 bg-transparent"
         />
       </Card>

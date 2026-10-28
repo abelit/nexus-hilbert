@@ -158,7 +158,6 @@ function IPAMShell() {
                 </h2>
                 {selectedIsSubnet && <Chip tone="info">{String(selectedNode?.cidr ?? '')}</Chip>}
                 {selectedNode && !selectedIsSubnet && <Chip>{tr('分组', 'Group')}</Chip>}
-                {!selectedNode && <Chip>{tr('全部', 'All')}</Chip>}
               </div>
               <p className="mt-1 text-[11px] text-text-faint">
                 {selectedNode

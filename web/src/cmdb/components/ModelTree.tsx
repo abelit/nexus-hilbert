@@ -39,6 +39,7 @@ export function ModelTree({
   error,
   onRetry,
   onSelect,
+  compact,
 }: {
   models: CIType[];
   groups: ModelGroup[];
@@ -47,6 +48,9 @@ export function ModelTree({
   error?: string | null;
   onRetry?(): void;
   onSelect?(): void;
+  /** The list page adds its own header and create action; the rail is then
+   *  only search + tree + the group-management link. */
+  compact?: boolean;
 }) {
   const { tr } = useI18n();
   const [query, setQuery] = useState('');
@@ -121,28 +125,30 @@ export function ModelTree({
   };
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col border-r border-border bg-bg lg:w-64 lg:shrink-0" aria-label={tr('模型导航', 'Model navigation')}>
+    <aside className="flex h-full min-h-0 w-full flex-col border-r border-border bg-bg lg:w-64 lg:shrink-0 xl:w-72" aria-label={tr('模型导航', 'Model navigation')}>
       <div className="flex flex-col gap-2 border-b border-border p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-text">{tr('模型', 'Models')}</h2>
-            <p className="text-[11px] text-text-faint">{tr(`${models.length} 个模型`, `${models.length} models`)}</p>
+        {!compact && (
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-text">{tr('模型', 'Models')}</h2>
+              <p className="text-[11px] text-text-faint">{tr(`${models.length} 个模型`, `${models.length} models`)}</p>
+            </div>
+            <Link
+              to="/cmdb/models?new=1"
+              className="inline-flex h-7 items-center gap-1 rounded-md bg-indigo-600 px-2 text-[11px] font-medium text-white hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+              onClick={onSelect}
+            >
+              <Plus size={12} aria-hidden="true" />
+              {tr('新建', 'New')}
+            </Link>
           </div>
-          <Link
-            to="/cmdb/models?new=1"
-            className="inline-flex h-7 items-center gap-1 rounded-md bg-indigo-600 px-2 text-[11px] font-medium text-white hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
-            onClick={onSelect}
-          >
-            <Plus size={12} aria-hidden="true" />
-            {tr('新建', 'New')}
-          </Link>
-        </div>
+        )}
         <div className="relative">
           <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint" aria-hidden="true" />
           <Input
             type="search"
             aria-label={tr('搜索模型', 'Search models')}
-            placeholder={tr('搜索模型', 'Search models')}
+            placeholder={tr('搜索模型分组或模型…', 'Search groups or models…')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="w-full pl-7 text-xs"

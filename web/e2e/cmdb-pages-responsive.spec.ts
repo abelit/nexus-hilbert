@@ -510,6 +510,57 @@ const IPAM_SCANS = {
   numfound: 1,
   result: [{ _id: 5, exec_id: 'abc123', cidr: '10.0.0.0/24', status: 0, ip_num: 2, stdout: '2 hosts up', start_at: '2026-10-18 03:00:00', end_at: '2026-10-18 03:00:11', created_at: '2026-10-18 03:00:00' }],
 };
+// --- DCIM ---
+
+const DCIM_RACK_TYPE = {
+  id: 48, name: 'dcim_rack', alias: '机柜', enabled: true, is_attached: true,
+  icon: '', order: 0, unique_key: 'name', show_name: 'name', parent_ids: [],
+};
+const DCIM_SERVER_TYPE = {
+  ...HOST, id: 5, name: 'server', alias: '服务器', unique_key: 'name', show_name: 'name',
+};
+const DCIM_TREE = {
+  result: [{
+    _id: 1, _type: 45, ci_type: 'dcim_region', ci_type_alias: '区域', name: '华北',
+    children: [{
+      _id: 2, _type: 47, ci_type: 'dcim_idc', ci_type_alias: '数据中心', name: '亦庄',
+      children: [{
+        _id: 3, _type: 46, ci_type: 'dcim_server_room', ci_type_alias: '机房',
+        name: 'A 机房', rack_count: 2, children: [],
+      }],
+    }],
+  }],
+  type2name: { '45': 'name', '46': 'name', '47': 'name' },
+};
+const DCIM_RACK_ATTRIBUTES = [
+  { id: 124, name: 'name', alias: '名称', value_type: '2', is_required: true, default_show: true, is_choice: false, is_list: false, is_indexed: true },
+  { id: 147, name: 'u_count', alias: 'U数', value_type: '0', is_required: true, default_show: true, is_choice: false, is_list: false, is_indexed: true },
+  { id: 143, name: 'free_u_count', alias: '可用U数', value_type: '0', is_required: true, default_show: true, is_choice: false, is_list: false, is_indexed: true },
+  { id: 137, name: 'rack_type', alias: '机柜类型', value_type: '2', is_required: false, default_show: true, is_choice: true, is_list: false, is_indexed: true, choice_value: [{ value: '普通柜', option: { label: '普通柜' } }, { value: '网络柜', option: { label: '网络柜' } }] },
+  { id: 135, name: 'rack_code', alias: '机柜编号', value_type: '2', is_required: false, default_show: true, is_choice: false, is_list: false, is_indexed: true },
+];
+const DCIM_RACKS = {
+  numfound: 2, total: 2, page: 1,
+  counter: { rack_count: 2, u_count: 84, u_used_count: 20, device_count: 2 },
+  result: [
+    { _id: 31, _type: 48, ci_id: 31, ci_type: 'dcim_rack', ci_type_alias: '机柜', name: 'R-A01', u_count: 42, free_u_count: 30, u_slot_abnormal: false, rack_type: '普通柜', rack_code: 'A-01' },
+    { _id: 32, _type: 48, ci_id: 32, ci_type: 'dcim_rack', ci_type_alias: '机柜', name: 'R-A02', u_count: 42, free_u_count: -8, u_slot_abnormal: true, rack_type: '网络柜', rack_code: 'A-02' },
+  ],
+};
+const DCIM_DEVICES = {
+  numfound: 2, total: 2, page: 1,
+  result: [
+    { _id: 55, _type: 5, ci_id: 55, ci_type: 'server', ci_type_alias: '服务器', name: 'srv-01', u_start: 2, u_count: 2 },
+    { _id: 56, _type: 5, ci_id: 56, ci_type: 'server', ci_type_alias: '服务器', name: 'srv-02', u_start: 8, u_count: 1 },
+  ],
+};
+const DCIM_HISTORY = {
+  numfound: 1,
+  result: [{ _id: 9, rack_id: 31, ci_id: 55, uid: 7, operate_type: '0', created_at: '2026-10-18 09:00:00' }],
+  id2ci: { '55': { _type: 5, ci_type: 'server', ci_type_alias: '服务器', name: 'srv-01' } },
+  type2show_key: { '5': 'name' },
+};
+
 const POOL_ENTRY = {
   id: 1, type_id: 1, adt_id: 5, unique_value: 'i-1',
   instance: { hostname: 'i-1', cpu: 4 }, oneagent_id: 'agent-1', oneagent_name: 'agent one',
@@ -535,6 +586,7 @@ const PAGES: PageCase[] = [
   { path: '/cmdb/batch', heading: '批量导入', headingEn: 'Batch import', name: 'batch-import' },
   { path: '/cmdb/service-tree', heading: '服务树', headingEn: 'Service tree', name: 'relation-views' },
   { path: '/cmdb/ipam', heading: 'IP 地址空间', headingEn: 'IP address space', name: 'ipam' },
+  { path: '/cmdb/dcim?node=3', heading: '数据中心', headingEn: 'Data centre', name: 'dcim' },
 ];
 
 async function mockAPI(page: import('@playwright/test').Page) {
@@ -549,6 +601,31 @@ async function mockAPI(page: import('@playwright/test').Page) {
         return;
       case '/api/v1/cmdb/ci-types':
         await route.fulfill({ json: { items: [HOST], total: 1 } });
+        return;
+      case '/api/v1/cmdb/ci-types/1/attributes':
+        await route.fulfill({ json: { type_id: 1, unique_id: 10, unique: 'hostname', attributes: INSTANCE_ATTRIBUTES } });
+        return;
+      case '/api/v1/cmdb/ci-types/1/relation-parents':
+        await route.fulfill({ json: { items: [], total: 0 } });
+        return;
+      case '/api/v1/cmdb/import/preview':
+        await route.fulfill({
+          json: {
+            total: 1, valid: 1, invalid: 0, creates: 1, updates: 0,
+            columns: [
+              { index: 0, header: 'hostname', attr_id: 10, attr: 'hostname', alias: '主机名', matched: true, identifier: true },
+            ],
+            rows: [{ row: 1, sheet_row: 2, ok: true, action: 'create', unique: 'web-01' }],
+          },
+        });
+        return;
+      case '/api/v1/cmdb/import/commit':
+        await route.fulfill({
+          json: {
+            written: 1, creates: 1, updates: 0,
+            rows: [{ row: 1, sheet_row: 2, ok: true, action: 'create', unique: 'web-01', ci_id: 101 }],
+          },
+        });
         return;
       case '/api/v1/cmdb/ci-types/ipam_subnet':
         await route.fulfill({ json: { id: 12, name: 'ipam_subnet', alias: '子网', enabled: true } });
@@ -597,6 +674,48 @@ async function mockAPI(page: import('@playwright/test').Page) {
         return;
       case '/api/v1/cmdb/ipam/history/scans':
         await route.fulfill({ json: IPAM_SCANS });
+        return;
+      case '/api/v1/cmdb/dcim/tree-view':
+        await route.fulfill({ json: DCIM_TREE });
+        return;
+      case '/api/v1/cmdb/dcim/server-rooms/3/racks':
+        await route.fulfill({ json: DCIM_RACKS });
+        return;
+      case '/api/v1/cmdb/dcim/history/operations':
+        await route.fulfill({ json: DCIM_HISTORY });
+        return;
+      case '/api/v1/cmdb/ci-types/dcim_rack':
+        await route.fulfill({ json: DCIM_RACK_TYPE });
+        return;
+      case '/api/v1/cmdb/ci-types/48/attributes':
+        await route.fulfill({ json: { type_id: 48, unique_id: 124, unique: 'name', attributes: DCIM_RACK_ATTRIBUTES } });
+        return;
+      case '/api/v1/cmdb/ci-types/48/attribute-groups':
+        await route.fulfill({ json: [] });
+        return;
+      case '/api/v1/cmdb/ci-types/48/relation-children':
+        await route.fulfill({ json: { items: [{ ctr_id: 1, type: DCIM_SERVER_TYPE, show_key: 'hostname', attributes: INSTANCE_ATTRIBUTES.slice(0, 2), relation_type: { id: 1, name: '包含', color: '' }, constraint: '0', parent_attr_ids: [], child_attr_ids: [] }], total: 1 } });
+        return;
+      case '/api/v1/cmdb/ci-types/5/attributes':
+        await route.fulfill({ json: { type_id: 5, unique_id: 10, unique: 'hostname', attributes: INSTANCE_ATTRIBUTES.slice(0, 3) } });
+        return;
+      case '/api/v1/cmdb/preferences/ci-types/48/fields':
+        await route.fulfill({ json: { type_id: 48, is_subscribed: true, fields: DCIM_RACK_ATTRIBUTES.map((attribute) => ({ attr_id: attribute.id, is_fixed: attribute.name === 'name' })) } });
+        return;
+      case '/api/v1/cmdb/preferences/ci-types/5/fields':
+        await route.fulfill({ json: { type_id: 5, is_subscribed: true, fields: [{ attr_id: 10, is_fixed: true }] } });
+        return;
+      case '/api/v1/cmdb/ci-relations/search': {
+        const root = new URL(route.request().url()).searchParams.get('root_id');
+        await route.fulfill({
+          json: root === '31'
+            ? DCIM_DEVICES
+            : { numfound: 0, total: 0, page: 1, result: [] },
+        });
+        return;
+      }
+      case '/api/v1/cmdb/instances/31':
+        await route.fulfill({ json: { ci_id: 31, type_id: 48, values: { name: 'R-A01', u_count: 42, free_u_count: 30, rack_type: '普通柜', rack_code: 'A-01' } } });
         return;
       case '/api/v1/cmdb/ci/s':
         await route.fulfill({ json: { numfound: 0, total: 0, page: 1, result: [] } });
@@ -653,7 +772,7 @@ async function mockAPI(page: import('@playwright/test').Page) {
 // The action column must be fixed as one piece: a pinned cell under an
 // unpinned header lets the headers of the columns it covers show through.
 // A DOM assertion cannot see that, so this measures both boxes in Chromium.
-test('the model action header stays pinned with the action cells', async ({ page }) => {
+test('the model action header moves with the action cells', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
   await page.addInitScript(() => {
     localStorage.setItem('ongrid-locale', 'zh-CN');
@@ -664,6 +783,12 @@ test('the model action header stays pinned with the action cells', async ({ page
     }));
   });
   await mockAPI(page);
+  // The pinned-column behaviour only matters when the table is wider than its
+  // card. A longer identifying attribute keeps this 1024px case overflowing
+  // even though the workbench card now fits the short fixture exactly.
+  await page.route('**/api/v1/cmdb/ci-types', (route) =>
+    route.fulfill({ json: { items: [{ ...HOST, unique_key: 'hostname_with_a_deliberately_long_key' }], total: 1 } }),
+  );
 
   await page.goto('/cmdb/models');
   await expect(page.getByRole('heading', { name: '模型配置' })).toBeVisible();
@@ -671,26 +796,56 @@ test('the model action header stays pinned with the action cells', async ({ page
   await page.getByRole('button', { name: '列表' }).click();
 
   const table = page.locator('.cmdb-table');
-  const scroller = table.locator('div.overflow-x-auto').first();
   await expect(table.getByText('hostname')).toBeVisible();
 
-  const scroll = await scroller.evaluate((element) => ({
-    scrollWidth: element.scrollWidth,
-    clientWidth: element.clientWidth,
-  }));
-  expect(scroll.scrollWidth).toBeGreaterThan(scroll.clientWidth);
+  const measure = () =>
+    table.evaluate((element) => {
+      const header = element.querySelector('thead th:last-child');
+      const cell = element.querySelector('tbody td.sticky');
+      const box = element.querySelector('div.overflow-x-auto');
+      if (!header || !cell || !box) return null;
+      return {
+        headerPosition: getComputedStyle(header).position,
+        cellPosition: getComputedStyle(cell).position,
+        headerRight: header.getBoundingClientRect().right,
+        cellRight: cell.getBoundingClientRect().right,
+        overflow: box.scrollWidth - box.clientWidth,
+      };
+    });
 
-  const headerBox = await table.locator('thead th').filter({ hasText: '操作' }).boundingBox();
-  const cellBox = await table.locator('tbody td.sticky').first().boundingBox();
-  const scrollerBox = await scroller.boundingBox();
-  expect(headerBox).not.toBeNull();
-  expect(cellBox).not.toBeNull();
-  expect(scrollerBox).not.toBeNull();
-  if (!headerBox || !cellBox || !scrollerBox) return;
+  // Below 2xl the action column is deliberately static, so a fixed column
+  // cannot cover the data columns. The header is sticky vertically (the list
+  // card scrolls its own body) but must not be pinned horizontally: scrolling
+  // the table sideways moves it with the cells, still ending at the same edge.
+  const narrow = await measure();
+  expect(narrow).not.toBeNull();
+  expect(narrow!.overflow).toBeGreaterThan(0);
+  expect(narrow!.headerPosition).toBe('sticky');
+  expect(narrow!.cellPosition).toBe('static');
+  expect(Math.abs(narrow!.headerRight - narrow!.cellRight)).toBeLessThanOrEqual(1);
 
-  const scrollerRight = scrollerBox.x + scrollerBox.width;
-  expect(headerBox.x + headerBox.width).toBeLessThanOrEqual(scrollerRight + 1);
-  expect(Math.abs((headerBox.x + headerBox.width) - (cellBox.x + cellBox.width))).toBeLessThanOrEqual(1);
+  await table.evaluate((element) => {
+    const box = element.querySelector('div.overflow-x-auto') as HTMLElement | null;
+    if (box) box.scrollLeft = 40;
+  });
+  const sideScrolled = await measure();
+  expect(sideScrolled).not.toBeNull();
+  expect(sideScrolled!.headerRight).toBeLessThan(narrow!.headerRight - 20);
+  expect(Math.abs(sideScrolled!.headerRight - sideScrolled!.cellRight)).toBeLessThanOrEqual(1);
+  await table.evaluate((element) => {
+    const box = element.querySelector('div.overflow-x-auto') as HTMLElement | null;
+    if (box) box.scrollLeft = 0;
+  });
+
+  // At 2xl the action column is pinned as one piece: a pinned cell under an
+  // unpinned header would let the covered headers show through.
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await expect.poll(async () => (await measure())?.headerPosition).toBe('sticky');
+  const wide = await measure();
+  expect(wide).not.toBeNull();
+  expect(wide!.headerPosition).toBe('sticky');
+  expect(wide!.cellPosition).toBe('sticky');
+  expect(Math.abs(wide!.headerRight - wide!.cellRight)).toBeLessThanOrEqual(1);
 });
 
 // Three labelled row buttons take almost the whole width of a phone table,
@@ -783,7 +938,10 @@ test('the model list can scroll to the last model in both views', async ({ page 
   await page.goto('/cmdb/models');
   await expect(page.getByRole('heading', { name: '模型配置' })).toBeVisible();
 
-  const content = page.locator('.cmdb-liquid-content');
+  // The full-height workbench card owns the page's one vertical scroller: the
+  // table view scrolls DataTable's own body (with a sticky header), the grid
+  // view scrolls the card body.
+  const content = page.locator('.cmdb-table-scroll, .cmdb-model-table-scroll').first();
   const tableScroll = await content.evaluate((element) => ({
     client: element.clientHeight,
     scroll: element.scrollHeight,
@@ -838,9 +996,10 @@ test('the model list groups table rows and cards without duplicating the table',
   await expect(page.getByRole('rowheader', { name: /其他/ })).toContainText('1 个模型');
 
   // ONE table, ONE column picker: grouping must not render a table per group.
+  // The picker is page chrome in the toolbar, so it is exactly one either way.
   const table = page.locator('.cmdb-table');
   await expect(table.locator('table')).toHaveCount(1);
-  await expect(table.getByRole('button', { name: /列/ })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: '列', exact: true })).toHaveCount(1);
   await expect(table.getByRole('link', { name: '主机' })).toBeVisible();
   await expect(table.getByRole('link', { name: '交换机' })).toBeVisible();
 
@@ -910,7 +1069,9 @@ test('resource data uses the compact header, model rail and one vertical scrolle
   await expect(header).toContainText('实例总数');
   await expect(header).toContainText('本页 Active');
 
-  const content = page.locator('.cmdb-liquid-content');
+  // The workbench card owns the page's one vertical scroller: the table view
+  // scrolls DataTable's own body (sticky header), the grid view the card body.
+  const content = page.locator('.cmdb-table-scroll, .cmdb-model-table-scroll').first();
   const before = await content.evaluate((element) => ({
     client: element.clientHeight,
     scroll: element.scrollHeight,
@@ -1748,6 +1909,92 @@ for (const width of ATTRIBUTE_WIDTHS) {
   }
 }
 
+test('DCIM workspace: rack grid, U view, table and operation log', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+
+  await page.goto('/cmdb/dcim?node=3');
+  await expect(page.getByRole('heading', { name: '数据中心' })).toBeVisible();
+  const tree = page.getByRole('tree');
+  await expect(tree.getByText('A 机房')).toBeVisible();
+  await expect(tree.getByTitle('2 个机柜').first()).toBeVisible();
+
+  // The room totals and the two racks.
+  await expect(page.getByText('R-A01')).toBeVisible();
+  await expect(page.getByText('R-A02')).toBeVisible();
+  await expect(page.getByText('24%')).toBeVisible();
+  await expect(page.getByText('50/42')).toBeVisible();
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+
+  await page.screenshot({ path: testInfo.outputPath('dcim-grid-1440-light-zh.png') });
+
+  // The rack drawer draws both faces and the operation log labels the codes.
+  await page.getByRole('button', { name: '打开机柜 R-A01' }).click();
+  const drawer = page.getByRole('dialog');
+  await expect(drawer.getByText('前视图')).toBeVisible();
+  await expect(drawer.getByRole('group', { name: '设备 srv-01' }).first()).toBeVisible();
+  await drawer.getByRole('tab', { name: '操作日志' }).click();
+  const log = drawer.getByRole('table');
+  await expect(log.getByText('上架', { exact: true })).toBeVisible();
+  await expect(log.getByText('运维')).toBeVisible();
+  await expect(log.getByText('srv-01')).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('dcim-log-1440-light-zh.png') });
+  await drawer.getByRole('button', { name: '关闭' }).click();
+
+  // The table keeps the identity, the capacity and the actions in view; the
+  // subscription's secondary columns wait for a wider window.
+  await page.getByRole('button', { name: '表格布局' }).click();
+  await expect(page.getByRole('columnheader', { name: '使用率' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '操作' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '机柜编号' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '别名' })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('dcim-table-1440-light-zh.png') });
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.getByRole('columnheader', { name: '操作' })).toBeVisible();
+  const bounds = await page.evaluate(() => {
+    const table = document.querySelector('table');
+    const action = [...document.querySelectorAll('th')].find((cell) => cell.textContent?.trim() === '操作');
+    if (!table || !action) return null;
+    return {
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      inside: action.getBoundingClientRect().right <= table.getBoundingClientRect().right + 1,
+    };
+  });
+  expect(bounds).not.toBeNull();
+  expect(bounds!.pageOverflow).toBeLessThanOrEqual(1);
+  expect(bounds!.inside).toBe(true);
+
+  // On a phone the table scrolls inside its card and the action column stays
+  // static, so it cannot cover the only readable data columns.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const phone = await page.evaluate(() => {
+    const table = document.querySelector('table');
+    const scroller = table?.parentElement;
+    const action = [...document.querySelectorAll('th')].find((cell) => cell.textContent?.trim() === '操作');
+    return {
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      tableOverflow: scroller ? scroller.scrollWidth - scroller.clientWidth : 0,
+      actionPosition: action ? getComputedStyle(action).position : '',
+    };
+  });
+  expect(phone.pageOverflow).toBeLessThanOrEqual(1);
+  expect(phone.tableOverflow).toBeGreaterThan(0);
+  expect(phone.actionPosition).toBe('static');
+});
+
 test('IPAM workspace: merge, filter, edit, history', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => {
@@ -1772,6 +2019,21 @@ test('IPAM workspace: merge, filter, edit, history', async ({ page }, testInfo) 
   await expect(page.getByText('10.0.0.11', { exact: true })).toBeVisible();
   await expect(page.getByText('10.0.0.13', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /未使用 \(253\)/ })).toBeVisible();
+
+  // THE PAGER SITS AFTER THE TABLE, NOT OVER IT. A sticky footer on a table
+  // taller than the viewport covers the rows it is meant to follow.
+  const pager = await page.evaluate(() => {
+    const footer = document.querySelector('[data-slot="pagination-footer"]');
+    const table = document.querySelector('table');
+    if (!footer || !table) return null;
+    return {
+      position: getComputedStyle(footer).position,
+      afterTable: footer.getBoundingClientRect().top >= table.getBoundingClientRect().bottom,
+    };
+  });
+  expect(pager).not.toBeNull();
+  expect(pager!.position).toBe('static');
+  expect(pager!.afterTable).toBe(true);
 
   await page.screenshot({ path: testInfo.outputPath('ipam-address-1440-light-zh.png') });
 
@@ -1798,6 +2060,31 @@ test('IPAM workspace: merge, filter, edit, history', async ({ page }, testInfo) 
   await page.getByRole('tab', { name: '扫描日志' }).click();
   await page.getByRole('button', { name: '查看扫描结果' }).click();
   await expect(page.getByText('2 hosts up')).toBeVisible();
+});
+
+test('IPAM overview keeps the action column visible at 1280', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+
+  await page.goto('/cmdb/ipam?tab=overview&node=all');
+  await expect(page.getByRole('heading', { name: 'IP 地址空间' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '操作' })).toBeVisible();
+  // Secondary columns are dropped so the identity and the actions fit; they
+  // come back with the wider window.
+  await expect(page.getByRole('columnheader', { name: '主机数' })).toHaveCount(0);
+  await expect(page.getByRole('columnheader', { name: '扫描' })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(page.getByRole('columnheader', { name: '主机数' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '扫描' })).toBeVisible();
 });
 
 test('IPAM address table stays inside the page at phone width', async ({ page }) => {
@@ -1829,6 +2116,93 @@ test('IPAM address table stays inside the page at phone width', async ({ page })
   expect(metrics.tableOverflow).toBeGreaterThan(0);
   expect(metrics.actionPosition).toBe('static');
 });
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`batch import previews a sheet and commits it (${theme})`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.addInitScript((themeName) => {
+      localStorage.setItem('ongrid-locale', 'zh-CN');
+      localStorage.setItem('ongrid-theme-preference', themeName);
+      localStorage.setItem('ongrid.auth', JSON.stringify({
+        state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+        version: 0,
+      }));
+    }, theme);
+    await mockAPI(page);
+
+    await page.goto('/cmdb/batch');
+    await page.locator('#cmdb-import-model').click();
+    await page.getByRole('option', { name: '主机' }).click();
+    await expect(page.locator('#cmdb-import-file')).toBeEnabled();
+
+    await page.locator('#cmdb-import-file').setInputFiles({
+      name: 'hosts.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from('hostname\nweb-01\n'),
+    });
+
+    await expect(page.getByRole('heading', { name: '列映射' })).toBeVisible();
+    await expect(page.getByText('新建 1 · 更新 0')).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`batch-import-preview-${theme}.png`), fullPage: true });
+
+    await page.getByRole('heading', { name: '数据预览' }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`batch-import-preview-rows-${theme}.png`) });
+
+    await page.getByRole('button', { name: '下载模板' }).click();
+    await expect(page.getByRole('heading', { name: '模型属性' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`batch-import-template-${theme}.png`) });
+    await page.getByRole('button', { name: '取消' }).click();
+
+    await page.getByRole('button', { name: '导入', exact: true }).click();
+    await expect(page.getByText('导入完成')).toBeVisible();
+    await expect(page.getByText('已写入 1 行')).toBeVisible();
+  });
+}
+
+for (const width of [390, 768, 1280, 1920]) {
+  test(`batch import preview fits ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.addInitScript(() => {
+      localStorage.setItem('ongrid-locale', 'zh-CN');
+      localStorage.setItem('ongrid-theme-preference', 'light');
+      localStorage.setItem('ongrid.auth', JSON.stringify({
+        state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+        version: 0,
+      }));
+    });
+    await mockAPI(page);
+
+    await page.goto('/cmdb/batch');
+    await page.locator('#cmdb-import-model').click();
+    await page.getByRole('option', { name: '主机' }).click();
+    await expect(page.locator('#cmdb-import-file')).toBeEnabled();
+    await page.locator('#cmdb-import-file').setInputFiles({
+      name: 'hosts.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from('hostname\nweb-01\n'),
+    });
+    await expect(page.getByRole('heading', { name: '列映射' })).toBeVisible();
+
+    // The page itself must not widen; the mapping and preview tables scroll
+    // inside their own containers.
+    expect(await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )).toBeLessThanOrEqual(1);
+
+    await page.getByRole('heading', { name: '数据预览' }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`batch-import-preview-${width}.png`) });
+
+    if (width === 390) {
+      await page.getByRole('button', { name: '下载模板' }).click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      const box = await dialog.boundingBox();
+      expect(box).not.toBeNull();
+      expect((box?.x ?? 0) >= 0 && (box?.x ?? 0) + (box?.width ?? 0) <= 391).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath('batch-import-template-390.png') });
+    }
+  });
+}
 
 for (const pageDef of PAGES) {
   const widths = [390, 768, 1280, 1920];

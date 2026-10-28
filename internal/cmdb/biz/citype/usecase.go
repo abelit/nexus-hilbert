@@ -3,6 +3,7 @@ package citype
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -140,6 +141,47 @@ func (u *Usecase) GetByRef(ctx context.Context, ref string) (*View, error) {
 		return nil, nil
 	}
 	return view, err
+}
+
+// GetByAlias resolves a model by its display alias.
+//
+// IT EXISTS FOR A SHEET HEADER, NOT FOR THE API. A relation column is written
+// `$<model>.<attribute>`; cantor's templates used the model's display alias
+// there, and an operator editing this port's template may type one too. The
+// alias is not unique by constraint, so an ambiguous one is refused rather than
+// resolved to whichever row the database returned first — writing a relation to
+// the wrong model is worse than refusing the sheet.
+//
+// It returns (nil, nil) when nothing matches, like GetByRef.
+func (u *Usecase) GetByAlias(ctx context.Context, alias string) (*View, error) {
+	if u.repo == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	if alias == "" {
+		return nil, errs.ErrInvalid
+	}
+	types, err := u.repo.ListTypes(ctx, ListFilter{})
+	if err != nil {
+		return nil, err
+	}
+	matches := make([]citypemodel.CIType, 0, 1)
+	for _, candidate := range types {
+		if candidate.Alias == alias {
+			matches = append(matches, candidate)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return nil, nil
+	case 1:
+		views, err := u.enrich(ctx, matches)
+		if err != nil {
+			return nil, err
+		}
+		return &views[0], nil
+	default:
+		return nil, fmt.Errorf("%w: %q is the alias of %d models", errs.ErrInvalid, alias, len(matches))
+	}
 }
 
 // Icons returns the id -> icon map the console uses to render model icons.

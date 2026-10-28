@@ -181,6 +181,10 @@ func (dcimRepoStub) FindCIsByUniqueValues(context.Context, model.ID, model.ID, m
 	return nil, errors.New("not used")
 }
 
+func (dcimRepoStub) FindCIsByAttributeValues(context.Context, model.ID, model.ID, map[model.ID]AttributeSpec, []any) ([][]model.ID, error) {
+	return nil, errors.New("not used")
+}
+
 func (dcimRepoStub) RecordIPAMOperation(context.Context, IPAMHistoryEntry, AuditInfo) error {
 	return errors.New("not used")
 }

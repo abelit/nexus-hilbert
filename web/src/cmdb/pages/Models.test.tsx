@@ -78,6 +78,22 @@ beforeEach(() => {
 });
 
 describe('the list', () => {
+  it('keeps the workspace bar above the tree and the content', async () => {
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })),
+      http.get('/api/v1/cmdb/attributes', () => HttpResponse.json({ items: attributes, total: attributes.length })),
+    );
+    renderPage();
+
+    const bar = await screen.findByRole('banner');
+    expect(within(bar).getByText('CMDB 资源管理平台')).toBeInTheDocument();
+    expect(within(bar).getByRole('heading', { level: 1, name: '模型配置' })).toBeInTheDocument();
+    expect(within(bar).getByText('总数')).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: /新建模型/ })).toBeInTheDocument();
+    // The tree is a sibling of the bar, not a child: it starts below it.
+    expect(within(bar).queryByPlaceholderText('搜索模型分组或模型…')).not.toBeInTheDocument();
+  });
+
   it('draws the models and their navigation links', async () => {
     server.use(
       http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })),
@@ -111,6 +127,27 @@ describe('the list', () => {
     expect(screen.queryByRole('link', { name: '主机' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: '交换机' })).toBeInTheDocument();
   });
+
+  it('pages a long model list and reports the visible range', async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 21 }, (_, index) => ({
+      ...models[0],
+      id: index + 1,
+      name: `model_${String(index + 1).padStart(2, '0')}`,
+      alias: `模型 ${String(index + 1).padStart(2, '0')}`,
+      order: index,
+    }));
+    server.use(http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: many, total: many.length })));
+    renderPage();
+
+    expect(await screen.findByText('显示 1 至 20 条，共 21 条模型')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: '模型 01' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: '模型 21' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '第 2 页' }));
+    expect(await screen.findByText('显示 21 至 21 条，共 21 条模型')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: '模型 21' }).length).toBeGreaterThan(0);
+  }, 30000);
 
   it('presents the schema as cards and keeps the actions', async () => {
     const user = userEvent.setup();
@@ -256,7 +293,7 @@ describe('grouping', () => {
 
     await screen.findByRole('link', { name: '主机' });
     await user.click(screen.getByRole('checkbox', { name: '按分组显示' }));
-    await user.click(screen.getByRole('button', { name: '只看启用' }));
+    await user.click(screen.getByRole('button', { name: /已启用/ }));
 
     const serverHeader = screen.getByRole('rowheader', { name: /服务器/ });
     expect(screen.queryByRole('rowheader', { name: /网络/ })).not.toBeInTheDocument();

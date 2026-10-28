@@ -286,6 +286,7 @@ export function HistoryTab() {
           shown={rows.length}
           total={numFound}
           onPageChange={setPage}
+          sticky={false}
           className="mt-3"
         />
       </Card>

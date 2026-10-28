@@ -10,6 +10,7 @@ import { listModelGroups, type ModelGroup } from '../api/preferences';
 import { describeError } from '../api/http';
 import { ModelTree } from './ModelTree';
 import { ModelTreeRefreshContext } from './model-tree-context';
+import { WorkspaceBar } from './WorkspaceBar';
 
 // The model configuration workspace.
 //
@@ -21,8 +22,22 @@ import { ModelTreeRefreshContext } from './model-tree-context';
 // On narrow screens the tree moves into a modal. The page header keeps a
 // "choose model" button, so a phone user can switch models without a
 // permanent 264px rail consuming the viewport.
+//
+// THE BAR BELONGS TO THE WORKSPACE, NOT TO A PAGE. Model configuration reads as
+// its own product surface: a full-width bar carries the CMDB mark, the page's
+// breadcrumb and its actions, and the tree starts underneath it. If the bar
+// lived inside the content column the tree would start above the breadcrumb and
+// the two left rails would fight for the first line.
 
-export function ModelConfigShell({ children }: { children: React.ReactNode }) {
+/** The workspace bar's page-specific slots. */
+export type ModelConfigHeader = {
+  /** Breadcrumb, ending in the page's own heading. */
+  leading: React.ReactNode;
+  /** Counters and page actions, right-aligned when they fit. */
+  actions?: React.ReactNode;
+};
+
+export function ModelConfigShell({ header, children }: { header: ModelConfigHeader; children: React.ReactNode }) {
   const { tr } = useI18n();
   const params = useParams<{ id?: string }>();
   const selectedID = params.id && /^\d+$/.test(params.id) ? Number(params.id) : undefined;
@@ -55,33 +70,38 @@ export function ModelConfigShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ModelTreeRefreshContext.Provider value={refresh}>
-      <div className="flex h-full min-h-0 w-full min-w-0">
-        <div className="hidden h-full min-h-0 lg:flex">
-          <ModelTree
-            models={models}
-            groups={groups}
-            selectedID={selectedID}
-            loading={loading}
-            error={err}
-            onRetry={() => void load()}
-          />
-        </div>
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+        <WorkspaceBar leading={header.leading} actions={header.actions} />
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* THE LIST IS NOT A MODEL DETAIL. On /cmdb/models there is no
-              selected model, so the narrow-screen picker would offer a choice
-              the page itself already shows. Detail pages keep it. */}
-          {selectedID !== undefined && (
-            <div className="flex items-center gap-2 border-b border-border px-4 py-2 lg:hidden">
-              <Button variant="outline" size="sm" type="button" onClick={() => setMobileOpen(true)}>
-                {tr('选择模型', 'Choose model')}
-              </Button>
-              <span className="min-w-0 truncate text-xs text-text-muted">
-                {selected ? selected.alias || selected.name : tr('未选择模型', 'No model selected')}
-              </span>
-            </div>
-          )}
-          <div className="min-h-0 flex-1">{children}</div>
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <div className="hidden h-full min-h-0 lg:flex">
+            <ModelTree
+              models={models}
+              groups={groups}
+              selectedID={selectedID}
+              loading={loading}
+              error={err}
+              onRetry={() => void load()}
+              compact
+            />
+          </div>
+
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* THE LIST IS NOT A MODEL DETAIL. On /cmdb/models there is no
+                selected model, so the narrow-screen picker would offer a choice
+                the page itself already shows. Detail pages keep it. */}
+            {selectedID !== undefined && (
+              <div className="flex items-center gap-2 border-b border-border px-4 py-2 lg:hidden">
+                <Button variant="outline" size="sm" type="button" onClick={() => setMobileOpen(true)}>
+                  {tr('选择模型', 'Choose model')}
+                </Button>
+                <span className="min-w-0 truncate text-xs text-text-muted">
+                  {selected ? selected.alias || selected.name : tr('未选择模型', 'No model selected')}
+                </span>
+              </div>
+            )}
+            <div className="min-h-0 flex-1">{children}</div>
+          </div>
         </div>
       </div>
 
@@ -100,6 +120,7 @@ export function ModelConfigShell({ children }: { children: React.ReactNode }) {
             error={err}
             onRetry={() => void load()}
             onSelect={() => setMobileOpen(false)}
+            compact
           />
         </div>
       </Modal>

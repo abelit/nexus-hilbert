@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -134,6 +135,113 @@ func (r *Repo) FindCIsByUniqueValues(ctx context.Context, typeID, attrID model.I
 		}
 	}
 	return out, nil
+}
+
+// FindCIsByAttributeValues returns every instance of a model that carries each
+// value, in the caller's order.
+//
+// IT IS THE SAME QUERY AS THE UNIQUE LOOKUP WITH A DIFFERENT CARDINALITY. A
+// unique attribute names one instance by definition; a relation column may name
+// any attribute, and a dozen racks can share a room name. The lookup therefore
+// returns the whole match set per value, and the caller decides whether an
+// empty set is a row error.
+//
+// The value-table choice, the coercion and the model filter are the unique
+// lookup's for the same reasons: an attribute's value may live in any of six
+// tables, a cell arrives as text, and a row in another model's table is not a
+// match for this model.
+func (r *Repo) FindCIsByAttributeValues(ctx context.Context, typeID, attrID model.ID, specs map[model.ID]cibiz.AttributeSpec, values []any) ([][]model.ID, error) {
+	out := make([][]model.ID, len(values))
+	spec, ok := specs[attrID]
+	if !ok || len(values) == 0 {
+		return out, nil
+	}
+	table, err := spec.StorageTable()
+	if err != nil {
+		return nil, err
+	}
+
+	key := func(stored value.StoredValue) string { return storedKey(table, stored) }
+	want := map[string][]int{}
+	storedList := make([]any, 0, len(values))
+	seen := map[string]bool{}
+	for i, raw := range values {
+		if raw == nil {
+			continue
+		}
+		stored, err := spec.ValueType.Validate(raw)
+		if err != nil {
+			continue
+		}
+		k := key(stored)
+		want[k] = append(want[k], i)
+		if !seen[k] {
+			seen[k] = true
+			storedList = append(storedList, stored)
+		}
+	}
+	if len(storedList) == 0 {
+		return out, nil
+	}
+
+	var rows []struct {
+		CIID  model.ID `gorm:"column:ci_id"`
+		Value string   `gorm:"column:value"`
+	}
+	q := r.db.WithContext(ctx).Table(table).
+		Select("ci_id, value").
+		Where("attr_id = ?", attrID)
+	if isTextTable(table) && r.db.Dialector.Name() == "sqlite" {
+		q = q.Where("value COLLATE NOCASE IN ?", storedList)
+	} else {
+		q = q.Where("value IN ?", storedList)
+	}
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("cmdb ci: look up relation values: %w", err)
+	}
+
+	ids := make([]model.ID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.CIID)
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var live []cimodel.CI
+	if err := r.db.WithContext(ctx).Model(&cimodel.CI{}).
+		Where("type_id = ? AND delete_marker = 0 AND id IN ?", typeID, ids).
+		Find(&live).Error; err != nil {
+		return nil, fmt.Errorf("cmdb ci: filter relation values by model: %w", err)
+	}
+	allowed := make(map[model.ID]bool, len(live))
+	for _, ci := range live {
+		allowed[ci.ID] = true
+	}
+
+	for _, row := range rows {
+		if !allowed[row.CIID] {
+			continue
+		}
+		for _, idx := range want[foldKey(table, row.Value)] {
+			if containsID(out[idx], row.CIID) {
+				continue
+			}
+			out[idx] = append(out[idx], row.CIID)
+		}
+	}
+	for _, list := range out {
+		sort.Slice(list, func(i, j int) bool { return list[i] < list[j] })
+	}
+	return out, nil
+}
+
+func containsID(ids []model.ID, id model.ID) bool {
+	for _, got := range ids {
+		if got == id {
+			return true
+		}
+	}
+	return false
 }
 
 // storedKey renders a coerced value the way the lookup keys it.

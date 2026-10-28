@@ -482,6 +482,7 @@ export function AddressesTab() {
               shown={pageRows.length}
               total={filtered.length}
               onPageChange={setPage}
+              sticky={false}
               className="mt-3"
             />
           </>
@@ -502,6 +503,7 @@ export function AddressesTab() {
               shown={pageRows.length}
               total={filtered.length}
               onPageChange={setPage}
+              sticky={false}
               className="mt-3"
             />
           </>

@@ -586,4 +586,16 @@ type ImportRepo interface {
 	// the identifying attribute's VALUE TYPE to pick the table the value lives
 	// in. See RackChange for why the ids travel as values.
 	FindCIsByUniqueValues(ctx context.Context, typeID, attrID model.ID, specs map[model.ID]AttributeSpec, values []any) ([]model.ID, error)
+
+	// FindCIsByAttributeValues returns, for each value, EVERY instance of the
+	// model that carries it, in the CALLER'S ORDER. A value no instance has is
+	// an empty list.
+	//
+	// IT IS THE RELATION IMPORT'S LOOKUP, and it differs from the unique
+	// lookup in two ways that matter: the attribute need not be unique, so one
+	// value can name several parents; and the caller is resolving a column of
+	// `$parent.attribute` cells, so "no match" is a row error rather than a
+	// create. One query for the whole column, for the same reason the unique
+	// lookup is batched: a preview must not cost one query per row.
+	FindCIsByAttributeValues(ctx context.Context, typeID, attrID model.ID, specs map[model.ID]AttributeSpec, values []any) ([][]model.ID, error)
 }

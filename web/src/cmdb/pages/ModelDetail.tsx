@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, FileJson, Pencil, Plus, RefreshCw } from 'lucide-react';
+import { ChevronRight, FileJson, Pencil, Plus, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -9,7 +9,6 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Hint } from '@/components/ui/Tooltip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
-import { PageHeader } from '@/components/ui/PageHeader';
 import { Select } from '@/components/ui/Select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Modal } from '@/components/Modal';
@@ -38,6 +37,7 @@ import {
   type TypeAttribute,
 } from '../api/citype';
 import { AttributeDictionary } from '../components/AttributeDictionary';
+import { MetaPill } from '../components/MetaPill';
 import { ModelConfigShell } from '../components/ModelConfigShell';
 import { useModelTreeRefresh } from '../components/model-tree-context';
 import { AttributeForm } from '../components/AttributeForm';
@@ -175,57 +175,63 @@ export default function ModelDetailPage() {
   };
 
   const modelLabel = model ? model.alias || model.name : ref;
+  const sectionCount = groups.filter((group) => !group.is_other).length;
 
   return (
-    <ModelConfigShell>
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-      <PageHeader
-        leading={
-          <Link
-            to="/cmdb/models"
-            className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
-          >
-            <ChevronLeft size={12} aria-hidden="true" />
-            {tr('所有模型', 'All models')}
-          </Link>
-        }
-        title={
-          <span className="flex items-center gap-2">
-            <CMDBIcon value={model?.icon} size={18} label={modelLabel} />
-            <span className="truncate">{modelLabel}</span>
-            {model && !model.enabled && <Chip>{tr('停用', 'Disabled')}</Chip>}
-            {model && !loading && attributes.length === 0 && <Chip tone="warning">{tr('无绑定属性', 'No bound attributes')}</Chip>}
-          </span>
-        }
-        subtitle={
-          model ? (
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <code className="font-mono">{model.name}</code>
-              {model.unique_key && (
-                <span>
-                  {tr('标识', 'Identifies by')} <code className="font-mono">{model.unique_key}</code>
-                </span>
-              )}
-              {model.show_name && (
-                <span>
-                  {tr('展示', 'Shows')} <code className="font-mono">{model.show_name}</code>
-                </span>
+    <ModelConfigShell
+      header={{
+        leading: (
+          <>
+            <Link
+              to="/cmdb/models"
+              className="hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+            >
+              {tr('资源模型', 'Resource models')}
+            </Link>
+            <ChevronRight size={10} aria-hidden="true" />
+            <Link
+              to="/cmdb/models"
+              className="hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+            >
+              {tr('模型配置', 'Model configuration')}
+            </Link>
+            <ChevronRight size={10} aria-hidden="true" />
+            <span className="flex min-w-0 items-center gap-1.5">
+              <CMDBIcon value={model?.icon} size={14} label={modelLabel} />
+              <h1 className="min-w-0 truncate text-xs font-medium text-text">{modelLabel}</h1>
+              {model && !model.enabled && <Chip>{tr('停用', 'Disabled')}</Chip>}
+              {model && !loading && attributes.length === 0 && (
+                <Chip tone="warning">{tr('无绑定属性', 'No bound attributes')}</Chip>
               )}
             </span>
-          ) : undefined
-        }
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
+          </>
+        ),
+        actions: (
+          <div className="cmdb-workspace-actions flex flex-wrap items-center justify-end gap-2 max-xl:justify-start">
+            {model && (
+              <span className="flex flex-wrap items-center gap-1.5">
+                <MetaPill label={tr('模型', 'Model')} value={model.name} mono />
+                {model.unique_key && (
+                  <MetaPill label={tr('标识', 'Identifies by')} value={model.unique_key} mono />
+                )}
+                {model.show_name && (
+                  <MetaPill label={tr('展示', 'Shows')} value={model.show_name} mono />
+                )}
+                <MetaPill label={tr('属性', 'Attributes')} value={attributes.length} />
+                <MetaPill label={tr('分组', 'Sections')} value={sectionCount} />
+              </span>
+            )}
             <Button
               variant="outline"
               size="sm"
               type="button"
               onClick={() => void load(true)}
               disabled={loading || refreshing}
-              className="inline-flex items-center gap-1.5"
+              aria-label={tr('刷新', 'Refresh')}
+              title={tr('刷新', 'Refresh')}
+              className="size-7 rounded-full px-0"
             >
-              <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
-              {tr('刷新', 'Refresh')}
+              <RefreshCw size={14} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
             </Button>
             <Button
               variant="outline"
@@ -252,18 +258,16 @@ export default function ModelDetailPage() {
               </Button>
             </Hint>
           </div>
-        }
-      />
-
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
-        {err && (
-          <div role="alert" className="mb-4 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
-            {err}
-          </div>
-        )}
-
-        <Tabs value={tab} onValueChange={changeTab}>
-          <TabsList className="mb-4">
+        ),
+      }}
+    >
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+      <Tabs value={tab} onValueChange={changeTab} className="flex min-h-0 flex-1 flex-col">
+        {/* THE TABS ARE PAGE CHROME, NOT CONTENT. Like the model list's filter
+            band they stay under the workspace bar while the active tab
+            scrolls, so switching tabs never means scrolling back to the top. */}
+        <div className="app-header cmdb-model-config-tabs shrink-0 px-6 pt-3">
+          <TabsList className="mb-0 flex-wrap border-b-0">
             <TabsTrigger value="attributes">
               {tr('属性', 'Attributes')}
               <span className="ml-1.5 text-[11px] text-text-faint">{attributes.length}</span>
@@ -277,8 +281,28 @@ export default function ModelDetailPage() {
             <TabsTrigger value="triggers">{tr('触发器', 'Triggers')}</TabsTrigger>
             <TabsTrigger value="discovery">{tr('自动发现', 'Auto discovery')}</TabsTrigger>
           </TabsList>
+        </div>
 
-          <TabsContent value="attributes">
+        {/* THE TAB CONTENT SHARES THE LIST'S WORKSPACE SURFACE. One liquid
+            background spans the whole area under the fixed tabs, so switching
+            from attributes to relations/constraints no longer swaps a tinted
+            panel for a plain grey page, and the page reads like the model
+            list's workbench instead of a floating panel with margins. */}
+        <div className="cmdb-liquid relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="cmdb-liquid-blobs" aria-hidden="true">
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-a" />
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-b" />
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
+          </div>
+
+          <div className="cmdb-model-detail-body relative min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
+            {err && (
+              <div role="alert" className="mb-4 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300">
+                {err}
+              </div>
+            )}
+
+            <TabsContent value="attributes">
             <ModelAttributesPanel
               rows={attributes}
               groups={groups}
@@ -305,7 +329,7 @@ export default function ModelDetailPage() {
             <ConstraintsTab modelRef={ref} attributes={attributes} isAdmin={isAdmin} adminTip={adminTip} />
           </TabsContent>
 
-          <TabsContent value="discovery" className="min-h-0 flex-1 overflow-y-auto p-6">
+          <TabsContent value="discovery">
             <Card>
               <div className="flex flex-col gap-2 p-4">
                 <h2 className="text-sm font-medium text-text">{tr('自动发现', 'Auto discovery')}</h2>
@@ -336,8 +360,9 @@ export default function ModelDetailPage() {
           <TabsContent value="triggers">
             <TriggersTab modelRef={ref} attributes={attributes} isAdmin={isAdmin} adminTip={adminTip} />
           </TabsContent>
-        </Tabs>
-      </div>
+          </div>
+        </div>
+      </Tabs>
 
       {editing && model && (
         <ModelForm

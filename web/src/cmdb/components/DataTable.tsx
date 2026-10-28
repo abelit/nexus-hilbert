@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, RotateCw } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -44,6 +44,13 @@ export type Column<T> = {
   hideable?: boolean;
   /** Starts hidden; only meaningful with `hideable`. */
   defaultHidden?: boolean;
+  /**
+   * Drop this column below a viewport width. A dense table that keeps every
+   * secondary column on a narrow window pushes the action column off the edge;
+   * hiding a count or a scan badge keeps the identity and the actions visible.
+   * The column returns automatically when the window is wide enough.
+   */
+  hideBelow?: number;
 };
 
 export type SortState = { key: string; desc: boolean };
@@ -98,6 +105,22 @@ type Props<T> = {
 
   /** Persists column visibility under this key. */
   storageKey?: string;
+
+  /**
+   * Controlled column visibility. When set, the page owns the state (via
+   * `useColumnVisibility`) and usually renders the picker in its own toolbar.
+   */
+  hiddenColumns?: string[];
+  onToggleColumn?: (key: string) => void;
+  /** Hide the table's built-in column-picker row. */
+  hideColumnPicker?: boolean;
+
+  /**
+   * Fill a flex parent and scroll the table body itself. The model list puts the
+   * table in a full-height workbench card, so the table's own scroller (not a
+   * wrapper) is the page's vertical scroller and the header can stick to it.
+   */
+  fill?: boolean;
 };
 
 export function DataTable<T>({
@@ -116,43 +139,43 @@ export function DataTable<T>({
   selection,
   onRowClick,
   storageKey,
+  hiddenColumns,
+  onToggleColumn,
+  hideColumnPicker,
+  fill,
 }: Props<T>) {
   const { tr } = useI18n();
+  const ownedColumns = useColumnVisibility(columns, storageKey);
+  const hidden = hiddenColumns ?? ownedColumns.hidden;
+  const toggleColumn = onToggleColumn ?? ownedColumns.toggle;
 
-  // A COLUMN MAY START HIDDEN WITHOUT THE OPERATOR HAVING HIDDEN IT. The
-  // defaults are a STRING so the effect below has a stable dependency: pages
-  // rebuild their column array on every render, and an array dependency would
-  // re-seed the state on every render. A stored choice — including an explicit
-  // "show everything" — always wins over the default.
-  const defaultsKey = columns
-    .filter((column) => column.hideable && column.defaultHidden)
-    .map((column) => column.key)
-    .join(',');
-
-  const [hidden, setHidden] = useState<string[]>(() => readHidden(storageKey, splitKeys(defaultsKey)));
   const [localSort, setLocalSort] = useState<SortState | null>(null);
+  const [viewport, setViewport] = useState(() =>
+    typeof window === 'undefined' ? 1920 : window.innerWidth,
+  );
 
   useEffect(() => {
-    setHidden(readHidden(storageKey, splitKeys(defaultsKey)));
-  }, [storageKey, defaultsKey]);
+    const onResize = () => setViewport(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // THE SERVER'S SORT WINS WHEN THERE IS ONE. Both states exist so a caller can
   // switch an endpoint between server-sorted and not without changing the page.
   const activeSort = onSortChange ? sort : localSort;
 
   const visible = useMemo(
-    () => columns.filter((column) => !(column.hideable && hidden.includes(column.key))),
-    [columns, hidden],
+    () =>
+      columns.filter(
+        (column) =>
+          !(column.hideable && hidden.includes(column.key)) &&
+          !(column.hideBelow && viewport < column.hideBelow),
+      ),
+    [columns, hidden, viewport],
   );
-  const hideable = columns.filter((column) => column.hideable);
-
-  const toggleColumn = (key: string) => {
-    setHidden((current) => {
-      const next = current.includes(key) ? current.filter((item) => item !== key) : [...current, key];
-      writeHidden(storageKey, next);
-      return next;
-    });
-  };
+  const hideable = columns.filter(
+    (column) => column.hideable && !(column.hideBelow && viewport < column.hideBelow),
+  );
 
   // ONE COMPARATOR FOR THE WHOLE TABLE. In grouped mode it is applied inside
   // each group, so clicking a header sorts every section the same way without
@@ -263,7 +286,7 @@ export function DataTable<T>({
           </td>
         ))}
         {actions && (
-          <td className="sticky right-0 w-px whitespace-nowrap px-4 py-2 text-left align-middle max-sm:static">
+          <td className="sticky right-0 w-px whitespace-nowrap px-4 py-2 text-left align-middle max-2xl:static">
             <div className="flex items-center gap-1">{actions(row)}</div>
           </td>
         )}
@@ -275,7 +298,7 @@ export function DataTable<T>({
     // THE WRAPPER CARRIES THE MODULE'S OWN CLASS so the selected-row tint can
     // beat the shared `.og-action-table` background rules without editing the
     // shared stylesheet — see ../styles.css.
-    <div className="cmdb-table flex min-w-0 flex-col gap-3">
+    <div className={cn('cmdb-table flex min-w-0 flex-col gap-3', fill && 'min-h-0 flex-1')}>
       {error && (
         <div
           role="alert"
@@ -291,33 +314,9 @@ export function DataTable<T>({
         </div>
       )}
 
-      {hideable.length > 0 && (
+      {!hideColumnPicker && hideable.length > 0 && (
         <div className="flex justify-end">
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="subtle" size="sm" type="button" />}>
-              <Columns3 size={12} aria-hidden="true" />
-              <span className="ml-1.5">{tr('列', 'Columns')}</span>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-52 p-1">
-              {/* Plain buttons, not menu items: a visibility toggle must not
-                  close the menu, and a menu item closes it by design. */}
-              {hideable.map((column) => {
-                const shown = !hidden.includes(column.key);
-                return (
-                  <button
-                    key={column.key}
-                    type="button"
-                    onClick={() => toggleColumn(column.key)}
-                    aria-pressed={shown}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-text-muted hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
-                  >
-                    <Checkbox checked={shown} tabIndex={-1} aria-hidden="true" />
-                    <span className="truncate">{column.header}</span>
-                  </button>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <ColumnVisibilityMenu columns={columns} hidden={hidden} onToggle={toggleColumn} />
         </div>
       )}
 
@@ -329,7 +328,7 @@ export function DataTable<T>({
         // THE SCROLLER IS THE TABLE'S OWN. A dense CMDB table must scroll inside
         // its container; letting it push the page wide would take the header and
         // the first columns out of reach on a narrow window.
-        <div className="min-w-0 overflow-x-auto">
+        <div className={cn('min-w-0 overflow-x-auto', fill && 'cmdb-table-scroll min-h-0 flex-1 overflow-y-auto')}>
           <table className={cn('og-resource-table', actions && 'og-action-table')}>
             <thead>
               <tr>
@@ -389,7 +388,7 @@ export function DataTable<T>({
                   // THE HEADER IS PINNED WITH THE CELLS. Without `sticky
                   // right-0` the cells cover the headers of the columns they
                   // scroll over while their own header sits off-screen.
-                  <th scope="col" className="sticky right-0 w-px whitespace-nowrap max-sm:static">
+                  <th scope="col" className="sticky right-0 w-px whitespace-nowrap max-2xl:static">
                     {actionsHeader ?? tr('操作', 'Actions')}
                   </th>
                 )}
@@ -458,4 +457,88 @@ function writeHidden(storageKey: string | undefined, hidden: string[]): void {
   } catch {
     /* localStorage unavailable — the choice applies to this visit only */
   }
+}
+
+// --- column visibility, shared with pages that own the picker ---
+
+/**
+ * Column visibility for one table, persisted under `storageKey`.
+ *
+ * THE PAGE MAY OWN THE PICKER. The model list puts the columns control in its
+ * toolbar above the workbench card; the page keeps this state and hands it back
+ * to the table through `hiddenColumns`/`onToggleColumn`, so there is still one
+ * source of truth and the same localStorage entry.
+ *
+ * THE DEFAULTS ARE A STRING so the effect has a stable dependency: pages
+ * rebuild their column array on every render, and an array dependency would
+ * re-seed the state on every render.
+ */
+export function useColumnVisibility<T>(columns: Column<T>[], storageKey?: string) {
+  const defaultsKey = columns
+    .filter((column) => column.hideable && column.defaultHidden)
+    .map((column) => column.key)
+    .join(',');
+  const [hidden, setHidden] = useState<string[]>(() => readHidden(storageKey, splitKeys(defaultsKey)));
+
+  useEffect(() => {
+    setHidden(readHidden(storageKey, splitKeys(defaultsKey)));
+  }, [storageKey, defaultsKey]);
+
+  const toggle = useCallback(
+    (key: string) => {
+      setHidden((current) => {
+        const next = current.includes(key) ? current.filter((item) => item !== key) : [...current, key];
+        writeHidden(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey],
+  );
+
+  return useMemo(() => ({ hidden, toggle }), [hidden, toggle]);
+}
+
+/**
+ * The column-visibility menu. The table renders it above its header by default;
+ * a page can render it in its own toolbar and hide the built-in row instead.
+ */
+export function ColumnVisibilityMenu<T>({
+  columns,
+  hidden,
+  onToggle,
+}: {
+  columns: Column<T>[];
+  hidden: string[];
+  onToggle(key: string): void;
+}) {
+  const { tr } = useI18n();
+  const hideable = columns.filter((column) => column.hideable);
+  if (hideable.length === 0) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="subtle" size="sm" type="button" />}>
+        <Columns3 size={12} aria-hidden="true" />
+        <span className="ml-1.5">{tr('列', 'Columns')}</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-52 p-1">
+        {/* Plain buttons, not menu items: a visibility toggle must not close the
+            menu, and a menu item closes it by design. */}
+        {hideable.map((column) => {
+          const shown = !hidden.includes(column.key);
+          return (
+            <button
+              key={column.key}
+              type="button"
+              onClick={() => onToggle(column.key)}
+              aria-pressed={shown}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-text-muted hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+            >
+              <Checkbox checked={shown} tabIndex={-1} aria-hidden="true" />
+              <span className="truncate">{column.header}</span>
+            </button>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }

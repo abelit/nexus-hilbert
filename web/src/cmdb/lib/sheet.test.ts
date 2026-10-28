@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 
-import { parseSheetFile, SheetError } from './sheet';
+import { buildRowsBlob, buildTemplateBlob, parseSheetFile, SheetError } from './sheet';
 
 function csvFile(text: string, name = 'hosts.csv'): File {
   return new File([text], name, { type: 'text/csv' });
@@ -59,5 +59,59 @@ describe('sheet parsing', () => {
     const tooMany = ['hostname', ...Array.from({ length: 5001 }, (_, index) => `host-${index}`)].join('\n');
     await expect(parseSheetFile(csvFile(tooMany))).rejects.toBeInstanceOf(SheetError);
     await expect(parseSheetFile(new File(['x'], 'hosts.txt'))).rejects.toThrow(/CSV or XLSX/);
+  });
+});
+
+// jsdom's Blob has no arrayBuffer(); FileReader is available in both jsdom and
+// the browser, which is why the production reader uses it too.
+function readBlob(blob: Blob): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read the blob'));
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+async function readWorkbook(blob: Blob): Promise<ExcelJS.Workbook> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await readBlob(blob));
+  return workbook;
+}
+
+describe('the downloadable template', () => {
+  it('writes the headers and choice dropdowns', async () => {
+    const blob = await buildTemplateBlob([
+      { header: 'hostname' },
+      { header: 'cpu', choices: ['4', '8'] },
+      { header: '$rack.机柜编号', headerColor: 'FFFF0000' },
+    ]);
+    const workbook = await readWorkbook(blob);
+    const sheet = workbook.worksheets[0];
+    expect(sheet.getRow(1).values).toEqual([undefined, 'hostname', 'cpu', '$rack.机柜编号']);
+    expect(sheet.getCell('B2').dataValidation?.type).toBe('list');
+    expect(sheet.getCell('B2').dataValidation?.formulae).toEqual(['"4,8"']);
+    expect(sheet.getCell('A2').dataValidation?.type).toBeUndefined();
+    expect(sheet.getCell('C1').font?.color?.argb).toBe('FFFF0000');
+  });
+
+  it('leaves a list longer than Excel allows as free text', async () => {
+    const blob = await buildTemplateBlob([
+      { header: 'env', choices: Array.from({ length: 60 }, (_, index) => `environment-${index}`) },
+    ]);
+    const workbook = await readWorkbook(blob);
+    const sheet = workbook.worksheets[0];
+    expect(sheet.getCell('A2').dataValidation?.type).toBeUndefined();
+  });
+});
+
+describe('the issue-rows download', () => {
+  it('keeps the original headers and rows', async () => {
+    const blob = await buildRowsBlob(['hostname', '$rack.机柜编号'], [['web-01', ''], ['web-02', 'R-A01']]);
+    const workbook = await readWorkbook(blob);
+    const sheet = workbook.worksheets[0];
+    expect(sheet.getRow(1).values).toEqual([undefined, 'hostname', '$rack.机柜编号']);
+    expect(sheet.getRow(2).values).toEqual([undefined, 'web-01', '']);
+    expect(sheet.getRow(3).values).toEqual([undefined, 'web-02', 'R-A01']);
   });
 });

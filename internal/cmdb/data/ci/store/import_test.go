@@ -22,45 +22,75 @@ func newImportFixture(t *testing.T) (*cibiz.Usecase, *Repo) {
 	if err := Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if err := db.AutoMigrate(&citypemodel.CIType{}, &citypemodel.Attribute{}, &citypemodel.CITypeAttribute{}); err != nil {
+	if err := db.AutoMigrate(
+		&citypemodel.CIType{}, &citypemodel.Attribute{}, &citypemodel.CITypeAttribute{},
+		&citypemodel.RelationType{}, &citypemodel.CITypeRelation{},
+	); err != nil {
 		t.Fatalf("migrate dictionary: %v", err)
 	}
 
-	// One model with a text identifier, a number and a text field.
+	// Two models: the one being imported, and the parent a relation column
+	// names. The rack model carries a text identifier the sheet can use.
 	ct := citypemodel.CIType{Name: "host", Alias: "主机", UniqueID: 1, Enabled: true}
 	ct.ID = 1
 	if err := db.Create(&ct).Error; err != nil {
 		t.Fatal(err)
 	}
+	rack := citypemodel.CIType{Name: "rack", Alias: "机柜", UniqueID: 4, Enabled: true}
+	rack.ID = 2
+	if err := db.Create(&rack).Error; err != nil {
+		t.Fatal(err)
+	}
 	for id, spec := range map[model.ID]struct {
+		typeID   model.ID
 		name, vt string
 	}{
-		1: {"hostname", "2"},
-		2: {"cpu", "0"},
-		3: {"note", "2"},
+		1: {1, "hostname", "2"},
+		2: {1, "cpu", "0"},
+		3: {1, "note", "2"},
+		4: {2, "rack_code", "2"},
 	} {
 		attr := citypemodel.Attribute{Name: spec.name, Alias: spec.name, ValueType: spec.vt, IsIndex: true}
 		attr.ID = id
 		if err := db.Create(&attr).Error; err != nil {
 			t.Fatal(err)
 		}
-		binding := citypemodel.CITypeAttribute{TypeID: 1, AttrID: id}
+		binding := citypemodel.CITypeAttribute{TypeID: spec.typeID, AttrID: id}
 		if err := db.Create(&binding).Error; err != nil {
 			t.Fatal(err)
 		}
+	}
+	relationType := citypemodel.RelationType{Name: "running_on", Color: "#1890ff"}
+	relationType.ID = 1
+	if err := db.Create(&relationType).Error; err != nil {
+		t.Fatal(err)
+	}
+	constraint := "2"
+	relation := citypemodel.CITypeRelation{
+		ParentID: 2, ChildID: 1, RelationTypeID: 1, Constraint: &constraint,
+	}
+	if err := db.Create(&relation).Error; err != nil {
+		t.Fatal(err)
 	}
 
 	repo := NewRepo(db)
 	return cibiz.NewUsecase(repo, &hostResolver{}, nil), repo
 }
 
-// hostResolver answers the model side for the import fixture's single model.
+// hostResolver answers the model side for the import fixture's two models.
 type hostResolver struct{}
 
 func (hostResolver) ResolveForCI(_ context.Context, ref string) (*cibiz.AttributeSet, error) {
-	if ref != "host" && ref != "1" {
-		return nil, nil
+	if ref == "host" || ref == "1" {
+		return hostSet(), nil
 	}
+	if ref == "rack" || ref == "2" {
+		return rackSet(), nil
+	}
+	return nil, nil
+}
+
+func hostSet() *cibiz.AttributeSet {
 	ct := citypemodel.CIType{Name: "host", Alias: "主机", UniqueID: 1, Enabled: true}
 	ct.ID = 1
 	specs := map[model.ID]cibiz.AttributeSpec{
@@ -68,19 +98,46 @@ func (hostResolver) ResolveForCI(_ context.Context, ref string) (*cibiz.Attribut
 		2: {ID: 2, Name: "cpu", Alias: "cpu", ValueType: "0", IsIndex: true},
 		3: {ID: 3, Name: "note", Alias: "note", ValueType: "2"},
 	}
+	return attributeSet(ct, 1, specs)
+}
+
+func rackSet() *cibiz.AttributeSet {
+	ct := citypemodel.CIType{Name: "rack", Alias: "机柜", UniqueID: 4, Enabled: true}
+	ct.ID = 2
+	specs := map[model.ID]cibiz.AttributeSpec{
+		4: {ID: 4, Name: "rack_code", Alias: "机柜编号", ValueType: "2", IsIndex: true, IsUnique: true},
+	}
+	return attributeSet(ct, 4, specs)
+}
+
+func attributeSet(ct citypemodel.CIType, uniqueID model.ID, specs map[model.ID]cibiz.AttributeSpec) *cibiz.AttributeSet {
 	set := &cibiz.AttributeSet{
 		Type: ct, Specs: specs,
 		ByName: map[string]model.ID{}, ByAlias: map[string]model.ID{},
-		UniqueAttrID: 1, UniqueAttr: specs[1], ShowAttr: specs[1],
+		UniqueAttrID: uniqueID, UniqueAttr: specs[uniqueID], ShowAttr: specs[uniqueID],
 	}
 	for id, spec := range specs {
 		set.ByName[spec.Name] = id
 		set.ByAlias[spec.Alias] = id
 	}
-	return set, nil
+	return set
 }
 
-func (hostResolver) RelationBetween(context.Context, model.ID, model.ID) (cibiz.TypeRelationRule, bool, error) {
+func (hostResolver) ResolveForCIAlias(_ context.Context, alias string) (*cibiz.AttributeSet, error) {
+	switch alias {
+	case "主机":
+		return hostSet(), nil
+	case "机柜":
+		return rackSet(), nil
+	default:
+		return nil, nil
+	}
+}
+
+func (hostResolver) RelationBetween(_ context.Context, parentTypeID, childTypeID model.ID) (cibiz.TypeRelationRule, bool, error) {
+	if parentTypeID == 2 && childTypeID == 1 {
+		return cibiz.TypeRelationRule{RelationTypeID: 1, Constraint: "2", RelationTypeName: "running_on"}, true, nil
+	}
 	return cibiz.TypeRelationRule{}, false, nil
 }
 
@@ -121,6 +178,25 @@ func TestImportPreviewWritesNothing(t *testing.T) {
 	}
 	if list.NumFound != 0 {
 		t.Fatalf("the preview wrote %d instances", list.NumFound)
+	}
+}
+
+// Under `replace`, a row whose identifier is new is a CREATE in both the row
+// and the counts. The policy says what to do when an instance exists; it does
+// not describe a row that will insert one.
+func TestImportPreviewReportsACreateUnderReplace(t *testing.T) {
+	uc, _ := newImportFixture(t)
+	ctx := context.Background()
+
+	got, err := uc.PreviewImport(ctx, importSheet(cibiz.ExistReplace, []any{"web-01", "8", ""}))
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if got.Creates != 1 || got.Updates != 0 {
+		t.Fatalf("preview counts = %+v", got)
+	}
+	if got.Rows[0].Action != "create" {
+		t.Fatalf("row action = %q, want create", got.Rows[0].Action)
 	}
 }
 
@@ -237,6 +313,133 @@ func TestImportRowsSeeEachOther(t *testing.T) {
 	}
 	if inst.Values["note"] != "second" || inst.Values["cpu"] == nil {
 		t.Fatalf("the last row did not win: %v", inst.Values)
+	}
+}
+
+// A relation column resolves its parent values in the preview, and the commit
+// writes the edge in the SAME transaction as the child instance.
+func TestImportRelationColumnsWriteEdges(t *testing.T) {
+	uc, repo := newImportFixture(t)
+	ctx := context.Background()
+
+	parent, err := uc.Create(ctx, cibiz.WriteRequest{
+		TypeRef: "rack",
+		Values:  map[string]any{"rack_code": "R-A01"},
+	})
+	if err != nil {
+		t.Fatalf("create rack: %v", err)
+	}
+
+	req := cibiz.ImportRequest{
+		TypeRef: "host",
+		Headers: []string{"hostname", "$rack.rack_code"},
+		Rows:    [][]any{{"web-01", "R-A01"}},
+	}
+	preview, err := uc.PreviewImport(ctx, req)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if preview.Valid != 1 || preview.Invalid != 0 || len(preview.Relations) != 1 {
+		t.Fatalf("preview = %+v", preview)
+	}
+	rel := preview.Relations[0]
+	if !rel.Matched || rel.ParentType != "rack" || rel.Attr != "rack_code" || rel.RelationTypeID != 1 {
+		t.Fatalf("relation column = %+v", rel)
+	}
+	if len(preview.Rows[0].Parents) != 1 || preview.Rows[0].Parents[0].ParentID != parent.CIID {
+		t.Fatalf("the row did not resolve its parent: %+v", preview.Rows[0].Parents)
+	}
+
+	done, err := uc.CommitImport(ctx, req)
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if done.Written != 1 {
+		t.Fatalf("written = %d", done.Written)
+	}
+	edges, total, err := repo.RelationsTo(ctx, done.Rows[0].InstanceID, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("read relations: %v", err)
+	}
+	if total != 1 || len(edges) != 1 {
+		t.Fatalf("relations = %d/%d, want one", total, len(edges))
+	}
+	if edges[0].FirstCIID != parent.CIID || edges[0].SecondCIID != done.Rows[0].InstanceID {
+		t.Fatalf("edge = %+v", edges[0])
+	}
+}
+
+// A relation header may address the parent model by its display alias, which
+// is what cantor's templates wrote. The generated template uses the model name,
+// but an edited header must still work.
+func TestImportRelationColumnAddressesAParentAlias(t *testing.T) {
+	uc, _ := newImportFixture(t)
+	ctx := context.Background()
+
+	parent, err := uc.Create(ctx, cibiz.WriteRequest{
+		TypeRef: "rack",
+		Values:  map[string]any{"rack_code": "R-A01"},
+	})
+	if err != nil {
+		t.Fatalf("create rack: %v", err)
+	}
+	preview, err := uc.PreviewImport(ctx, cibiz.ImportRequest{
+		TypeRef: "host",
+		Headers: []string{"hostname", "$机柜.机柜编号"},
+		Rows:    [][]any{{"web-01", "R-A01"}},
+	})
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if preview.Valid != 1 || len(preview.Relations) != 1 {
+		t.Fatalf("preview = %+v", preview)
+	}
+	if preview.Relations[0].ParentType != "rack" || preview.Relations[0].Note == "" {
+		t.Fatalf("relation column = %+v", preview.Relations[0])
+	}
+	if len(preview.Rows[0].Parents) != 1 || preview.Rows[0].Parents[0].ParentID != parent.CIID {
+		t.Fatalf("parent = %+v", preview.Rows[0].Parents)
+	}
+}
+
+// A relation cell naming no parent makes its row invalid instead of importing
+// the instance without the edge the sheet asked for.
+func TestImportRelationColumnReportsUnknownParents(t *testing.T) {
+	uc, _ := newImportFixture(t)
+	ctx := context.Background()
+
+	preview, err := uc.PreviewImport(ctx, cibiz.ImportRequest{
+		TypeRef: "host",
+		Headers: []string{"hostname", "$rack.rack_code"},
+		Rows:    [][]any{{"web-01", "R-NOPE"}},
+	})
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if preview.Invalid != 1 || preview.Rows[0].OK {
+		t.Fatalf("preview = %+v", preview)
+	}
+	issues := preview.Rows[0].Issues
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "no rack instance") {
+		t.Fatalf("issues = %+v", issues)
+	}
+}
+
+// A relation header that cannot be resolved is a refusal, not a silently
+// ignored column: the sheet would otherwise import instances with no relation.
+func TestImportRefusesUnresolvableRelationColumns(t *testing.T) {
+	uc, _ := newImportFixture(t)
+	ctx := context.Background()
+
+	for _, header := range []string{"$", "$rack", "$missing.rack_code", "$rack.missing", "$host.hostname"} {
+		_, err := uc.PreviewImport(ctx, cibiz.ImportRequest{
+			TypeRef: "host",
+			Headers: []string{"hostname", header},
+			Rows:    [][]any{{"web-01", "x"}},
+		})
+		if err == nil {
+			t.Fatalf("header %q was accepted", header)
+		}
 	}
 }
 

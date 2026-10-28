@@ -38,6 +38,29 @@ func importSet() *AttributeSet {
 	return set
 }
 
+func TestSplitRelationHeader(t *testing.T) {
+	for _, tc := range []struct {
+		header     string
+		parent     string
+		attr       string
+		isRelation bool
+		ok         bool
+	}{
+		{header: "$rack.rack_code", parent: "rack", attr: "rack_code", isRelation: true, ok: true},
+		{header: " $rack.机柜编号 ", parent: "rack", attr: "机柜编号", isRelation: true, ok: true},
+		{header: "hostname", isRelation: false, ok: false},
+		{header: "$rack", parent: "rack", isRelation: true, ok: false},
+		{header: "$.rack_code", attr: "rack_code", isRelation: true, ok: false},
+		{header: "$rack.", parent: "rack", isRelation: true, ok: false},
+	} {
+		parent, attr, isRelation, ok := SplitRelationHeader(tc.header)
+		if parent != tc.parent || attr != tc.attr || isRelation != tc.isRelation || ok != tc.ok {
+			t.Fatalf("SplitRelationHeader(%q) = (%q, %q, %v, %v), want (%q, %q, %v, %v)",
+				tc.header, parent, attr, isRelation, ok, tc.parent, tc.attr, tc.isRelation, tc.ok)
+		}
+	}
+}
+
 func TestMatchColumns(t *testing.T) {
 	set := importSet()
 	cols := MatchColumns(set, []string{"hostname", "CPU核数", "备注", "密码", "运行时长", "", "nonsense", "cpu"})
@@ -102,12 +125,24 @@ func TestMatchColumnsCaseFold(t *testing.T) {
 	}
 }
 
+// A row is a CREATE until the existence lookup says otherwise — even under
+// `replace`. Setting the action from the policy alone made every new row show
+// as an update and left the preview's counts disagreeing with its rows.
+func TestBuildImportRowStartsAsCreateUnderReplace(t *testing.T) {
+	set := importSet()
+	cols := MatchColumns(set, []string{"hostname", "cpu"})
+	row := buildImportRow(set, cols, []any{"web-01", "8"}, 1, 1)
+	if !row.OK || row.Action != importActionCreate {
+		t.Fatalf("row = %+v, want a create", row)
+	}
+}
+
 func TestBuildImportRow(t *testing.T) {
 	set := importSet()
 	cols := MatchColumns(set, []string{"hostname", "cpu", "nonexistent"})
 
 	// A good row.
-	row := buildImportRow(set, cols, []any{"web-01", "8", "ignored"}, 1, 1, ExistReject)
+	row := buildImportRow(set, cols, []any{"web-01", "8", "ignored"}, 1, 1)
 	if !row.OK || row.Unique != "web-01" || row.Action != importActionCreate {
 		t.Fatalf("a good row = %+v", row)
 	}
@@ -122,7 +157,7 @@ func TestBuildImportRow(t *testing.T) {
 	}
 
 	// A wrong type is reported against the COLUMN, with the type's own words.
-	bad := buildImportRow(set, cols, []any{"web-02", "eight"}, 2, 1, ExistReject)
+	bad := buildImportRow(set, cols, []any{"web-02", "eight"}, 2, 1)
 	if bad.OK {
 		t.Fatalf("a row with a non-numeric cpu was accepted: %+v", bad)
 	}
@@ -136,7 +171,7 @@ func TestBuildImportRow(t *testing.T) {
 	}
 
 	// A missing identifier is a row error, not a silent create.
-	missing := buildImportRow(set, cols, []any{"", "8"}, 3, 1, ExistReject)
+	missing := buildImportRow(set, cols, []any{"", "8"}, 3, 1)
 	if missing.OK {
 		t.Fatalf("a row with no hostname was accepted: %+v", missing)
 	}
@@ -144,7 +179,7 @@ func TestBuildImportRow(t *testing.T) {
 	// AN EMPTY CELL SUPPLIES NOTHING: a sheet is full of blanks belonging to
 	// rows that have no value for an attribute, and treating a blank as "clear
 	// this field" would erase data on an update import.
-	blank := buildImportRow(set, cols, []any{"web-04", "  "}, 4, 1, ExistReplace)
+	blank := buildImportRow(set, cols, []any{"web-04", "  "}, 4, 1)
 	if !blank.OK {
 		t.Fatalf("a blank cell made the row invalid: %+v", blank)
 	}
@@ -154,7 +189,7 @@ func TestBuildImportRow(t *testing.T) {
 
 	// A row with nothing at all is refused rather than creating an empty
 	// instance.
-	empty := buildImportRow(set, cols, []any{"", ""}, 5, 1, ExistReject)
+	empty := buildImportRow(set, cols, []any{"", ""}, 5, 1)
 	if empty.OK {
 		t.Fatalf("an empty row was accepted: %+v", empty)
 	}
@@ -164,13 +199,13 @@ func TestBuildImportRow(t *testing.T) {
 func TestBuildImportRowReportsEveryBadCell(t *testing.T) {
 	set := importSet()
 	cols := MatchColumns(set, []string{"hostname", "cpu"})
-	row := buildImportRow(set, cols, []any{"web-01", "not-a-number"}, 1, 1, ExistReject)
+	row := buildImportRow(set, cols, []any{"web-01", "not-a-number"}, 1, 1)
 	if len(row.Issues) != 1 {
 		t.Fatalf("issues = %+v", row.Issues)
 	}
 	// A short row is not an error: a spreadsheet is a rectangle only by
 	// convention.
-	short := buildImportRow(set, cols, []any{"web-02"}, 2, 1, ExistReject)
+	short := buildImportRow(set, cols, []any{"web-02"}, 2, 1)
 	if !short.OK {
 		t.Fatalf("a short row was refused: %+v", short)
 	}

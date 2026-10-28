@@ -664,3 +664,52 @@ html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabl
     transition: none;
   }
 }
+
+/* A workspace band is chrome, not a floating card: the model list's filters and
+   the resource list's filters both meet the workspace bar above, the model rail
+   to their left, and stay put while the content below scrolls. It borrows the
+   liquid panel token so it belongs to the same glass surface without the
+   rounded card and its margins. */
+.cmdb-workspace-band {
+  background: var(--liquid-panel-strong);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+/* The list body is one full-height card; its table scroller carries the page's
+   vertical scroll and the header stays put while the rows move. The header
+   cells need an OPAQUE background: the liquid header token is 97% opaque, and
+   at that alpha the row passing underneath still ghosts through. `--card` is
+   the same surface at full opacity. `cmdb-table-scroll` is only added when
+   DataTable fills a card. */
+.cmdb-table-scroll .og-resource-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: rgb(var(--card));
+}
+
+/* Vertical sticky must not turn the action header into a horizontally pinned
+   one below `2xl`: the row cells are static there, and a pinned header would
+   cover the data columns the same way a pinned cell would. */
+@media (max-width: 1535.98px) {
+  .cmdb-table-scroll .og-resource-table thead th.sticky {
+    right: auto;
+  }
+}
+
+/* The model-config toolbar carries tabs, search, grouping, refresh and the
+   view toggle. Between the app sidebar and the model rail the content is
+   narrower than a plain page, so below `2xl` the controls move under the tabs
+   instead of squeezing the search box to a few characters. The workspace bar
+   above it wraps on its own because it is a flex container. */
+@media (max-width: 1439px) {
+  .cmdb-model-config-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .cmdb-model-config-toolbar > div:last-child {
+    justify-content: flex-start;
+  }
+}

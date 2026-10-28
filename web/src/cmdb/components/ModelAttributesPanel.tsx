@@ -35,17 +35,18 @@ import {
 } from '../lib/attribute-type';
 import { DataTable, type Column } from './DataTable';
 
-// The model's attribute workspace, styled as a scoped liquid-glass surface.
+// The model's attribute workspace, styled as a liquid-glass surface.
 //
 // THE GROUPING IS REAL DATA. Attributes belong to form sections, and those are
 // the same sections an operator sees on the instance form. The page keeps one
 // glass panel per section instead of one flat list so the configuration and the
 // resulting form read the same way.
 //
-// THE EFFECT IS SCOPED. The ambient blobs, translucent panels and the blue
-// primary action live under `.cmdb-liquid` only. The rest of the console keeps
-// its existing surfaces; the reference HTML is a design direction, not a new
-// global theme.
+// THE SURFACE BELONGS TO THE PAGE. The model detail provides the `.cmdb-liquid`
+// scope (gradient + blobs) for every tab, so this panel paints only its own
+// glass panels; rendering it outside a `.cmdb-liquid` ancestor would leave the
+// panels without their tokens. The reference HTML is a design direction, not a
+// new global theme.
 
 type View = 'table' | 'grid';
 
@@ -271,13 +272,7 @@ export function ModelAttributesPanel({
   ];
 
   return (
-    <div className="cmdb-attribute-workspace cmdb-liquid relative min-w-0 overflow-hidden">
-      <div className="cmdb-liquid-blobs" aria-hidden="true">
-        <span className="cmdb-liquid-blob cmdb-liquid-blob-a" />
-        <span className="cmdb-liquid-blob cmdb-liquid-blob-b" />
-        <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
-      </div>
-
+    <div className="cmdb-attribute-workspace relative min-w-0">
       <div className="cmdb-liquid-content relative flex flex-col gap-3">
         <div className="cmdb-liquid-panel rounded-2xl px-4 py-3.5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">

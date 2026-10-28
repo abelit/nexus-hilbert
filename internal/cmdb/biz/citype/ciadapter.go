@@ -41,6 +41,22 @@ func (r *CIResolver) ResolveForCI(ctx context.Context, ref string) (*cibiz.Attri
 	if err != nil {
 		return nil, err
 	}
+	return r.setFromView(ctx, view)
+}
+
+// ResolveForCIAlias resolves a model by its display alias, for the import
+// sheet's `$parent.attribute` headers. It is not part of TypeResolver: an
+// alias is not unique, so only a caller that can report the ambiguity should
+// use it. The import use case asks for it through an optional interface.
+func (r *CIResolver) ResolveForCIAlias(ctx context.Context, alias string) (*cibiz.AttributeSet, error) {
+	view, err := r.uc.GetByAlias(ctx, alias)
+	if err != nil {
+		return nil, err
+	}
+	return r.setFromView(ctx, view)
+}
+
+func (r *CIResolver) setFromView(ctx context.Context, view *View) (*cibiz.AttributeSet, error) {
 	if view == nil {
 		return nil, nil
 	}

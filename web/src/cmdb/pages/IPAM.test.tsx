@@ -212,6 +212,9 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem('ongrid-locale', 'zh-CN');
   useAuth.setState({ token: null, role: 'admin' });
+  // The overview and IP search drop secondary columns below 1400px; jsdom's
+  // default is 1024, so pin the desktop width these cases describe.
+  Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true });
 });
 
 describe('the address-space shell', () => {

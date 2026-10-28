@@ -2,26 +2,25 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Boxes,
+  ChevronRight,
   Folder,
   LayoutGrid,
   MoreHorizontal,
   Pencil,
   Plus,
-  Power,
   RefreshCw,
   Search,
   Table2,
   Trash2,
 } from 'lucide-react';
 
-import { Button, EmptyState } from '@/components/ui';
+import { Button, EmptyState, PaginationFooter } from '@/components/ui';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/DropdownMenu';
 import { Chip } from '@/components/ui/Chip';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Hint } from '@/components/ui/Tooltip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
-import { PageHeader } from '@/components/ui/PageHeader';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -47,7 +46,7 @@ import {
 } from '../api/citype';
 import { listModelGroups, type ModelGroup } from '../api/preferences';
 import { CMDBIcon } from '../components/CMDBIcon';
-import { DataTable, type Column } from '../components/DataTable';
+import { ColumnVisibilityMenu, DataTable, useColumnVisibility, type Column } from '../components/DataTable';
 import { IconPicker } from '../components/IconPicker';
 import { ModelConfigShell } from '../components/ModelConfigShell';
 import { useModelTreeRefresh } from '../components/model-tree-context';
@@ -76,6 +75,9 @@ import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
 // administrator gates.
 
 type View = 'table' | 'grid';
+type StatusFilter = 'all' | 'enabled' | 'disabled';
+
+const PAGE_SIZE = 20;
 
 export default function ModelsPage() {
   const { tr } = useI18n();
@@ -93,7 +95,8 @@ export default function ModelsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [onlyEnabled, setOnlyEnabled] = useState(false);
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [page, setPage] = useState(0);
   const [grouped, setGrouped] = useState(false);
   const [view, setView] = useState<View>(() =>
     window.matchMedia?.('(max-width: 1279px)')?.matches ? 'grid' : 'table',
@@ -150,13 +153,15 @@ export default function ModelsPage() {
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return models
-      .filter((model) => (onlyEnabled ? model.enabled : true))
+      .filter((model) =>
+        status === 'all' ? true : status === 'enabled' ? model.enabled : !model.enabled,
+      )
       .filter((model) => {
         if (!needle) return true;
         return model.name.toLowerCase().includes(needle) || model.alias.toLowerCase().includes(needle);
       })
       .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
-  }, [models, query, onlyEnabled]);
+  }, [models, query, status]);
 
   const sections = useMemo(
     () =>
@@ -168,6 +173,19 @@ export default function ModelsPage() {
     [visible, groups, tr],
   );
   const groupedView = grouped && groups.length > 0 && sections.length > 0;
+
+  // GROUPING IS A DISPLAY MODE, NOT A SECOND DATASET. Paging a grouped list
+  // would split one group across pages and make its count meaningless, so the
+  // grouped view shows every match and pagination belongs to the flat views.
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage);
+  }, [page, safePage]);
+  const pagedVisible = useMemo(
+    () => (groupedView ? visible : visible.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)),
+    [groupedView, safePage, visible],
+  );
   const modelCountLabel = (count: number) =>
     count === 1 ? tr('1 个模型', '1 model') : tr(`${count} 个模型`, `${count} models`);
 
@@ -221,10 +239,17 @@ export default function ModelsPage() {
   const enabledCount = models.filter((model) => model.enabled).length;
   const disabledCount = models.length - enabledCount;
   const inheritingCount = models.filter((model) => model.parent_ids.length > 0).length;
-  const filtering = query.trim().length > 0 || onlyEnabled;
+  const filtering = query.trim().length > 0 || status !== 'all';
+  const rangeStart = pagedVisible.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
+  const rangeEnd = pagedVisible.length === 0 ? 0 : safePage * PAGE_SIZE + pagedVisible.length;
   const clearFilters = () => {
     setQuery('');
-    setOnlyEnabled(false);
+    setStatus('all');
+    setPage(0);
+  };
+  const changeStatus = (next: StatusFilter) => {
+    setStatus(next);
+    setPage(0);
   };
 
   const parentNames = (row: CIType): string[] =>
@@ -233,7 +258,7 @@ export default function ModelsPage() {
   const columns: Column<CIType>[] = [
     {
       key: 'name',
-      header: tr('模型', 'Model'),
+      header: tr('模型名称/标识符', 'Model name / identifier'),
       width: 'min-w-44',
       sortable: true,
       sortValue: (row) => row.alias || row.name,
@@ -241,20 +266,20 @@ export default function ModelsPage() {
         <div className="flex min-w-0 items-center gap-2">
           <CMDBIcon value={row.icon} size={16} label={row.alias || row.name} />
           <div className="min-w-0">
-            <Link
-              to={`/cmdb/models/${row.id}`}
-              className="block truncate font-medium text-text hover:text-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
-            >
-              {row.alias || row.name}
-            </Link>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-mono text-[11px] text-text-faint" title={row.name}>
-                {row.name}
-              </span>
-              <Chip tone={row.enabled ? 'success' : 'default'} dense>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Link
+                to={`/cmdb/models/${row.id}`}
+                className="block min-w-0 truncate font-medium text-text hover:text-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+              >
+                {row.alias || row.name}
+              </Link>
+              <Chip tone={row.enabled ? 'success' : 'default'} dense className="shrink-0">
                 {row.enabled ? tr('启用', 'Enabled') : tr('停用', 'Disabled')}
               </Chip>
             </div>
+            <span className="mt-0.5 block truncate font-mono text-[11px] text-text-faint" title={row.name}>
+              {row.name}
+            </span>
           </div>
         </div>
       ),
@@ -272,7 +297,7 @@ export default function ModelsPage() {
     },
     {
       key: 'parents',
-      header: tr('继承自', 'Inherits from'),
+      header: tr('继承关系', 'Inheritance'),
       hideable: true,
       cell: (row) => {
         if (row.parent_ids.length === 0) return <span className="text-text-faint">—</span>;
@@ -299,6 +324,10 @@ export default function ModelsPage() {
     },
   ];
 
+  // The column picker lives in the toolbar, not in a header row inside the
+  // workbench card, so the table can use the card's full height.
+  const columnVisibility = useColumnVisibility(columns, 'models');
+
   const renderCard = (row: CIType) => (
     <ModelCard
       key={row.id}
@@ -313,77 +342,70 @@ export default function ModelsPage() {
   );
 
   return (
-    <ModelConfigShell>
-      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-        <PageHeader
-          title={
-            <span className="flex min-w-0 items-center gap-2">
-              <Boxes size={18} className="shrink-0 text-sky-500" aria-hidden="true" />
-              <span className="truncate">{tr('模型配置', 'Model configuration')}</span>
-            </span>
-          }
-          subtitle={
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="inline-flex items-center gap-1">
-                <span>{tr('模型', 'Models')}</span>
-                <span className="font-mono font-medium text-text">{models.length}</span>
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span>{tr('启用', 'Enabled')}</span>
-                <span className="font-mono font-medium text-text">{enabledCount}</span>
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span>{tr('停用', 'Disabled')}</span>
-                <span className="font-mono font-medium text-text">{disabledCount}</span>
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span>{tr('含继承', 'Inheritance')}</span>
-                <span className="font-mono font-medium text-text">{inheritingCount}</span>
-              </span>
-            </span>
-          }
-          actions={
-            <div className="flex flex-wrap items-center gap-2">
+    <ModelConfigShell
+      header={{
+        leading: (
+          <>
+            <span>{tr('资源模型', 'Resource models')}</span>
+            <ChevronRight size={10} aria-hidden="true" />
+            <h1 className="min-w-0 truncate text-xs font-medium text-text">
+              {tr('模型配置', 'Model configuration')}
+            </h1>
+          </>
+        ),
+        actions: (
+          <div className="cmdb-workspace-actions flex flex-wrap items-center justify-end gap-2 max-xl:justify-start">
+            <StatGroup
+              items={[
+                { tone: 'muted', label: tr('总数', 'Total'), value: models.length },
+                { tone: 'success', label: tr('已启用', 'Enabled'), value: enabledCount },
+                { tone: 'warning', label: tr('已停用', 'Disabled'), value: disabledCount },
+                { tone: 'none', label: tr('含继承', 'Inheritance'), value: inheritingCount },
+              ]}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => void load(true)}
+              disabled={loading || refreshing}
+              aria-label={tr('刷新', 'Refresh')}
+              title={tr('刷新', 'Refresh')}
+              className="size-7 rounded-full px-0"
+            >
+              <RefreshCw size={14} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
+            </Button>
+            <Hint content={adminTip}>
               <Button
                 variant="outline"
                 size="sm"
                 type="button"
-                onClick={() => void load(true)}
-                disabled={loading || refreshing}
+                onClick={() => void bootstrap()}
+                disabled={!isAdmin}
                 className="inline-flex items-center gap-1.5"
               >
-                <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
-                {tr('刷新', 'Refresh')}
+                <Boxes size={12} aria-hidden="true" />
+                {tr('内建模型', 'Built-in models')}
               </Button>
-              <Hint content={adminTip}>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  onClick={() => void bootstrap()}
-                  disabled={!isAdmin}
-                  className="inline-flex items-center gap-1.5"
-                >
-                  <Boxes size={12} aria-hidden="true" />
-                  {tr('内建模型', 'Built-in models')}
-                </Button>
-              </Hint>
-              <Hint content={adminTip}>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  type="button"
-                  onClick={() => setEditing({ mode: 'create' })}
-                  disabled={!isAdmin}
-                  className="inline-flex items-center gap-1.5 font-medium"
-                >
-                  <Plus size={12} aria-hidden="true" />
-                  {tr('新建模型', 'New model')}
-                </Button>
-              </Hint>
-            </div>
-          }
-        />
+            </Hint>
+            <Hint content={adminTip}>
+              <Button
+                variant="primary"
+                size="sm"
+                type="button"
+                onClick={() => setEditing({ mode: 'create' })}
+                disabled={!isAdmin}
+                className="inline-flex items-center gap-1.5 font-medium"
+              >
+                <Plus size={12} aria-hidden="true" />
+                {tr('新建模型', 'New model')}
+              </Button>
+            </Hint>
+          </div>
+        ),
+      }}
+    >
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
 
         <div className="cmdb-liquid relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
           <div className="cmdb-liquid-blobs" aria-hidden="true">
@@ -392,31 +414,32 @@ export default function ModelsPage() {
             <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
           </div>
 
-          <div className="cmdb-liquid-content relative min-h-0 flex-1 overflow-y-auto p-6">
-            <div className="flex flex-col gap-4">
-              <div className="cmdb-liquid-panel rounded-2xl p-3">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="cmdb-liquid-content relative flex min-h-0 flex-1 flex-col">
+            {/* THE FILTER BAR IS CHROME, NOT A CARD. It meets the workspace bar
+                above and the model tree to its left, and never scrolls away
+                with the table, so the page reads as one surface instead of a
+                floating panel with margins on all four sides. */}
+            <div className="cmdb-workspace-band shrink-0 border-b border-border/50 px-4 py-2.5">
+              <div className="cmdb-model-config-toolbar flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <Button
-                    variant="plain"
-                    size="sm"
-                    type="button"
-                    aria-pressed={!onlyEnabled}
-                    onClick={() => setOnlyEnabled(false)}
-                    className={cn('cmdb-liquid-pill', !onlyEnabled && 'is-active')}
-                  >
-                    {tr('全部模型', 'All models')}
-                  </Button>
-                  <Button
-                    variant="plain"
-                    size="sm"
-                    type="button"
-                    aria-pressed={onlyEnabled}
-                    onClick={() => setOnlyEnabled(true)}
-                    className={cn('cmdb-liquid-pill', onlyEnabled && 'is-active')}
-                  >
-                    {tr('只看启用', 'Enabled only')}
-                  </Button>
+                  <StatusTab
+                    active={status === 'all'}
+                    label={tr('全部模型', 'All models')}
+                    count={models.length}
+                    onClick={() => changeStatus('all')}
+                  />
+                  <StatusTab
+                    active={status === 'enabled'}
+                    label={tr('已启用', 'Enabled')}
+                    count={enabledCount}
+                    onClick={() => changeStatus('enabled')}
+                  />
+                  <StatusTab
+                    active={status === 'disabled'}
+                    label={tr('已停用', 'Disabled')}
+                    count={disabledCount}
+                    onClick={() => changeStatus('disabled')}
+                  />
                   {groupedView && (
                     <span className="text-[11px] text-text-faint">
                       {tr(`${sections.length} 组`, `${sections.length} groups`)}
@@ -441,7 +464,7 @@ export default function ModelsPage() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative w-full sm:w-64">
+                  <div className="relative w-full sm:w-48 2xl:w-64">
                     <Search
                       size={13}
                       className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint"
@@ -450,9 +473,12 @@ export default function ModelsPage() {
                     <Input
                       type="search"
                       aria-label={tr('搜索模型列表', 'Search model list')}
-                      placeholder={tr('按名称或别名搜索', 'Search by name or alias')}
+                      placeholder={tr('按名称或别名搜索…', 'Search by name or alias…')}
                       value={query}
-                      onChange={(event) => setQuery(event.target.value)}
+                      onChange={(event) => {
+                        setQuery(event.target.value);
+                        setPage(0);
+                      }}
                       className="w-full pl-7 text-xs"
                     />
                   </div>
@@ -460,40 +486,65 @@ export default function ModelsPage() {
                     <label className="cmdb-liquid-filter inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted">
                       <Checkbox
                         checked={grouped}
-                        onCheckedChange={(next) => setGrouped(next === true)}
+                        onCheckedChange={(next) => {
+                          setGrouped(next === true);
+                          setPage(0);
+                        }}
                         aria-label={tr('按分组显示', 'Group by model group')}
                       />
                       {tr('按分组显示', 'Group by model group')}
                     </label>
                   )}
+                  {view === 'table' && (
+                    <ColumnVisibilityMenu
+                      columns={columns}
+                      hidden={columnVisibility.hidden}
+                      onToggle={columnVisibility.toggle}
+                    />
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={() => void load(true)}
+                    disabled={loading || refreshing}
+                    aria-label={tr('刷新数据', 'Refresh data')}
+                    title={tr('刷新', 'Refresh')}
+                    className="shrink-0 px-2"
+                  >
+                    <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
+                  </Button>
                   <div className="cmdb-liquid-segment flex shrink-0 items-center gap-1 p-1">
                     <Button
                       variant="plain"
                       size="sm"
                       type="button"
                       aria-pressed={view === 'table'}
+                      aria-label={tr('列表', 'List')}
+                      title={tr('列表视图', 'List view')}
                       onClick={() => setView('table')}
-                      className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'table' && 'is-active')}
+                      className={cn('cmdb-liquid-segment-button inline-flex items-center justify-center px-2.5', view === 'table' && 'is-active')}
                     >
-                      <Table2 size={12} aria-hidden="true" />
-                      {tr('列表', 'List')}
+                      <Table2 size={13} aria-hidden="true" />
                     </Button>
                     <Button
                       variant="plain"
                       size="sm"
                       type="button"
                       aria-pressed={view === 'grid'}
+                      aria-label={tr('网格', 'Grid')}
+                      title={tr('网格视图', 'Grid view')}
                       onClick={() => setView('grid')}
-                      className={cn('cmdb-liquid-segment-button inline-flex items-center gap-1.5', view === 'grid' && 'is-active')}
+                      className={cn('cmdb-liquid-segment-button inline-flex items-center justify-center px-2.5', view === 'grid' && 'is-active')}
                     >
-                      <LayoutGrid size={12} aria-hidden="true" />
-                      {tr('网格', 'Grid')}
+                      <LayoutGrid size={13} aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
               </div>
             </div>
 
+            <div className="cmdb-model-config-body flex min-h-0 flex-1 flex-col gap-3 p-4">
             {groupsErr && (
               <div
                 role="alert"
@@ -516,12 +567,21 @@ export default function ModelsPage() {
               </div>
             )}
 
-            <div className="cmdb-liquid-panel overflow-hidden rounded-2xl">
+            {/* THE LIST BODY IS ONE WORKBENCH CARD. It takes the height left
+                under the fixed toolbar band, keeps its column control and
+                table header in place, and owns the pager in its footer — so
+                the page never needs a second scroll or a floating pagination
+                card below the fold. */}
+            <section className="cmdb-liquid-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
               {view === 'table' ? (
-                <div className="p-3">
+                <div className="flex min-h-0 flex-1 flex-col p-3">
                   <DataTable
+                    fill
+                    hideColumnPicker
+                    hiddenColumns={columnVisibility.hidden}
+                    onToggleColumn={columnVisibility.toggle}
                     columns={columns}
-                    rows={visible}
+                    rows={pagedVisible}
                     groups={
                       groupedView
                         ? sections.map((section) => ({
@@ -579,7 +639,8 @@ export default function ModelsPage() {
                   />
                 </div>
               ) : (
-                <div className="flex flex-col">
+                <div className="cmdb-model-table-scroll min-h-0 flex-1 overflow-y-auto p-3">
+                <div className="flex flex-col gap-3">
                   {err && (
                     <div
                       role="alert"
@@ -663,12 +724,30 @@ export default function ModelsPage() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
-                      {visible.map(renderCard)}
+                      {pagedVisible.map(renderCard)}
                     </div>
                   )}
                 </div>
+                </div>
               )}
-            </div>
+
+              {!groupedView && visible.length > 0 && (
+                <PaginationFooter
+                  embedded
+                  page={safePage}
+                  pageSize={PAGE_SIZE}
+                  shown={pagedVisible.length}
+                  total={visible.length}
+                  loading={loading}
+                  showPageNumbers
+                  summary={tr(
+                    `显示 ${rangeStart} 至 ${rangeEnd} 条，共 ${visible.length} 条模型`,
+                    `Showing ${rangeStart}–${rangeEnd} of ${visible.length} models`,
+                  )}
+                  onPageChange={setPage}
+                />
+              )}
+            </section>
           </div>
         </div>
       </div>
@@ -694,6 +773,58 @@ export default function ModelsPage() {
         {dialog}
       </div>
     </ModelConfigShell>
+  );
+}
+
+function StatusTab({
+  active,
+  label,
+  count,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  count: number;
+  onClick(): void;
+}) {
+  return (
+    <Button
+      variant="plain"
+      size="sm"
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'cmdb-liquid-pill inline-flex items-center gap-1.5',
+        active &&
+          'bg-indigo-500/10 font-medium text-indigo-700 ring-1 ring-inset ring-indigo-500/25 dark:text-indigo-300',
+      )}
+    >
+      <span>{label}</span>
+      <span className="font-mono text-[11px] tabular-nums opacity-70">({count})</span>
+    </Button>
+  );
+}
+
+function StatGroup({
+  items,
+}: {
+  items: Array<{ tone: 'muted' | 'success' | 'warning' | 'none'; label: string; value: number }>;
+}) {
+  const dot = (tone: 'muted' | 'success' | 'warning') =>
+    tone === 'success' ? 'bg-emerald-500' : tone === 'warning' ? 'bg-amber-500' : 'bg-zinc-400 dark:bg-zinc-500';
+  return (
+    <div className="flex flex-wrap items-stretch rounded-2xl border border-border/60 bg-card/60 text-[11px] text-text-muted sm:flex-nowrap sm:divide-x sm:divide-border/60 sm:rounded-full">
+      {items.map((item) => (
+        <span key={item.label} className="flex items-center gap-1 whitespace-nowrap px-2 py-1 sm:gap-1.5 sm:px-2.5">
+          {item.tone !== 'none' && (
+            <span className={cn('size-1.5 shrink-0 rounded-full', dot(item.tone))} aria-hidden="true" />
+          )}
+          <span>{item.label}</span>
+          <span className="font-mono font-semibold tabular-nums text-text">{item.value}</span>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -723,9 +854,8 @@ function ActionLinks({
           onClick={onEdit}
           disabled={!isAdmin}
           aria-label={tr(`编辑 ${row.name}`, `Edit ${row.name}`)}
-          className="cmdb-liquid-action-edit inline-flex items-center gap-1"
+          className="cmdb-liquid-action-edit"
         >
-          <Pencil size={12} aria-hidden="true" />
           {tr('编辑', 'Edit')}
         </Button>
       </Hint>
@@ -737,9 +867,8 @@ function ActionLinks({
           onClick={onToggle}
           disabled={!isAdmin}
           aria-label={row.enabled ? tr(`停用 ${row.name}`, `Disable ${row.name}`) : tr(`启用 ${row.name}`, `Enable ${row.name}`)}
-          className="cmdb-liquid-plain-action inline-flex items-center gap-1"
+          className="cmdb-liquid-plain-action"
         >
-          <Power size={12} aria-hidden="true" />
           {row.enabled ? tr('停用', 'Disable') : tr('启用', 'Enable')}
         </Button>
       </Hint>
@@ -751,9 +880,8 @@ function ActionLinks({
           onClick={onDelete}
           disabled={!isAdmin}
           aria-label={tr(`删除 ${row.name}`, `Delete ${row.name}`)}
-          className="cmdb-liquid-action-danger inline-flex items-center gap-1"
+          className="cmdb-liquid-action-danger"
         >
-          <Trash2 size={12} aria-hidden="true" />
           {tr('删除', 'Delete')}
         </Button>
       </Hint>

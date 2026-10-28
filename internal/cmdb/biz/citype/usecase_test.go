@@ -262,6 +262,36 @@ func TestGetByIDAndName(t *testing.T) {
 	}
 }
 
+// A sheet's relation header may name a model by the display alias cantor's
+// templates used. The alias is not unique, so an ambiguous one is refused
+// instead of resolved to whichever model came first.
+func TestGetByAlias(t *testing.T) {
+	repo := &countingRepo{
+		types: []citypemodel.CIType{
+			newCIType(5, "kvm", "虚机"),
+			newCIType(6, "host", "主机"),
+			newCIType(7, "other", "虚机"),
+		},
+		attrs: map[model.ID]citypemodel.Attribute{},
+	}
+	uc := NewUsecase(repo, nil)
+	ctx := context.Background()
+
+	got, err := uc.GetByAlias(ctx, "主机")
+	if err != nil || got == nil || got.Type.ID != 6 {
+		t.Fatalf("GetByAlias(主机) = %+v, %v", got, err)
+	}
+	if got, err := uc.GetByAlias(ctx, "missing"); err != nil || got != nil {
+		t.Fatalf("GetByAlias(missing) = %+v, %v, want (nil, nil)", got, err)
+	}
+	if _, err := uc.GetByAlias(ctx, "虚机"); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("GetByAlias(ambiguous) error = %v, want ErrInvalid", err)
+	}
+	if _, err := uc.GetByAlias(ctx, ""); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("GetByAlias(\"\") error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestGetMissingOrInvalid(t *testing.T) {
 	uc := NewUsecase(&countingRepo{attrs: map[model.ID]citypemodel.Attribute{}}, nil)
 	ctx := context.Background()

@@ -24,6 +24,13 @@ import (
 // and the alternative is a Go dependency the project has not reviewed; what
 // arrives here is the headers and the cells, so the mapping from a column to an
 // attribute — which needs the model — happens on this side.
+//
+// A HEADER MAY ALSO BE A RELATION COLUMN, `$<model>.<attribute>`. Those are
+// resolved against the model graph and the parent instances during the
+// preview, and their edges are written in the import's transaction. A malformed
+// or unresolvable relation header is a 400, not an ignored column: importing
+// the rows without the relation the sheet asked for is the outcome this
+// endpoint exists to prevent.
 func (h *Handler) registerImport(r chi.Router) {
 	r.Post("/v1/cmdb/import/preview", h.importPreview)
 	r.Post("/v1/cmdb/import/commit", h.importCommit)

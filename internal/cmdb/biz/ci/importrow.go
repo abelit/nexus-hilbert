@@ -133,6 +133,32 @@ func MatchColumns(set *AttributeSet, headers []string) []ImportColumn {
 	return out
 }
 
+// IsRelationHeader reports whether a sheet header asks for a relation column.
+//
+// A leading `$` is the whole marker. cantor wrote `$model.attribute`; a column
+// carrying an ordinary attribute name never starts with it, so an operator's
+// edited header cannot turn a value column into a relation by accident.
+func IsRelationHeader(header string) bool {
+	return strings.HasPrefix(strings.TrimSpace(header), "$")
+}
+
+// SplitRelationHeader splits `$<parent model>.<parent attribute>`.
+//
+// ok is false for a header that starts with `$` but does not name both halves.
+// isRelation says whether it was a relation header at all, which lets the
+// caller distinguish "not a relation" from "a malformed one".
+func SplitRelationHeader(header string) (parent, attr string, isRelation, ok bool) {
+	header = strings.TrimSpace(header)
+	if !strings.HasPrefix(header, "$") {
+		return "", "", false, false
+	}
+	rest := strings.TrimPrefix(header, "$")
+	parent, attr, ok = strings.Cut(rest, ".")
+	parent = strings.TrimSpace(parent)
+	attr = strings.TrimSpace(attr)
+	return parent, attr, true, ok && parent != "" && attr != ""
+}
+
 // resolveHeader finds the attribute a header names, and says how.
 func resolveHeader(set *AttributeSet, header string) (model.ID, string) {
 	if id, ok := set.ResolveAttrID(header); ok {
@@ -163,6 +189,67 @@ func resolveHeader(set *AttributeSet, header string) (model.ID, string) {
 	}
 }
 
+// ImportRelationColumn is one sheet column that RELATES each row to parent
+// instances instead of supplying an attribute.
+//
+// THE HEADER IS THE CONTRACT: `$<parent model>.<parent attribute>`, matching
+// cantor's `$产品.产品名` template convention. The parent model may be addressed
+// by its exact name (what the generated template writes), its numeric id, or
+// its display alias (what cantor wrote); an ambiguous alias is refused. The
+// attribute may be named by its name or alias, because the template writes the
+// alias a person reads.
+//
+// IT IS A SEPARATE TYPE RATHER THAN AN ImportColumn WITH A FLAG because the two
+// answer different questions. An attribute column says what the row's own
+// instance carries; a relation column says which existing instances it belongs
+// to, and that is a lookup in another model's value tables.
+type ImportRelationColumn struct {
+	// Index is the column's position in the sheet, 0-based.
+	Index int `json:"index"`
+
+	// Header is the sheet's own header, trimmed.
+	Header string `json:"header"`
+
+	// ParentTypeID, ParentType and ParentAlias describe the model whose
+	// instances the column names.
+	ParentTypeID model.ID `json:"parent_type_id,omitempty"`
+	ParentType   string   `json:"parent_type,omitempty"`
+	ParentAlias  string   `json:"parent_alias,omitempty"`
+
+	// AttrID, Attr and AttrAlias describe the parent attribute that identifies
+	// the parent instance.
+	AttrID    model.ID `json:"attr_id,omitempty"`
+	Attr      string   `json:"attr,omitempty"`
+	AttrAlias string   `json:"attr_alias,omitempty"`
+
+	// RelationTypeID and constraint are the declared rule for the pair, so the
+	// commit can write the edge without asking the model graph again.
+	RelationTypeID model.ID         `json:"relation_type_id,omitempty"`
+	Constraint     model.Constraint `json:"-"`
+
+	// Matched says the header resolved and the edge may be written. It is
+	// false only when resolution failed, which prepareImport reports as a
+	// refusal rather than silently dropping the column.
+	Matched bool `json:"matched"`
+
+	// Note explains the resolution, in the sheet's own terms.
+	Note string `json:"note,omitempty"`
+
+	// parentSet is the resolved parent model, kept for the value tables the
+	// lookup needs. Unexported: this is an internal detail, not wire data.
+	parentSet *AttributeSet
+}
+
+// ImportParentEdge is one parent instance a row would be related to.
+//
+// It carries the column it came from because different columns can relate the
+// same row to different models, and the commit needs each edge's declared
+// relation type.
+type ImportParentEdge struct {
+	ColumnIndex int
+	ParentID    model.ID
+}
+
 // ImportRow is one sheet row, and what would happen to it.
 type ImportRow struct {
 	// Number is the row's position among the DATA rows, 1-based.
@@ -191,6 +278,12 @@ type ImportRow struct {
 
 	// Values is the resolved write, kept so the commit does not resolve twice.
 	Values map[string]any `json:"-"`
+
+	// Parents are the parent instances this row would be related to, one edge
+	// per resolved sheet value. It is resolved during the preview so the
+	// preview and the commit agree, and is never wire data: a row response
+	// names its problems, not its future edges.
+	Parents []ImportParentEdge `json:"-"`
 }
 
 // The actions a row can take.
@@ -206,7 +299,7 @@ const (
 // value for a particular attribute, and treating a blank as "clear this field"
 // would erase data on an update import — the one outcome a person filling in a
 // sheet cannot foresee.
-func buildImportRow(set *AttributeSet, columns []ImportColumn, cells []any, number, headerRows int, policy ExistPolicy) ImportRow {
+func buildImportRow(set *AttributeSet, columns []ImportColumn, cells []any, number, headerRows int) ImportRow {
 	row := ImportRow{
 		Number:   number,
 		SheetRow: number + headerRows,
@@ -273,10 +366,12 @@ func buildImportRow(set *AttributeSet, columns []ImportColumn, cells []any, numb
 	}
 	row.Unique = fmt.Sprint(unique)
 	row.OK = true
+	// A SHEET ROW IS A CREATE UNTIL THE LOOKUP SAYS OTHERWISE. Applying the
+	// existence policy here made every row under `replace` claim to be an
+	// update before anyone looked, so the preview showed "update" for rows that
+	// would insert. The lookup in buildImportRows is the only place that knows,
+	// and it overwrites this when the identifier is taken.
 	row.Action = importActionCreate
-	if policy == ExistReplace {
-		row.Action = importActionUpdate
-	}
 	for name, raw := range supplied {
 		row.Values[name] = raw
 	}

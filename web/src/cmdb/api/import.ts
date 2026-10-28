@@ -37,13 +37,30 @@ export type ImportRequest = {
   exist_policy: 'reject' | 'replace';
 };
 
+export type ImportRelationColumn = {
+  index: number;
+  header: string;
+  parent_type_id?: number;
+  parent_type?: string;
+  parent_alias?: string;
+  attr_id?: number;
+  attr?: string;
+  attr_alias?: string;
+  relation_type_id?: number;
+  matched: boolean;
+  note?: string;
+};
+
 export type ImportPreview = {
   total: number;
   valid: number;
   invalid: number;
   creates: number;
   updates: number;
+  /** Attribute columns only; relation columns are in `relations`. */
   columns: ImportColumn[];
+  /** `$parent.attribute` columns, resolved against the model graph. */
+  relations?: ImportRelationColumn[];
   rows: ImportRow[];
 };
 

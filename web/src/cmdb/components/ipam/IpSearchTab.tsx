@@ -162,6 +162,7 @@ export function IpSearchTab() {
       sortable: true,
       sortValue: (row) => row.name ?? '',
       hideable: true,
+      hideBelow: 1400,
       cell: (row) => <span className="text-xs text-text-muted">{row.name ?? '—'}</span>,
     },
     {
@@ -170,6 +171,7 @@ export function IpSearchTab() {
       sortable: true,
       sortValue: (row) => row.macAddress ?? '',
       hideable: true,
+      hideBelow: 1400,
       cell: (row) => <span className="font-mono text-[11px] text-text-muted">{row.macAddress ?? '—'}</span>,
     },
   ];
@@ -294,6 +296,7 @@ export function IpSearchTab() {
           shown={filtered.length}
           total={numFound}
           onPageChange={setPage}
+          sticky={false}
           className="mt-3"
         />
       </Card>

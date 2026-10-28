@@ -181,14 +181,87 @@ function formatExcelDate(value: Date): string {
   );
 }
 
-/** Builds a one-row XLSX template with the model's attribute aliases. */
-export async function buildTemplateBlob(headers: string[]): Promise<Blob> {
+/**
+ * One column of the downloadable template.
+ *
+ * `choices` becomes an Excel data-validation dropdown. Excel limits a list
+ * formula to 255 characters, so a longer set is left as free text rather than
+ * producing a workbook that won't open.
+ */
+export type TemplateColumn = {
+  header: string;
+  choices?: string[];
+  /** ARGB. Cantor marked relation headers red so an operator could see which
+   *  columns create edges rather than values. */
+  headerColor?: string;
+};
+
+/**
+ * Builds a one-row XLSX template.
+ *
+ * THE DROPDOWNS ARE WHY THIS IS MORE THAN A HEADER ROW. Cantor put the model's
+ * choice values into the template so an operator picks a valid value instead of
+ * discovering the typo at import time. The validation is applied to the data
+ * rows (the sheet's limit, not a sample), because a dropdown that stops after
+ * row 200 is worse than none.
+ */
+export async function buildTemplateBlob(columns: Array<string | TemplateColumn>): Promise<Blob> {
   const mod = await import('exceljs');
   const ExcelJS = mod.default ?? mod;
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('template');
+  const cols = columns.map((column) => (typeof column === 'string' ? { header: column } : column));
+
+  sheet.columns = cols.map((column, index) => ({
+    header: column.header,
+    key: `column-${index}`,
+    width: 20,
+  }));
+  sheet.getRow(1).font = { bold: true };
+  cols.forEach((column, index) => {
+    if (!column.headerColor) return;
+    sheet.getCell(1, index + 1).font = {
+      bold: true,
+      color: { argb: column.headerColor },
+    };
+  });
+
+  cols.forEach((column, index) => {
+    if (!column.choices || column.choices.length === 0) return;
+    if (column.choices.some((choice) => /[",\r\n]/.test(choice))) return;
+    const list = column.choices.join(',');
+    if (list.length > 255) return;
+    for (let row = 2; row <= MAX_IMPORT_ROWS + 1; row += 1) {
+      sheet.getCell(row, index + 1).dataValidation = {
+        type: 'list',
+        allowBlank: true,
+        formulae: [`"${list}"`],
+      };
+    }
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+}
+
+/**
+ * Builds an XLSX from the sheet's own headers and rows.
+ *
+ * The issue-rows download is the ORIGINAL sheet, not a re-render of the
+ * server's mapping: an operator edits the failing rows and uploads the same
+ * file again, so dropping unrecognised columns would make the downloaded file
+ * a different import.
+ */
+export async function buildRowsBlob(headers: string[], rows: unknown[][]): Promise<Blob> {
+  const mod = await import('exceljs');
+  const ExcelJS = mod.default ?? mod;
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('issues');
   sheet.addRow(headers);
   sheet.getRow(1).font = { bold: true };
+  for (const row of rows) sheet.addRow(row);
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

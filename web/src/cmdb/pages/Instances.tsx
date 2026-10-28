@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  Boxes,
   ChevronDown,
+  ChevronRight,
   Eye,
   FileUp,
   Folder,
@@ -21,7 +21,6 @@ import { Button, EmptyState } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
-import { PageHeader } from '@/components/ui/PageHeader';
 import { PaginationFooter } from '@/components/ui/PaginationFooter';
 import { Select } from '@/components/ui/Select';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -53,8 +52,10 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Drawer } from '../components/Drawer';
 import { InstanceDetailDrawer } from '../components/instance-detail/InstanceDetailDrawer';
 import { InstanceFieldsDialog } from '../components/InstanceFieldsDialog';
+import { MetaPill } from '../components/MetaPill';
 import { ReferencePicker } from '../components/ReferencePicker';
 import { useToast } from '../components/Toast';
+import { WorkspaceBar } from '../components/WorkspaceBar';
 import { attributeSections } from '../lib/attribute-sections';
 import { choiceText } from '../lib/choice-labels';
 import { instanceSearchQuery, searchRowToInstance } from '../lib/instance-search';
@@ -268,7 +269,9 @@ export default function InstancesPage() {
     setGroups([]);
     setErr(null);
     setLoading(true);
-    if (contentRef.current) contentRef.current.scrollTop = 0;
+    // The workbench card owns the scroller, whichever view is active.
+    const scroller = contentRef.current?.querySelector<HTMLElement>('.cmdb-table-scroll, .cmdb-model-table-scroll');
+    if (scroller) scroller.scrollTop = 0;
     const next = new URLSearchParams(params);
     next.set('type', name);
     setParams(next, { replace: true });
@@ -447,21 +450,92 @@ export default function InstancesPage() {
   }));
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+      <WorkspaceBar
+        leading={
+          <>
+            <span>{tr('资源模型', 'Resource models')}</span>
+            <ChevronRight size={10} aria-hidden="true" />
+            <h1 className="min-w-0 truncate text-xs font-medium text-text">{tr('资源数据', 'Resources')}</h1>
+            {model && (
+              <>
+                <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <CMDBIcon value={model.icon} size={14} label={model.alias || model.name} />
+                  <span className="truncate text-text">{model.alias || model.name}</span>
+                  <code className="font-mono text-[10px] text-text-faint">{model.name}</code>
+                  {!model.enabled && <Chip>{tr('停用', 'Disabled')}</Chip>}
+                </span>
+              </>
+            )}
+          </>
+        }
+        actions={
+          <div className="cmdb-workspace-actions flex flex-wrap items-center justify-end gap-2 max-xl:justify-start">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <MetaPill
+                label={search ? tr('匹配实例', 'Matching instances') : tr('实例总数', 'Total instances')}
+                value={numFound}
+              />
+              <MetaPill label={tr('本页', 'On this page')} value={rows.length} />
+              {statusAttribute && (
+                <MetaPill
+                  label={tr('本页 Active', 'Active on page')}
+                  value={activePercent === null ? '—' : `${activePercent}%`}
+                />
+              )}
+              {envAttribute && (
+                <MetaPill label={tr('本页 PROD', 'PROD on page')} value={prodCount === null ? '—' : prodCount} />
+              )}
+              {slaAttribute && (
+                <MetaPill label={tr('本页有 SLA', 'With SLA on page')} value={slaCount === null ? '—' : slaCount} />
+              )}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => void load(true)}
+              disabled={loading || refreshing}
+              aria-label={tr('刷新', 'Refresh')}
+              title={tr('刷新', 'Refresh')}
+              className="size-7 rounded-full px-0"
+            >
+              <RefreshCw size={14} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
+            </Button>
+            <Link
+              to="/cmdb/batch"
+              className="og-button inline-flex items-center gap-1.5"
+              data-size="sm"
+              data-variant="outline"
+            >
+              <FileUp size={12} aria-hidden="true" />
+              {tr('批量导入', 'Batch import')}
+            </Link>
+            <Button
+              variant="primary"
+              size="sm"
+              type="button"
+              onClick={() => setEditing({ mode: 'create' })}
+              disabled={!model || attributes.length === 0}
+              className="inline-flex items-center gap-1.5 font-medium"
+            >
+              <Plus size={12} aria-hidden="true" />
+              {tr('新建实例', 'New instance')}
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="flex min-h-0 min-w-0 flex-1">
       {/* THE MODEL RAIL IS NAVIGATION, NOT A GLASS CARD. It mirrors the model
           configuration tree: opaque, full height, with its own scroller. */}
       <aside
-        className="hidden h-full min-h-0 w-64 shrink-0 border-r border-border bg-bg lg:flex"
+        className="hidden h-full min-h-0 w-64 shrink-0 border-r border-border bg-bg lg:flex xl:w-72"
         aria-label={tr('模型导航', 'Model navigation')}
       >
         <div className="flex h-full min-h-0 w-full flex-col">
-          <div className="flex flex-col gap-2 border-b border-border p-3">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-text">{tr('模型', 'Models')}</h2>
-              <p className="text-[11px] text-text-faint">
-                {tr(`${models.length} 个模型`, `${models.length} models`)}
-              </p>
-            </div>
+          <div className="border-b border-border p-3">
             <div className="relative">
               <Search
                 size={13}
@@ -568,110 +642,11 @@ export default function InstancesPage() {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <PageHeader
-          className="cmdb-instances-header"
-          title={
-            <span className="flex min-w-0 items-center gap-2">
-              <span aria-hidden="true" className="shrink-0">
-                {model ? (
-                  <CMDBIcon value={model.icon} size={18} label={model.alias || model.name} />
-                ) : (
-                  <Boxes size={18} className="text-sky-500" />
-                )}
-              </span>
-              <span className="truncate">{tr('资源数据', 'Resources')}</span>
-              {model && !model.enabled && <Chip>{tr('停用', 'Disabled')}</Chip>}
-            </span>
-          }
-          subtitle={
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              {model && (
-                <>
-                  <span className="font-medium text-text">{model.alias || model.name}</span>
-                  <code className="font-mono">{model.name}</code>
-                </>
-              )}
-              <span className="inline-flex items-center gap-1">
-                <span>{search ? tr('匹配实例', 'Matching instances') : tr('实例总数', 'Total instances')}</span>
-                <span className="font-mono font-medium text-text">{numFound}</span>
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span>{tr('本页', 'On this page')}</span>
-                <span className="font-mono font-medium text-text">{rows.length}</span>
-              </span>
-              {statusAttribute && (
-                <span className="inline-flex items-center gap-1">
-                  <span>{tr('本页 Active', 'Active on page')}</span>
-                  <span className="font-mono font-medium text-text">
-                    {activePercent === null ? '—' : `${activePercent}%`}
-                  </span>
-                </span>
-              )}
-              {envAttribute && (
-                <span className="inline-flex items-center gap-1">
-                  <span>{tr('本页 PROD', 'PROD on page')}</span>
-                  <span className="font-mono font-medium text-text">
-                    {prodCount === null ? '—' : prodCount}
-                  </span>
-                </span>
-              )}
-              {slaAttribute && (
-                <span className="inline-flex items-center gap-1">
-                  <span>{tr('本页有 SLA', 'With SLA on page')}</span>
-                  <span className="font-mono font-medium text-text">
-                    {slaCount === null ? '—' : slaCount}
-                  </span>
-                </span>
-              )}
-            </span>
-          }
-          actions={
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                type="button"
-                onClick={() => void load(true)}
-                disabled={loading || refreshing}
-                className="inline-flex items-center gap-1.5"
-              >
-                <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
-                {tr('刷新', 'Refresh')}
-              </Button>
-              <Link
-                to="/cmdb/batch"
-                className="og-button inline-flex items-center gap-1.5"
-                data-size="sm"
-                data-variant="outline"
-              >
-                <FileUp size={12} aria-hidden="true" />
-                {tr('批量导入', 'Batch import')}
-              </Link>
-              <Button
-                variant="primary"
-                size="sm"
-                type="button"
-                onClick={() => setEditing({ mode: 'create' })}
-                disabled={!model || attributes.length === 0}
-                className="inline-flex items-center gap-1.5 font-medium"
-              >
-                <Plus size={12} aria-hidden="true" />
-                {tr('新建实例', 'New instance')}
-              </Button>
-            </div>
-          }
-        />
 
-        <div className="cmdb-liquid relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="cmdb-liquid-blobs" aria-hidden="true">
-            <span className="cmdb-liquid-blob cmdb-liquid-blob-a" />
-            <span className="cmdb-liquid-blob cmdb-liquid-blob-b" />
-            <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
-          </div>
-
-          <div ref={contentRef} className="cmdb-liquid-content relative min-h-0 flex-1 overflow-y-auto p-6">
-            <div className="flex flex-col gap-4">
-              <div className="cmdb-liquid-panel rounded-2xl p-3">
+        {/* THE FILTER BAR IS CHROME, NOT A CARD. It sits under the workspace
+            bar and meets the model rail, exactly like the model list's band, so
+            the page reads as one surface and the filters never scroll away. */}
+        <div className="cmdb-workspace-band shrink-0 border-b border-border/50 px-4 py-2.5">
                 {modelsErr && (
                   <div
                     role="alert"
@@ -876,12 +851,21 @@ export default function InstancesPage() {
                     )}
                   </div>
                 )}
-              </div>
+        </div>
 
-              <div className="cmdb-liquid-panel overflow-hidden rounded-2xl">
+        <div className="cmdb-liquid relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="cmdb-liquid-blobs" aria-hidden="true">
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-a" />
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-b" />
+            <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
+          </div>
+          <div ref={contentRef} className="cmdb-liquid-content relative flex min-h-0 flex-1 flex-col">
+            <div className="cmdb-model-config-body flex min-h-0 flex-1 flex-col p-4">
+              <section className="cmdb-liquid-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
                 {view === 'table' ? (
-                  <div className="p-3">
+                  <div className="flex min-h-0 flex-1 flex-col p-3">
                     <DataTable
+                      fill
                       columns={tableColumns}
                       rows={visibleRows}
                       rowKey={(row) => row.ci_id}
@@ -948,14 +932,16 @@ export default function InstancesPage() {
                       )}
                     />
                   </div>
-                ) : err ? (
-                  <div role="alert" className="flex flex-wrap items-center gap-3 px-4 py-3 text-xs text-red-300">
-                    <span className="min-w-0 flex-1 break-words">{err}</span>
-                    <Button variant="ghost" size="sm" type="button" onClick={() => void load()} className="cmdb-liquid-secondary">
-                      {tr('重试', 'Retry')}
-                    </Button>
-                  </div>
-                ) : loading && rows.length === 0 ? (
+                ) : (
+                  <div className="cmdb-model-table-scroll min-h-0 flex-1 overflow-y-auto p-3">
+                    {err ? (
+                      <div role="alert" className="flex flex-wrap items-center gap-3 px-4 py-3 text-xs text-red-600 dark:text-red-300">
+                        <span className="min-w-0 flex-1 break-words">{err}</span>
+                        <Button variant="ghost" size="sm" type="button" onClick={() => void load()} className="cmdb-liquid-secondary">
+                          {tr('重试', 'Retry')}
+                        </Button>
+                      </div>
+                    ) : loading && rows.length === 0 ? (
                   <div className="flex h-40 items-center justify-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</div>
                 ) : rows.length === 0 ? (
                   search ? (
@@ -1016,23 +1002,33 @@ export default function InstancesPage() {
                       />
                     ))}
                   </div>
+                    )}
+                  </div>
                 )}
 
-                <div className="cmdb-liquid-divider border-t px-3 py-1.5">
-                  <PaginationFooter
-                    page={page}
-                    pageSize={PAGE_SIZE}
-                    shown={visibleRows.length}
-                    total={numFound}
-                    loading={loading}
-                    onPageChange={setPage}
-                    className="cmdb-liquid-page-footer border-0 bg-transparent py-0"
-                  />
-                </div>
-              </div>
+                <PaginationFooter
+                  embedded
+                  page={page}
+                  pageSize={PAGE_SIZE}
+                  shown={visibleRows.length}
+                  total={numFound}
+                  loading={loading}
+                  showPageNumbers
+                  summary={tr(
+                    `显示 ${visibleRows.length === 0 ? 0 : page * PAGE_SIZE + 1} 至 ${
+                      visibleRows.length === 0 ? 0 : page * PAGE_SIZE + visibleRows.length
+                    } 条，共 ${numFound} 条实例`,
+                    `Showing ${visibleRows.length === 0 ? 0 : page * PAGE_SIZE + 1}–${
+                      visibleRows.length === 0 ? 0 : page * PAGE_SIZE + visibleRows.length
+                    } of ${numFound} instances`,
+                  )}
+                  onPageChange={setPage}
+                />
+              </section>
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       {editing && model && (

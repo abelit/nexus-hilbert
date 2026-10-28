@@ -93,6 +93,19 @@ beforeEach(() => {
   useAuth.setState({ token: null, role: 'admin' });
 });
 
+describe('the workspace bar', () => {
+  it('keeps the model heading in the breadcrumb and the actions on the bar', async () => {
+    baseHandlers();
+    renderPage();
+
+    const bar = await screen.findByRole('banner');
+    expect(within(bar).getByText('CMDB 资源管理平台')).toBeInTheDocument();
+    expect(within(bar).getByRole('heading', { level: 1, name: '主机' })).toBeInTheDocument();
+    expect(within(bar).getByRole('link', { name: '模型配置' })).toHaveAttribute('href', '/cmdb/models');
+    expect(within(bar).getByRole('button', { name: '模型定义' })).toBeInTheDocument();
+  });
+});
+
 describe('the attribute tab', () => {
   it('shows the effective set and where an inherited attribute comes from', async () => {
     baseHandlers();

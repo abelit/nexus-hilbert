@@ -50,38 +50,73 @@ export function deleteDCIMNode(type: DCIMType, id: number): Promise<void> {
   return cmdbDelete(`/dcim/${type}/${id}`);
 }
 
+/** The room-level totals the rack page's cards draw. */
+export type RackCounters = {
+  rack_count: number;
+  u_count: number;
+  u_used_count: number;
+  device_count: number;
+};
+
 /** A room's racks, with each rack's capacity rolled up. */
-export type RoomRacks = SearchPage & { counter?: Record<string, number> };
+export type RoomRacks = SearchPage & { counter?: RackCounters };
 
 export function roomRacks(roomID: number, q?: string): Promise<RoomRacks> {
   return cmdbGet<RoomRacks>(`/dcim/server-rooms/${roomID}/racks`, q ? { q } : undefined);
 }
 
-/** Mounts a device at a unit, or repositions it. */
+/** What a rack mutation returns. */
+export type RackChange = {
+  rack_id: number;
+  ci_id: number;
+  u_count: number;
+  free_u_count: number;
+  /** Present when a migration changed the destination rack too. */
+  to_free_u_count?: number;
+};
+
+/** Mounts a device at a unit. */
 export function mountDevice(
   roomID: number,
   rackID: number,
   deviceID: number,
   input: { u_start: number; u_count?: number },
-): Promise<{ rack_id: number; ci_id: number; u_count: number; free_u_count: number }> {
+): Promise<RackChange> {
   return cmdbPost(`/dcim/server-rooms/${roomID}/racks/${rackID}/devices/${deviceID}`, input);
 }
 
+/**
+ * Repositions a device, or migrates it when `to_rack_id` names another rack.
+ *
+ * THE SERVER TREATS BOTH AS ONE OPERATION (one endpoint, one transaction), so
+ * the console does too. `to_u_start` is the destination; `u_count` may be
+ * supplied to change the recorded height.
+ */
 export function moveDevice(
   roomID: number,
   rackID: number,
   deviceID: number,
-  input: { to_u_start?: number; to_rack_id?: number },
-): Promise<{ rack_id: number; ci_id: number; u_count: number; free_u_count: number; to_free_u_count?: number }> {
+  input: { to_u_start?: number; to_rack_id?: number; u_count?: number },
+): Promise<RackChange> {
   return cmdbPut(`/dcim/server-rooms/${roomID}/racks/${rackID}/devices/${deviceID}`, input);
 }
 
-export function unmountDevice(roomID: number, rackID: number, deviceID: number): Promise<void> {
-  return cmdbDelete(`/dcim/server-rooms/${roomID}/racks/${rackID}/devices/${deviceID}`);
+export function unmountDevice(roomID: number, rackID: number, deviceID: number): Promise<RackChange> {
+  return cmdbDelete<RackChange>(`/dcim/server-rooms/${roomID}/racks/${rackID}/devices/${deviceID}`);
 }
 
+/** The result of the room-wide recompute. */
+export type RackRecalc = {
+  racks: number;
+  free_u_count: number;
+  /** Rack ids found to have overlapping devices. */
+  u_slot_abnormal: number[];
+  /** Rack ids whose height could not be read, so no capacity could be computed. */
+  skipped: number[];
+};
+
 /** Recomputes every rack's free-unit count from what is in it. */
-export function recalcRackUnits(): Promise<{ racks?: number; changed?: number }> {
+export function recalcRackUnits(): Promise<RackRecalc> {
   return cmdbPost('/dcim/racks/recalc-units');
 }
 
@@ -100,6 +135,8 @@ export type RackHistory = {
   result: RackOperation[];
   /** Instance labels, keyed by instance id as a string. */
   id2ci?: Record<string, Record<string, unknown>>;
+  /** Model id → the attribute that labels that model. */
+  type2show_key?: Record<string, string>;
 };
 
 export function rackHistory(params?: { rack_id?: number; operate_type?: string[]; page?: number; count?: number }): Promise<RackHistory> {
