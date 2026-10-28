@@ -112,6 +112,54 @@ describe('the list', () => {
     expect(screen.queryByRole('columnheader', { name: 'root_password' })).not.toBeInTheDocument();
   });
 
+  it('searches the whole model through /ci/s on Enter and clears back to the list', async () => {
+    const user = userEvent.setup();
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
+    const searches: unknown[] = [];
+    server.use(
+      http.post('/api/v1/cmdb/ci/s', async ({ request }) => {
+        searches.push(await request.json());
+        return HttpResponse.json({
+          numfound: 1,
+          total: 1,
+          page: 1,
+          result: [
+            {
+              _id: 7,
+              _type: 1,
+              ci_id: 7,
+              ci_type: 'host',
+              unique: 'hostname',
+              unique_alias: '主机名',
+              _updated_at: '2026-10-27 09:00:00',
+              _updated_by: 'admin',
+              hostname: 'web-99',
+              note: 'found',
+            },
+          ],
+        });
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText('web-01')).toBeInTheDocument();
+    const box = screen.getByRole('searchbox', { name: '搜索全部实例' });
+    await user.type(box, 'web-99{Enter}');
+
+    // A SERVER SEARCH, NOT A PAGE FILTER: the term goes to the DSL endpoint.
+    await waitFor(() => expect(searches).toHaveLength(1));
+    expect(searches[0]).toMatchObject({ q: '_type:1,*web-99*', count: 20, page: 1 });
+    expect(await screen.findByText('web-99')).toBeInTheDocument();
+    expect(screen.getByText('found')).toBeInTheDocument();
+    expect(screen.queryByText('web-01')).not.toBeInTheDocument();
+    expect(screen.getByText('匹配实例')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '清除搜索' }));
+    // The empty term returns to the ordinary list endpoint.
+    expect(await screen.findByText('web-01')).toBeInTheDocument();
+    expect(screen.getByText('实例总数')).toBeInTheDocument();
+  });
+
   it('filters by environment and switches to the card grid', async () => {
     const user = userEvent.setup();
     handlers([

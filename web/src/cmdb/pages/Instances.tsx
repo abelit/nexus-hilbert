@@ -14,6 +14,7 @@ import {
   Search,
   Table2,
   Trash2,
+  X,
 } from 'lucide-react';
 
 import { Button, EmptyState } from '@/components/ui';
@@ -41,6 +42,7 @@ import {
   deleteInstance,
   getInstance,
   listInstances,
+  searchInstances,
   updateInstance,
   type Instance,
 } from '../api/instance';
@@ -55,6 +57,7 @@ import { ReferencePicker } from '../components/ReferencePicker';
 import { useToast } from '../components/Toast';
 import { attributeSections } from '../lib/attribute-sections';
 import { choiceText } from '../lib/choice-labels';
+import { instanceSearchQuery, searchRowToInstance } from '../lib/instance-search';
 import { groupModels } from '../lib/model-groups';
 import { referenceRawText, referenceText, useReferenceLabels, type ReferenceLabels } from '../lib/reference-labels';
 import { displayValue, isValueTypeCode } from '../lib/valuetype';
@@ -102,7 +105,10 @@ export default function InstancesPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [filter, setFilter] = useState('');
+  // Cantor's box searches the whole model, not the loaded page: the draft is
+  // committed to `/ci/s` on Enter, which is the only trigger.
+  const [searchDraft, setSearchDraft] = useState('');
+  const [search, setSearch] = useState('');
   const [modelQuery, setModelQuery] = useState('');
   const [envFilter, setEnvFilter] = useState('all');
   const [levelFilter, setLevelFilter] = useState('all');
@@ -158,16 +164,6 @@ export default function InstancesPage() {
   // REFERENCE IDS ARE NOT NAMES. Resolve the visible page's references in one
   // batch per referenced model, and fall back to the stored id if a lookup fails.
   const referenceLabels = useReferenceLabels(rows, columns, models);
-  const labelAttributes = useMemo(
-    () =>
-      new Map(
-        attributes
-          .filter((attribute) => attribute.is_reference || attribute.is_choice)
-          .map((attribute) => [attribute.name, attribute]),
-      ),
-    [attributes],
-  );
-
   // The model's shape: its effective attributes, its form sections, and the
   // columns this operator subscribed to.
   useEffect(() => {
@@ -207,6 +203,12 @@ export default function InstancesPage() {
     };
   }, [typeRef, model?.unique_key, tr]);
 
+  // The search query needs the model id, but the list loader must not depend on
+  // the model list request: the models land after the first list fetch and a
+  // dependency would refetch the same page.
+  const modelIDRef = useRef<number | undefined>(undefined);
+  modelIDRef.current = model?.id;
+
   const load = useCallback(
     async (quiet = false) => {
       if (!typeRef) return;
@@ -214,17 +216,34 @@ export default function InstancesPage() {
       else setLoading(true);
       setErr(null);
       try {
-        const got = await listInstances(typeRef, { page: page + 1, count: PAGE_SIZE });
-        setRows(got.items ?? []);
-        setNumFound(got.numfound ?? 0);
+        // CANTOR'S BOX IS A SERVER SEARCH. The term goes to `/ci/s` as a
+        // type-scoped contains query across the indexed values of the WHOLE
+        // model; the plain list is the empty-term path.
+        if (search) {
+          const got = await searchInstances({
+            q: instanceSearchQuery(modelIDRef.current ?? typeRef, search),
+            count: PAGE_SIZE,
+            page: page + 1,
+          });
+          setRows((got.result ?? []).map(searchRowToInstance));
+          setNumFound(got.numfound ?? 0);
+        } else {
+          const got = await listInstances(typeRef, { page: page + 1, count: PAGE_SIZE });
+          setRows(got.items ?? []);
+          setNumFound(got.numfound ?? 0);
+        }
       } catch (error) {
-        setErr(describeError(error, tr('无法读取实例', 'Could not load the instances')));
+        setErr(
+          search
+            ? describeError(error, tr('搜索实例失败', 'Could not search instances'))
+            : describeError(error, tr('无法读取实例', 'Could not load the instances')),
+        );
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [typeRef, page, tr],
+    [page, search, tr, typeRef],
   );
 
   useEffect(() => {
@@ -237,7 +256,8 @@ export default function InstancesPage() {
     // its attributes and rows are loading.
     setTypeRef(name);
     setPage(0);
-    setFilter('');
+    setSearch('');
+    setSearchDraft('');
     setEnvFilter('all');
     setLevelFilter('all');
     setViewing(null);
@@ -284,25 +304,17 @@ export default function InstancesPage() {
     return [...seen].sort((left, right) => left.localeCompare(right));
   };
 
-  // A CLIENT-SIDE FILTER OVER THE CURRENT PAGE, not a search. The real filter is
-  // 资源搜索; these controls are for narrowing the page an operator can see.
-  const visibleRows = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (envFilter !== 'all' && displayValue(row.values?.environment) !== envFilter) return false;
-      if (levelFilter !== 'all' && displayValue(row.values?.level) !== levelFilter) return false;
-      if (!needle) return true;
-      return Object.entries(row.values ?? {}).some(([name, value]) => {
-        const attribute = labelAttributes.get(name);
-        const label = attribute?.is_reference
-          ? referenceText(value, referenceLabels)
-          : attribute
-            ? choiceText(attribute, value)
-            : undefined;
-        return (label ?? displayValue(value)).toLowerCase().includes(needle);
-      });
-    });
-  }, [rows, filter, envFilter, levelFilter, labelAttributes, referenceLabels]);
+  // THE ENVIRONMENT/LEVEL CHIPS FILTER THE LOADED PAGE. The free-text box is a
+  // server search (see load), so no value matching happens here.
+  const visibleRows = useMemo(
+    () =>
+      rows.filter((row) => {
+        if (envFilter !== 'all' && displayValue(row.values?.environment) !== envFilter) return false;
+        if (levelFilter !== 'all' && displayValue(row.values?.level) !== levelFilter) return false;
+        return true;
+      }),
+    [rows, envFilter, levelFilter],
+  );
 
   const activeCount = rows.filter((row) => displayValue(row.values?.data_status).toLowerCase() === 'active').length;
   const activePercent = statusAttribute && rows.length > 0 ? Math.round((activeCount / rows.length) * 100) : null;
@@ -362,11 +374,22 @@ export default function InstancesPage() {
     });
   }, [groupedRail, modelSections, typeRef]);
 
-  const filtering = filter.trim().length > 0 || envFilter !== 'all' || levelFilter !== 'all';
+  const filtering = envFilter !== 'all' || levelFilter !== 'all';
   const clearFilters = () => {
-    setFilter('');
     setEnvFilter('all');
     setLevelFilter('all');
+  };
+  const applySearch = () => {
+    const next = searchDraft.trim();
+    if (next === search) return;
+    setSearch(next);
+    setPage(0);
+  };
+  const clearSearch = () => {
+    setSearchDraft('');
+    if (!search) return;
+    setSearch('');
+    setPage(0);
   };
 
   // One rail row, shared by the flat and grouped renders so the two modes
@@ -569,7 +592,7 @@ export default function InstancesPage() {
                 </>
               )}
               <span className="inline-flex items-center gap-1">
-                <span>{tr('实例总数', 'Total instances')}</span>
+                <span>{search ? tr('匹配实例', 'Matching instances') : tr('实例总数', 'Total instances')}</span>
                 <span className="font-mono font-medium text-text">{numFound}</span>
               </span>
               <span className="inline-flex items-center gap-1">
@@ -765,12 +788,35 @@ export default function InstancesPage() {
                       />
                       <Input
                         type="search"
-                        aria-label={tr('在本页筛选', 'Filter this page')}
+                        aria-label={tr('搜索全部实例', 'Search all instances')}
                         placeholder={tr('搜索名称、代码或任意值…', 'Search name, code or any value…')}
-                        value={filter}
-                        onChange={(event) => setFilter(event.target.value)}
-                        className="w-full pl-7 text-xs"
+                        value={searchDraft}
+                        onChange={(event) => setSearchDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            applySearch();
+                          }
+                        }}
+                        // The native search clear would empty the draft without
+                        // resetting the applied query; the explicit X below is
+                        // the one control that clears both.
+                        className={cn(
+                          'w-full pl-7 text-xs [&::-webkit-search-cancel-button]:hidden',
+                          search && 'pr-7',
+                        )}
                       />
+                      {search && (
+                        <button
+                          type="button"
+                          onClick={clearSearch}
+                          aria-label={tr('清除搜索', 'Clear search')}
+                          title={tr('清除搜索', 'Clear search')}
+                          className="absolute right-1.5 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-text-faint hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+                        >
+                          <X size={12} aria-hidden="true" />
+                        </button>
+                      )}
                     </div>
                     {model && (
                       <InstanceFieldsDialog
@@ -810,10 +856,25 @@ export default function InstancesPage() {
                     </div>
                   </div>
                 </div>
-                {filtering && (
-                  <p className="mt-2 text-[11px] text-text-faint">
-                    {tr(`显示 ${visibleRows.length} / ${rows.length} 条本页记录`, `Showing ${visibleRows.length} of ${rows.length} on this page`)}
-                  </p>
+                {(search || filtering) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-faint">
+                    {search && (
+                      <span>
+                        {tr(
+                          `在全部实例中搜索「${search}」，命中 ${numFound} 条`,
+                          `Searching all instances for “${search}”: ${numFound} matches`,
+                        )}
+                      </span>
+                    )}
+                    {filtering && (
+                      <span>
+                        {tr(
+                          `显示 ${visibleRows.length} / ${rows.length} 条本页记录`,
+                          `Showing ${visibleRows.length} of ${rows.length} on this page`,
+                        )}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -831,9 +892,11 @@ export default function InstancesPage() {
                       empty={
                         model && attributes.length === 0
                           ? tr('这个模型还没有绑定属性，存不了实例。去模型详情里加几个。', 'This model has no bound attributes, so it cannot hold instances. Add some on its page.')
-                          : visibleRows.length === 0 && rows.length > 0
-                            ? tr('没有匹配的实例', 'No matching instances')
-                            : tr('还没有实例', 'No instances yet')
+                          : search && rows.length === 0
+                            ? tr(`未找到匹配「${search}」的实例`, `No instances match “${search}”`)
+                            : visibleRows.length === 0 && rows.length > 0
+                              ? tr('没有匹配的实例', 'No matching instances')
+                              : tr('还没有实例', 'No instances yet')
                       }
                       actions={(row) => (
                         <span className="flex items-center gap-1 whitespace-nowrap">
@@ -895,28 +958,41 @@ export default function InstancesPage() {
                 ) : loading && rows.length === 0 ? (
                   <div className="flex h-40 items-center justify-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</div>
                 ) : rows.length === 0 ? (
-                  <EmptyState
-                    className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
-                    title={tr('还没有实例', 'No instances yet')}
-                    hint={
-                      model && attributes.length === 0
-                        ? tr('这个模型还没有绑定属性，存不了实例。', 'This model has no bound attributes, so it cannot hold instances.')
-                        : tr('创建第一条实例开始。', 'Create the first instance to begin.')
-                    }
-                    action={
-                      model && attributes.length > 0 ? (
-                        <Button variant="primary" size="sm" type="button" onClick={() => setEditing({ mode: 'create' })} className="inline-flex items-center gap-1.5">
-                          <Plus size={12} aria-hidden="true" />
-                          {tr('新建实例', 'New instance')}
+                  search ? (
+                    <EmptyState
+                      className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
+                      title={tr(`未找到匹配「${search}」的实例`, `No instances match “${search}”`)}
+                      hint={tr('换一个关键词，或清除搜索。', 'Try another term, or clear the search.')}
+                      action={
+                        <Button variant="ghost" size="sm" type="button" onClick={clearSearch} className="cmdb-liquid-secondary">
+                          {tr('清除搜索', 'Clear search')}
                         </Button>
-                      ) : undefined
-                    }
-                  />
+                      }
+                    />
+                  ) : (
+                    <EmptyState
+                      className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
+                      title={tr('还没有实例', 'No instances yet')}
+                      hint={
+                        model && attributes.length === 0
+                          ? tr('这个模型还没有绑定属性，存不了实例。', 'This model has no bound attributes, so it cannot hold instances.')
+                          : tr('创建第一条实例开始。', 'Create the first instance to begin.')
+                      }
+                      action={
+                        model && attributes.length > 0 ? (
+                          <Button variant="primary" size="sm" type="button" onClick={() => setEditing({ mode: 'create' })} className="inline-flex items-center gap-1.5">
+                            <Plus size={12} aria-hidden="true" />
+                            {tr('新建实例', 'New instance')}
+                          </Button>
+                        ) : undefined
+                      }
+                    />
+                  )
                 ) : visibleRows.length === 0 ? (
                   <EmptyState
                     className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
                     title={tr('没有匹配的实例', 'No matching instances')}
-                    hint={tr('换一个关键词，或清除环境/等级筛选。', 'Try another term, or clear the environment/level filters.')}
+                    hint={tr('清除环境或等级筛选。', 'Clear the environment or level filter.')}
                     action={
                       <Button variant="ghost" size="sm" type="button" onClick={clearFilters} className="cmdb-liquid-secondary">
                         {tr('清除筛选', 'Clear filters')}

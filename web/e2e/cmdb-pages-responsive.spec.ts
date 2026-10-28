@@ -983,6 +983,55 @@ test('resource data lists every model attribute and saves the chosen columns', a
   await page.screenshot({ path: testInfo.outputPath('resource-data-attributes-dialog-390-light-zh-CN.png') });
 });
 
+test('resource data searches the whole model on the server', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockInstanceDetail(page);
+  let searchBody: unknown = null;
+  await page.route('**/api/v1/cmdb/ci/s', async (route) => {
+    searchBody = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        numfound: 1,
+        total: 1,
+        page: 1,
+        result: [{
+          _id: 77, _type: 1, ci_id: 77, ci_type: 'host',
+          hostname: 'web-77', note: 'server match', data_status: 'active',
+        }],
+      },
+    });
+  });
+
+  await page.goto('/cmdb/instances?type=host');
+  await expect(page.getByText('host-05').first()).toBeVisible();
+
+  // Enter commits the term to the DSL endpoint; typing alone does not search.
+  const box = page.getByRole('searchbox', { name: '搜索全部实例' });
+  await box.fill('web-77');
+  await box.press('Enter');
+
+  const table = page.locator('.cmdb-table');
+  await expect(table.getByText('web-77', { exact: true })).toBeVisible();
+  await expect(table.getByText('server match', { exact: true })).toBeVisible();
+  await expect(page.getByText('host-05')).toHaveCount(0);
+  expect(searchBody).toMatchObject({ q: '_type:1,*web-77*', page: 1, count: 20 });
+  await expect(page.getByText(/命中 1 条/)).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('resource-data-server-search-1440-light-zh-CN.png') });
+
+  // Clearing the term returns to the ordinary list endpoint.
+  await page.getByRole('button', { name: '清除搜索' }).click();
+  await expect(page.getByText('host-05').first()).toBeVisible();
+  await expect(page.getByText(/命中 1 条/)).toHaveCount(0);
+});
+
 test('resource data hides the rail and uses the model Select on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
