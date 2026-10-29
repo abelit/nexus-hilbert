@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import { Button, EmptyState } from '@/components/ui';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { Chip } from '@/components/ui/Chip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
@@ -57,12 +58,14 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Drawer } from '../components/Drawer';
 import { InstanceDetailDrawer } from '../components/instance-detail/InstanceDetailDrawer';
 import { InstanceFieldsDialog } from '../components/InstanceFieldsDialog';
+import { ExportMenu } from '../components/ipam/ExportMenu';
 import { MetaPill } from '../components/MetaPill';
 import { ReferencePicker } from '../components/ReferencePicker';
 import { useToast } from '../components/Toast';
 import { WorkspaceBar } from '../components/WorkspaceBar';
 import { attributeSections } from '../lib/attribute-sections';
 import { choiceText } from '../lib/choice-labels';
+import type { ExportColumn } from '../lib/export';
 import { instanceSearchQuery, searchRowToInstance } from '../lib/instance-search';
 import { groupModels, orderModelsBySubscription } from '../lib/model-groups';
 import { referenceRawText, referenceText, useReferenceLabels, type ReferenceLabels } from '../lib/reference-labels';
@@ -80,6 +83,12 @@ import { displayValue, isValueTypeCode } from '../lib/valuetype';
 // columns is not a fallback.
 
 const PAGE_SIZE = 20;
+
+// One export page is 500 because that is the instance/search endpoint's
+// ceiling. 全部 is therefore fetched in pages, with a bound: cantor asked for
+// 99,999 in one request, which this backend would clamp to one 500-row page.
+const EXPORT_PAGE_SIZE = 500;
+const EXPORT_MAX_ROWS = 10_000;
 
 type View = 'table' | 'grid';
 
@@ -131,6 +140,20 @@ export default function InstancesPage() {
     const ci = Number(params.get('ci'));
     return Number.isSafeInteger(ci) && ci > 0 ? { id: ci, tab: 'overview' } : null;
   });
+  // SELECTION IS THE OPERATOR'S INTENT, NOT A PAGE FACT. Checked instances stay
+  // selected while paging; changing the model or the query starts a new set.
+  const [selected, setSelected] = useState<Set<string | number>>(() => new Set());
+  const selectedCount = selected.size;
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  const toggleSelected = useCallback((id: number) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const loadModelGroups = useCallback(async () => {
     try {
@@ -277,6 +300,7 @@ export default function InstancesPage() {
     setSearchDraft('');
     setEnvFilter('all');
     setLevelFilter('all');
+    setSelected(new Set());
     setViewing(null);
     setRows([]);
     setNumFound(0);
@@ -301,6 +325,12 @@ export default function InstancesPage() {
     if (!ok) return;
     try {
       await deleteInstance(row.ci_id);
+      setSelected((current) => {
+        if (!current.has(row.ci_id)) return current;
+        const next = new Set(current);
+        next.delete(row.ci_id);
+        return next;
+      });
       toast.success(tr('已删除', 'Deleted'));
       await load(true);
     } catch (error) {
@@ -325,14 +355,35 @@ export default function InstancesPage() {
 
   // THE ENVIRONMENT/LEVEL CHIPS FILTER THE LOADED PAGE. The free-text box is a
   // server search (see load), so no value matching happens here.
-  const visibleRows = useMemo(
-    () =>
-      rows.filter((row) => {
-        if (envFilter !== 'all' && displayValue(row.values?.environment) !== envFilter) return false;
-        if (levelFilter !== 'all' && displayValue(row.values?.level) !== levelFilter) return false;
-        return true;
-      }),
-    [rows, envFilter, levelFilter],
+  const matchesEnvLevel = useCallback(
+    (row: Instance) => {
+      if (envFilter !== 'all' && displayValue(row.values?.environment) !== envFilter) return false;
+      if (levelFilter !== 'all' && displayValue(row.values?.level) !== levelFilter) return false;
+      return true;
+    },
+    [envFilter, levelFilter],
+  );
+  const visibleRows = useMemo(() => rows.filter(matchesEnvLevel), [rows, matchesEnvLevel]);
+
+  // THE TABLE AND THE GRID SHARE ONE SET. The table's header checkbox and the
+  // grid's toolbar checkbox both act on the rows the current view shows.
+  const pageIDs = useMemo(() => visibleRows.map((row) => row.ci_id), [visibleRows]);
+  const allPageSelected = pageIDs.length > 0 && pageIDs.every((id) => selected.has(id));
+  const somePageSelected = !allPageSelected && pageIDs.some((id) => selected.has(id));
+  const togglePageSelected = () => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (allPageSelected) pageIDs.forEach((id) => next.delete(id));
+      else pageIDs.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+  const tableSelection = useMemo(
+    () => ({
+      selected,
+      onChange: (next: ReadonlySet<string | number>) => setSelected(new Set(next)),
+    }),
+    [selected],
   );
 
   const activeCount = rows.filter((row) => displayValue(row.values?.data_status).toLowerCase() === 'active').length;
@@ -432,21 +483,34 @@ export default function InstancesPage() {
   }, [groupedRail, modelSections, typeRef]);
 
   const filtering = envFilter !== 'all' || levelFilter !== 'all';
+  // A query change invalidates the visible set; keeping a hidden selection
+  // would let 已选 export rows the operator can no longer see.
+  const applyEnvFilter = (value: string) => {
+    setEnvFilter(value);
+    clearSelection();
+  };
+  const applyLevelFilter = (value: string) => {
+    setLevelFilter(value);
+    clearSelection();
+  };
   const clearFilters = () => {
     setEnvFilter('all');
     setLevelFilter('all');
+    clearSelection();
   };
   const applySearch = () => {
     const next = searchDraft.trim();
     if (next === search) return;
     setSearch(next);
     setPage(0);
+    clearSelection();
   };
   const clearSearch = () => {
     setSearchDraft('');
     if (!search) return;
     setSearch('');
     setPage(0);
+    clearSelection();
   };
 
   // One rail row, shared by the flat and grouped renders so the two modes
@@ -502,6 +566,92 @@ export default function InstancesPage() {
       );
     },
   }));
+
+  // The exported columns are the subscribed ones the table shows. References
+  // are omitted, as cantor did: their stored value is an id, and resolving every
+  // referenced instance would turn one export into hundreds of lookups.
+  const exportColumns = useMemo<ExportColumn<Instance>[]>(
+    () =>
+      columns
+        .filter((attribute) => !attribute.is_reference)
+        .map((attribute) => ({
+          key: attribute.name,
+          header: attribute.alias || attribute.name,
+          value: (row) => {
+            const value = row.values?.[attribute.name];
+            return choiceText(attribute, value) ?? displayValue(value);
+          },
+        })),
+    [columns],
+  );
+
+  // 全部 means "the current server query", not "the twenty rows on screen".
+  // The endpoint caps one page at 500, so fetch in pages and stop at the same
+  // client-side bound the UI reports.
+  const fetchAllForExport = useCallback(async (): Promise<Instance[]> => {
+    if (!typeRef) return [];
+    const target = Math.min(numFound, EXPORT_MAX_ROWS);
+    if (target <= 0) return [];
+    const pages = Math.ceil(target / EXPORT_PAGE_SIZE);
+    const collected: Instance[] = [];
+    for (let page = 1; page <= pages; page += 1) {
+      if (search) {
+        const got = await searchInstances({
+          q: instanceSearchQuery(model?.id ?? typeRef, search),
+          count: EXPORT_PAGE_SIZE,
+          page,
+        });
+        const items = (got.result ?? []).map(searchRowToInstance);
+        collected.push(...items);
+        if (items.length === 0) break;
+      } else {
+        const got = await listInstances(typeRef, { page, count: EXPORT_PAGE_SIZE });
+        const items = got.items ?? [];
+        collected.push(...items);
+        if (items.length === 0) break;
+      }
+      if (collected.length >= target) break;
+    }
+    if (numFound > EXPORT_MAX_ROWS) {
+      toast.info(
+        tr(
+          `实例超过 ${EXPORT_MAX_ROWS} 条，已导出前 ${EXPORT_MAX_ROWS} 条`,
+          `More than ${EXPORT_MAX_ROWS} instances; exporting the first ${EXPORT_MAX_ROWS}`,
+        ),
+      );
+    }
+    // The environment/level chips are a page filter in the UI; applying them to
+    // the whole export keeps the file consistent with what the operator asked
+    // to see rather than silently widening the scope.
+    return collected.slice(0, target).filter(matchesEnvLevel);
+  }, [typeRef, numFound, search, model?.id, matchesEnvLevel, toast, tr]);
+
+  // SELECTED ROWS CAN BE ON PAGES THE OPERATOR HAS LEFT. Resolve them by id, in
+  // the order they were checked, instead of exporting only what is on screen.
+  // The ids travel in batches of one page so a large selection stays within the
+  // search endpoint's per-request limit.
+  const fetchSelectedForExport = useCallback(async (): Promise<Instance[]> => {
+    const ids = [...selected]
+      .map((key) => Number(key))
+      .filter((id) => Number.isSafeInteger(id) && id > 0);
+    if (ids.length === 0) return [];
+    const found = new Map<number, Instance>();
+    for (let offset = 0; offset < ids.length; offset += EXPORT_PAGE_SIZE) {
+      const chunk = ids.slice(offset, offset + EXPORT_PAGE_SIZE);
+      const got = await searchInstances({
+        q: `_id:(${chunk.join(';')})`,
+        count: EXPORT_PAGE_SIZE,
+        page: 1,
+      });
+      for (const item of (got.result ?? []).map(searchRowToInstance)) {
+        found.set(item.ci_id, item);
+      }
+    }
+    return ids.flatMap((id) => {
+      const row = found.get(id);
+      return row ? [row] : [];
+    });
+  }, [selected]);
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
@@ -740,7 +890,7 @@ export default function InstancesPage() {
                             size="sm"
                             type="button"
                             aria-pressed={envFilter === 'all'}
-                            onClick={() => setEnvFilter('all')}
+                            onClick={() => applyEnvFilter('all')}
                             className={cn('cmdb-liquid-pill', envFilter === 'all' && 'is-active')}
                           >
                             {tr('全部环境', 'All env')}
@@ -754,7 +904,7 @@ export default function InstancesPage() {
                                 size="sm"
                                 type="button"
                                 aria-pressed={envFilter === value}
-                                onClick={() => setEnvFilter(value)}
+                                onClick={() => applyEnvFilter(value)}
                                 title={label ? `${label} (${value})` : value}
                                 className={cn('cmdb-liquid-pill', envFilter === value && 'is-active')}
                               >
@@ -777,7 +927,7 @@ export default function InstancesPage() {
                             size="sm"
                             type="button"
                             aria-pressed={levelFilter === 'all'}
-                            onClick={() => setLevelFilter('all')}
+                            onClick={() => applyLevelFilter('all')}
                             className={cn('cmdb-liquid-pill', levelFilter === 'all' && 'is-active')}
                           >
                             {tr('全部等级', 'All levels')}
@@ -791,7 +941,7 @@ export default function InstancesPage() {
                                 size="sm"
                                 type="button"
                                 aria-pressed={levelFilter === value}
-                                onClick={() => setLevelFilter(value)}
+                                onClick={() => applyLevelFilter(value)}
                                 title={label ? `${label} (${value})` : value}
                                 className={cn(
                                   'cmdb-liquid-pill',
@@ -883,6 +1033,19 @@ export default function InstancesPage() {
                         {tr('网格', 'Grid')}
                       </Button>
                     </div>
+                    {model && (
+                      <ExportMenu
+                        filename={model.alias || model.name || 'cmdb-instances'}
+                        columns={exportColumns}
+                        rows={visibleRows}
+                        scopes={['all', 'page', 'selected']}
+                        totalCount={filtering ? undefined : numFound}
+                        selectedCount={selectedCount}
+                        fetchAll={fetchAllForExport}
+                        fetchSelected={fetchSelectedForExport}
+                        disabled={loading || exportColumns.length === 0}
+                      />
+                    )}
                   </div>
                 </div>
                 {(search || filtering) && (
@@ -905,6 +1068,31 @@ export default function InstancesPage() {
                     )}
                   </div>
                 )}
+                {selectedCount > 0 && (
+                  <div
+                    role="status"
+                    className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-[11px]"
+                  >
+                    <span className="font-medium text-text">
+                      {tr(`已选 ${selectedCount} 项`, `${selectedCount} selected`)}
+                    </span>
+                    <span className="text-text-muted">
+                      {tr(
+                        '导出时选择「已选」只导出勾选的实例。',
+                        'Choose “Selected” in Export to export only the checked instances.',
+                      )}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      onClick={clearSelection}
+                      className="ms-auto text-text-muted hover:text-text"
+                    >
+                      {tr('清除选择', 'Clear selection')}
+                    </Button>
+                  </div>
+                )}
         </div>
 
         <div className="cmdb-liquid relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -923,6 +1111,7 @@ export default function InstancesPage() {
                       columns={tableColumns}
                       rows={visibleRows}
                       rowKey={(row) => row.ci_id}
+                      selection={tableSelection}
                       loading={loading}
                       error={err}
                       onRetry={() => void load()}
@@ -1040,21 +1229,34 @@ export default function InstancesPage() {
                     }
                   />
                 ) : (
-                  <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
-                    {visibleRows.map((row) => (
-                      <InstanceCard
-                        key={row.ci_id}
-                        row={row}
-                        columns={columns}
-                        referenceLabels={referenceLabels}
-                        environmentAttribute={envAttribute}
-                        model={model ?? null}
-                        onView={() => setViewing({ id: row.ci_id, tab: 'overview' })}
-                        onTopology={() => setViewing({ id: row.ci_id, tab: 'topology' })}
-                        onEdit={() => setEditing({ mode: 'edit', id: row.ci_id })}
-                        onDelete={() => void remove(row)}
+                  <div className="p-4">
+                    <div className="mb-3 flex items-center gap-2 text-[11px] text-text-muted">
+                      <Checkbox
+                        checked={allPageSelected}
+                        indeterminate={somePageSelected}
+                        onCheckedChange={togglePageSelected}
+                        aria-label={tr('选择本页全部', 'Select every row on this page')}
                       />
-                    ))}
+                      <span>{tr('选择本页', 'Select this page')}</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      {visibleRows.map((row) => (
+                        <InstanceCard
+                          key={row.ci_id}
+                          row={row}
+                          columns={columns}
+                          referenceLabels={referenceLabels}
+                          environmentAttribute={envAttribute}
+                          model={model ?? null}
+                          selected={selected.has(row.ci_id)}
+                          onSelect={() => toggleSelected(row.ci_id)}
+                          onView={() => setViewing({ id: row.ci_id, tab: 'overview' })}
+                          onTopology={() => setViewing({ id: row.ci_id, tab: 'topology' })}
+                          onEdit={() => setEditing({ mode: 'edit', id: row.ci_id })}
+                          onDelete={() => void remove(row)}
+                        />
+                      ))}
+                    </div>
                   </div>
                     )}
                   </div>
@@ -1129,6 +1331,8 @@ function InstanceCard({
   referenceLabels,
   environmentAttribute,
   model,
+  selected,
+  onSelect,
   onView,
   onTopology,
   onEdit,
@@ -1139,6 +1343,8 @@ function InstanceCard({
   referenceLabels: ReferenceLabels;
   environmentAttribute?: TypeAttribute;
   model: CIType | null;
+  selected: boolean;
+  onSelect(): void;
   onView(): void;
   onTopology(): void;
   onEdit(): void;
@@ -1174,16 +1380,27 @@ function InstanceCard({
     environment.toLowerCase() === 'prod' ? 'success' : environment.toLowerCase() === 'test' ? 'info' : 'default';
 
   return (
-    <div className="cmdb-liquid-card flex min-w-0 flex-col justify-between rounded-2xl p-4">
+    <div
+      data-selected={selected || undefined}
+      className="cmdb-liquid-card flex min-w-0 flex-col justify-between rounded-2xl p-4"
+    >
       <div>
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="truncate font-mono text-[10px] text-text-faint">{codeValue}</p>
-            <h3 className="mt-0.5 truncate text-sm font-bold text-text">
-              {titleValue === '—' ? `#${row.ci_id}` : titleValue}
-            </h3>
+          <div className="flex min-w-0 items-start gap-2">
+            <Checkbox
+              checked={selected}
+              onCheckedChange={onSelect}
+              aria-label={tr(`选择实例 ${row.ci_id}`, `Select instance ${row.ci_id}`)}
+              className="mt-0.5"
+            />
+            <div className="min-w-0">
+              <p className="truncate font-mono text-[10px] text-text-faint">{codeValue}</p>
+              <h3 className="mt-0.5 truncate text-sm font-bold text-text">
+                {titleValue === '—' ? `#${row.ci_id}` : titleValue}
+              </h3>
+            </div>
           </div>
-          {environment !== '—' && <Chip tone={environmentTone}>{environmentText}</Chip>}
+          {environment !== '—' && <Chip tone={environmentTone} className="shrink-0">{environmentText}</Chip>}
         </div>
         <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
           {fields.map((attribute) => {

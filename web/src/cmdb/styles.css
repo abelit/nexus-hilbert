@@ -423,6 +423,14 @@ html.dark .cmdb-liquid-policy.is-shown {
   background: var(--liquid-panel-strong);
 }
 
+/* The grid shares the table's selection language: indigo, visible in both
+   themes, and not erased while the pointer hovers the card. */
+.cmdb-liquid-card[data-selected],
+.cmdb-liquid-card[data-selected]:hover {
+  border-color: rgb(99 102 241 / 0.55);
+  box-shadow: 0 0 0 1px rgb(99 102 241 / 0.3), var(--liquid-shadow);
+}
+
 @media (max-width: 640px) {
   .cmdb-liquid-blob-a {
     top: -90px;

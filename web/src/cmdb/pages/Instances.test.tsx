@@ -107,6 +107,39 @@ beforeEach(() => {
 });
 
 describe('the list', () => {
+  it('offers an export of the current query and the current page', async () => {
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
+    renderPage();
+
+    await screen.findByText('web-01');
+    expect(await screen.findByRole('button', { name: '导出' })).toBeInTheDocument();
+  });
+
+  it('selects rows with the row and page checkboxes, and offers that selection to export', async () => {
+    const user = userEvent.setup();
+    handlers([
+      { ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } },
+      { ci_id: 6, type_id: 1, values: { hostname: 'web-02', note: 'world' } },
+    ]);
+    renderPage();
+
+    await screen.findByText('web-01');
+    const rowBoxes = screen.getAllByRole('checkbox', { name: '选择这一行' });
+    await user.click(rowBoxes[0]);
+    expect(await screen.findByText('已选 1 项')).toBeInTheDocument();
+
+    // The header checkbox extends the selection to the rows on this page.
+    await user.click(screen.getByRole('checkbox', { name: '选择本页全部' }));
+    expect(await screen.findByText('已选 2 项')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '清除选择' }));
+    expect(screen.queryByText(/已选 \d+ 项/)).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('checkbox', { name: '选择这一行' })[0]);
+    await user.click(screen.getByRole('button', { name: '导出' }));
+    expect(await screen.findByRole('button', { name: '已选 (1)' })).toBeInTheDocument();
+  });
+
   it('shows the subscribed columns, and only those', async () => {
     handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello', root_password: 'x' } }]);
     renderPage();
@@ -237,6 +270,10 @@ describe('the list', () => {
     expect(screen.getByRole('button', { name: '查看实例 5' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '编辑实例 5' })).toBeInTheDocument();
     expect(screen.getAllByText('生产').length).toBeGreaterThan(0);
+    // The grid shares the table's selection state and gives the card its own
+    // checkbox instead of making the whole card a checkbox.
+    await user.click(screen.getByRole('checkbox', { name: '选择实例 5' }));
+    expect(await screen.findByText('已选 1 项')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '查看实例 5' }));
     const drawer = await screen.findByRole('dialog');
