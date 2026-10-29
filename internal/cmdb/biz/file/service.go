@@ -1,7 +1,6 @@
 package file
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -40,7 +39,10 @@ type FileInput struct {
 	Name        string
 	Size        int64
 	ContentType string
-	Reader      io.Reader
+	// Reader must be rewindable: the usecase sniffs the MIME prefix, hashes
+	// the object, and then hands the same stream to the storage backend. S3
+	// SigV4 also hashes and rewinds the body on HTTP endpoints.
+	Reader io.ReadSeeker
 }
 
 // FileDTO is the value stored in a CMDB file attribute and returned by upload.
@@ -162,6 +164,9 @@ func (u *Usecase) UpdatePreview(ctx context.Context, patch PreviewPatch) (Previe
 	if patch.PreviewServerURL != nil {
 		cfg.PreviewServerURL = strings.TrimSpace(*patch.PreviewServerURL)
 	}
+	if patch.FileFetchBaseURL != nil {
+		cfg.FileFetchBaseURL = normalizeBaseURL(*patch.FileFetchBaseURL)
+	}
 	if patch.ForceUpdatedCacheTypes != nil {
 		cfg.ForceUpdatedCacheTypes = normalizeExtensions(*patch.ForceUpdatedCacheTypes)
 	}
@@ -282,15 +287,29 @@ func (u *Usecase) Upload(ctx context.Context, callerID uint64, _ string, inputs 
 		}
 		head = head[:n]
 		mimeType := detectMime(original, input.ContentType, head)
+		if _, err := input.Reader.Seek(0, io.SeekStart); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("rewind upload %s: %w", original, err)
+		}
 		fileID, err := newFileID()
 		if err != nil {
 			cleanup()
 			return nil, err
 		}
 		key := u.now().UTC().Format("2006/01/02") + "/" + fileID + "_" + original
+		// Hash in its own pass instead of wrapping the body in io.TeeReader:
+		// the S3 signer needs the original seekable reader to rewind after its
+		// own payload hash, and a TeeReader would hide Seek.
 		hasher := sha256.New()
-		body := io.TeeReader(io.MultiReader(bytes.NewReader(head), input.Reader), hasher)
-		if _, err := backend.Put(ctx, key, body, input.Size, mimeType); err != nil {
+		if _, err := io.Copy(hasher, input.Reader); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("hash upload %s: %w", original, err)
+		}
+		if _, err := input.Reader.Seek(0, io.SeekStart); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("rewind upload %s: %w", original, err)
+		}
+		if _, err := backend.Put(ctx, key, input.Reader, input.Size, mimeType); err != nil {
 			cleanup()
 			return nil, err
 		}
@@ -442,7 +461,8 @@ func fileIDsFromJSON(raw string) []string {
 }
 
 // PreviewLink mints a short-lived capability URL. The URL is relative; the
-// browser prefixes it with the same origin kkFileView can reach.
+// browser prefixes it with the admin-configured file access address (or the
+// frontend build-time base / browser origin) before handing it to kkFileView.
 func (u *Usecase) PreviewLink(ctx context.Context, fileID string, download bool) (string, time.Time, error) {
 	if _, err := u.fileRow(ctx, fileID); err != nil {
 		return "", time.Time{}, err
@@ -528,6 +548,7 @@ func (u *Usecase) resolvePreview(ctx context.Context) (PreviewConfig, error) {
 	if err := json.Unmarshal([]byte(plain), &cfg); err != nil {
 		return PreviewConfig{}, fmt.Errorf("cmdb file: parse preview settings: %w", err)
 	}
+	cfg.FileFetchBaseURL = normalizeBaseURL(cfg.FileFetchBaseURL)
 	cfg.ForceUpdatedCacheTypes = normalizeExtensions(cfg.ForceUpdatedCacheTypes)
 	if len(cfg.ForceUpdatedCacheTypes) == 0 {
 		cfg.ForceUpdatedCacheTypes = u.previewDef.ForceUpdatedCacheTypes

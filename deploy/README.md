@@ -8,7 +8,7 @@ development; production-style install assets live under `deploy/install/`.
 - `Dockerfile.ongrid` — multi-stage build for the cloud service (`cmd/ongrid`). Final image is `debian:bookworm-slim`, nonroot — **not** distroless/static: the cloud binary is cgo-linked because the local ONNX embedder (fastembed-go → libonnxruntime) needs glibc + libstdc++ + libgomp, and the image bundles ONNX Runtime under `ONNX_PATH`.
 - `Dockerfile.ongrid-edge` — the edge agent (`cmd/ongrid-edge`) is pure-Go (`CGO_ENABLED=0`), so *its* image is distroless + static (`gcr.io/distroless/static-debian12:nonroot`) — the opposite of the cloud image, which carries the embedder. Exposes `9101` only for local `/metrics` debug; the agent dials out.
 - `Dockerfile.ongrid-cmdb` — the standalone CMDB service (`cmd/ongrid-cmdb`), pure-Go and distroless (`gcr.io/distroless/base-debian12:nonroot`). Listens on `8082` (API) and `9102` (`/metrics`); shares the manager database and JWT secret.
-- `docker-compose.yml` — spins up `mysql`, `ongrid`, `ongrid-cmdb`, `frontier`, `nginx`, `prometheus`, and `grafana` on the `ongrid_net` bridge. MySQL is the default backend; its data lives in the named volume `mysql_data`. `ongrid-edge` is intentionally excluded (edge runs on user hosts) — a commented stanza at the bottom shows how to run one for demos. nginx routes `/api/v1/cmdb/*` to `ongrid-cmdb` and everything else under `/api/` to `ongrid`.
+- `docker-compose.yml` — spins up `mysql`, `ongrid`, `ongrid-cmdb`, `kkfileview`, `rustfs`, `frontier`, `nginx`, `prometheus`, and `grafana` on the `ongrid_net` bridge. MySQL is the default backend; its data lives in the named volume `mysql_data`. CMDB attachments use the `cmdb_files` volume by default and can switch to the bundled RustFS (`rustfs_data`) in Settings → File storage. `ongrid-edge` is intentionally excluded (edge runs on user hosts) — a commented stanza at the bottom shows how to run one for demos. nginx routes `/api/v1/cmdb/*` to `ongrid-cmdb`, `/file-preview/` to `kkfileview`, and everything else under `/api/` to `ongrid`.
 - `install/` — production-style release package assets, with an install guide (`install/README.md`) covering package upload, install, upgrade, and verification on a target host.
 - `prometheus/prometheus.yml` — minimal scrape config: jobs `prometheus`, `ongrid-manager` -> `ongrid:9100/metrics`, and `ongrid-cmdb` -> `ongrid-cmdb:9102/metrics`.
 
@@ -106,9 +106,16 @@ In production, set both to strong values in `.env` **before** the first
 | `https://localhost/api/v1/cmdb/health` | CMDB schema lineage (bearer token required) |
 | `https://localhost/cmdb-readyz` | CMDB readiness (no token; used by install/upgrade) |
 | `http://ongrid-cmdb:9102/metrics` | Prometheus `/metrics` on the CMDB service (compose network) |
+| `https://localhost/file-preview/` | kkFileView preview UI (proxied by nginx) |
+| `http://127.0.0.1:9001`          | RustFS console (access key `minioadmin`) |
+| `http://127.0.0.1:9000`          | RustFS S3 API (compose network: `http://rustfs:9000`) |
 | `http://localhost:40012`         | edge tunnel listener (geminio)  |
 | `http://localhost:9090`         | Prometheus UI (targets, graph)  |
 | `localhost:3306`                | MySQL (user `ongrid`, pw `ongrid`, db `ongrid`) |
+
+File preview uses `http://ongrid-cmdb:8082` as the kkFileView file access
+address by default. It is an ordinary runtime setting under Settings → File
+preview, so it can be changed without rebuilding the web image.
 
 Data lives in the `mysql_data` Docker volume. Back that volume up with
 `sudo tar czf mysql.tgz -C "$(docker volume inspect -f '{{.Mountpoint}}' mysql_data)" .`

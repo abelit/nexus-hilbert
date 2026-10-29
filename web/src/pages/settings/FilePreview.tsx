@@ -24,6 +24,7 @@ const splitTypes = (value: string): string[] =>
 
 const EMPTY: FilePreviewConfig = {
   preview_server_url: '',
+  file_fetch_base_url: '',
   force_updated_cache_types: [],
 };
 
@@ -134,6 +135,26 @@ export default function SettingsFilePreview() {
             />
             <p className="mt-1 text-[11px] text-zinc-500">
               {tr('可填完整 URL，或同源路径 /file-preview/onlinePreview（内置服务）。', 'Use an absolute URL, or the same-origin /file-preview/onlinePreview path for the bundled service.')}
+            </p>
+          </div>
+
+          <div>
+            <Label htmlFor="cmdb-file-fetch-base">{tr('文件访问地址', 'File access address')}</Label>
+            <Input
+              id="cmdb-file-fetch-base"
+              value={config.file_fetch_base_url}
+              onChange={(event) => {
+                setConfig((current) => ({ ...current, file_fetch_base_url: event.target.value }));
+                setStatus(null);
+              }}
+              className="mt-1 w-full font-mono"
+              placeholder="http://ongrid-cmdb:8082"
+            />
+            <p className="mt-1 text-[11px] text-zinc-500">
+              {tr(
+                'kkFileView 拉取附件时使用的 CMDB 地址，必须能从 kkFileView 进程访问。内置 docker compose 填 http://ongrid-cmdb:8082；留空使用浏览器当前域名。',
+                'CMDB address kkFileView uses to fetch attachments; it must be reachable from the kkFileView process. Use http://ongrid-cmdb:8082 for the bundled docker compose stack, or leave empty to use the browser origin.',
+              )}
             </p>
           </div>
 

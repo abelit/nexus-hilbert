@@ -1,11 +1,13 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 
@@ -104,6 +106,57 @@ func (s *S3) ensureBucket(ctx context.Context) error {
 	return nil
 }
 
+// maxMemorySpool bounds how much of a non-seekable body is held in memory
+// before falling back to a temporary file. CMDB attachments are usually small;
+// the file path covers large uploads without multiplying peak memory.
+const maxMemorySpool = 8 << 20
+
+// ensureSeekable makes a body rewindable. SigV4 hashes the payload and rewinds
+// it for HTTP endpoints (RustFS/MinIO), which fails for a streaming reader.
+// Callers should pass an io.Seeker; this is a safety net for adapters.
+func ensureSeekable(r io.Reader, size int64) (io.Reader, func(), error) {
+	if _, ok := r.(io.Seeker); ok {
+		return r, func() {}, nil
+	}
+	if size >= 0 && size <= maxMemorySpool {
+		body, err := io.ReadAll(io.LimitReader(r, maxMemorySpool+1))
+		if err != nil {
+			return nil, nil, fmt.Errorf("objectstore: read S3 body: %w", err)
+		}
+		if int64(len(body)) <= maxMemorySpool {
+			return bytes.NewReader(body), func() {}, nil
+		}
+		return spoolS3Body(body, r)
+	}
+	return spoolS3Body(nil, r)
+}
+
+func spoolS3Body(prefix []byte, r io.Reader) (io.Reader, func(), error) {
+	file, err := os.CreateTemp("", "ongrid-s3-body-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("objectstore: create S3 spool file: %w", err)
+	}
+	cleanup := func() {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+	}
+	if len(prefix) > 0 {
+		if _, err := file.Write(prefix); err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("objectstore: write S3 spool file: %w", err)
+		}
+	}
+	if _, err := io.Copy(file, r); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("objectstore: write S3 spool file: %w", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("objectstore: rewind S3 spool file: %w", err)
+	}
+	return file, cleanup, nil
+}
+
 func (s *S3) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) (Object, error) {
 	if size < 0 {
 		return Object{}, errors.New("objectstore: size must be non-negative")
@@ -111,10 +164,15 @@ func (s *S3) Put(ctx context.Context, key string, r io.Reader, size int64, conte
 	if err := s.ensureBucket(ctx); err != nil {
 		return Object{}, err
 	}
+	body, cleanup, err := ensureSeekable(r, size)
+	if err != nil {
+		return Object{}, err
+	}
+	defer cleanup()
 	input := &s3.PutObjectInput{
 		Bucket:        aws.String(s.bucket),
 		Key:           aws.String(key),
-		Body:          r,
+		Body:          body,
 		ContentLength: aws.Int64(size),
 	}
 	if contentType != "" {

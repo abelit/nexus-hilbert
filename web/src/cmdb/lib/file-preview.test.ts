@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { base64UTF8, buildKkFilePreviewURL, filePreviewBaseUrl } from './file-preview';
+import { base64UTF8, buildKkFilePreviewURL, filePreviewBaseUrl, resolveFileFetchBase } from './file-preview';
 
 describe('the kkFileView URL builder', () => {
   afterEach(() => {
@@ -12,6 +12,13 @@ describe('the kkFileView URL builder', () => {
     expect(filePreviewBaseUrl()).toBe(window.location.origin);
     vi.stubEnv('VITE_FILE_API_BASE_URL', 'http://host.docker.internal:5000');
     expect(filePreviewBaseUrl()).toBe('http://host.docker.internal:5000');
+  });
+
+  it('prefers the configured file access address over the build-time base', () => {
+    vi.stubEnv('VITE_FILE_API_BASE_URL', 'http://build-base:5000');
+    expect(resolveFileFetchBase('http://ongrid-cmdb:8082/')).toBe('http://ongrid-cmdb:8082');
+    expect(resolveFileFetchBase('  ')).toBe('http://build-base:5000');
+    expect(resolveFileFetchBase(null)).toBe('http://build-base:5000');
   });
 
   it('encodes UTF-8 and appends the original filename', () => {

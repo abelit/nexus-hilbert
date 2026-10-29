@@ -272,6 +272,47 @@ func jsonMarshal(files []FileDTO) (string, error) {
 	return string(data), err
 }
 
+func TestPreviewFileFetchBaseURL(t *testing.T) {
+	uc, _, _ := newTestUsecase(t)
+	previewURL := "/file-preview/onlinePreview"
+	base := "  http://ongrid-cmdb:8082/  "
+	cfg, err := uc.UpdatePreview(context.Background(), PreviewPatch{
+		PreviewServerURL: &previewURL,
+		FileFetchBaseURL: &base,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePreview: %v", err)
+	}
+	if cfg.FileFetchBaseURL != "http://ongrid-cmdb:8082" {
+		t.Fatalf("file fetch base = %q", cfg.FileFetchBaseURL)
+	}
+	got, err := uc.Preview(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FileFetchBaseURL != "http://ongrid-cmdb:8082" {
+		t.Fatalf("persisted file fetch base = %q", got.FileFetchBaseURL)
+	}
+
+	empty := ""
+	got, err = uc.UpdatePreview(context.Background(), PreviewPatch{FileFetchBaseURL: &empty})
+	if err != nil || got.FileFetchBaseURL != "" {
+		t.Fatalf("clear file fetch base = %+v err=%v", got, err)
+	}
+
+	for _, raw := range []string{
+		"ongrid-cmdb:8082",
+		"ftp://ongrid-cmdb:8082",
+		"http://ongrid-cmdb:8082?x=1",
+		"http://user:pass@ongrid-cmdb:8082",
+	} {
+		value := raw
+		if _, err := uc.UpdatePreview(context.Background(), PreviewPatch{FileFetchBaseURL: &value}); err == nil {
+			t.Fatalf("accepted invalid file fetch base %q", raw)
+		}
+	}
+}
+
 func TestRelativePreviewUsesInternalURL(t *testing.T) {
 	uc, _, _ := newTestUsecase(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

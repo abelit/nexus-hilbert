@@ -309,6 +309,9 @@ services:
       ONGRID_CMDB_S3_REGION: ${RUSTFS_REGION:-us-east-1}
       ONGRID_CMDB_S3_USE_SSL: "false"
       ONGRID_CMDB_FILE_PREVIEW_URL: ${ONGRID_CMDB_FILE_PREVIEW_URL:-}
+      # kkFileView fetches signed attachments over the compose network; the
+      # runtime setting can be changed in Settings -> File preview.
+      ONGRID_CMDB_FILE_FETCH_BASE_URL: ${ONGRID_CMDB_FILE_FETCH_BASE_URL:-http://ongrid-cmdb:8082}
       ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL: ${ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL:-http://kkfileview:8012}
       ONGRID_CMDB_FILE_MAX_MB: ${ONGRID_CMDB_FILE_MAX_MB:-50}
       ONGRID_OTEL_ENDPOINT: ${ONGRID_OTEL_ENDPOINT:-tempo:4318}

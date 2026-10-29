@@ -116,6 +116,8 @@ export type FileStorageConfig = {
 
 export type FilePreviewConfig = {
   preview_server_url: string;
+  /** Base kkFileView uses to fetch signed files; empty uses the browser base. */
+  file_fetch_base_url: string;
   force_updated_cache_types: string[];
 };
 

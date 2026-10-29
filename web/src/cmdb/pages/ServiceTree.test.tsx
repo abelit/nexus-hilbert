@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw-server';
@@ -18,12 +18,14 @@ vi.mock('../components/service-tree/RelationGraph', () => ({
     selectedNodes,
     highlightedNodes,
     onToggleNode,
+    onOpenNode,
   }: {
     graph: { nodes: Array<{ id: number; label: string }> };
     editMode: boolean;
     selectedNodes: Set<number>;
     highlightedNodes: Set<number>;
     onToggleNode(id: number): void;
+    onOpenNode(id: number): void;
   }) => (
     <div data-testid="relation-graph" data-edit={editMode ? '1' : '0'}>
       <span data-testid="highlighted">{[...highlightedNodes].join(',')}</span>
@@ -32,7 +34,7 @@ vi.mock('../components/service-tree/RelationGraph', () => ({
           key={node.id}
           type="button"
           aria-pressed={selectedNodes.has(node.id)}
-          onClick={() => onToggleNode(node.id)}
+          onClick={() => (editMode ? onToggleNode(node.id) : onOpenNode(node.id))}
         >
           {node.label}
         </button>
@@ -54,6 +56,39 @@ const model = (id: number, name: string, alias: string) => ({
 });
 
 const models = [model(1, 'idc', '机房'), model(2, 'rack', '机柜'), model(3, 'host', '主机')];
+
+const attribute = (id: number, name: string, alias: string, value_type: string) => ({
+  id,
+  name,
+  alias,
+  value_type,
+  is_choice: false,
+  is_list: false,
+  is_unique: false,
+  is_index: value_type === '2',
+  is_link: false,
+  is_password: false,
+  is_sortable: false,
+  is_dynamic: false,
+  is_bool: false,
+  is_file: false,
+  is_reference: false,
+  is_computed: false,
+  has_compute_script: false,
+  has_choice_web_hook: false,
+  has_choice_other: false,
+  is_required: false,
+  order: id,
+  default_show: true,
+  inherited: false,
+  is_indexed: value_type === '2',
+  storage_table: value_type === '2' ? 'c_value_index_texts' : 'c_value_integers',
+});
+
+const hostAttributes = [
+  attribute(10, 'hostname', '主机名', '2'),
+  attribute(11, 'cpu', 'CPU', '0'),
+];
 
 const relation = (parent: number, child: number) => {
   const related = (row: ReturnType<typeof model>) => ({
@@ -123,6 +158,47 @@ describe('the model relation canvas', () => {
     expect((await screen.findAllByText('机房树')).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: '查看定义 机房树' })).toBeInTheDocument();
     expect(screen.getByTestId('highlighted')).toHaveTextContent('1,2,3');
+  });
+
+  it('previews a model node and jumps to resources or model configuration', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/host/attributes', () =>
+        HttpResponse.json({ type_id: 3, unique_id: 10, unique: 'hostname', attributes: hostAttributes }),
+      ),
+    );
+
+    const renderWithRoutes = () =>
+      render(
+        <MemoryRouter initialEntries={['/cmdb/service-tree']}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/cmdb/service-tree" element={<ServiceTreePage />} />
+              <Route path="/cmdb/instances" element={<div data-testid="resources-route" />} />
+              <Route path="/cmdb/models/:id" element={<div data-testid="model-route" />} />
+            </Routes>
+          </ToastProvider>
+        </MemoryRouter>,
+      );
+
+    const first = renderWithRoutes();
+    let graph = await screen.findByTestId('relation-graph');
+    await user.click(within(graph).getByRole('button', { name: '主机' }));
+    let card = await screen.findByRole('complementary', { name: '模型详情' });
+    expect(within(card).getByText('主机')).toBeInTheDocument();
+    expect(await within(card).findByText('主机名')).toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: /资源数据/ }));
+    expect(await screen.findByTestId('resources-route')).toBeInTheDocument();
+    first.unmount();
+
+    const second = renderWithRoutes();
+    graph = await screen.findByTestId('relation-graph');
+    await user.click(within(graph).getByRole('button', { name: '主机' }));
+    card = await screen.findByRole('complementary', { name: '模型详情' });
+    await user.click(within(card).getByRole('button', { name: /模型配置/ }));
+    expect(await screen.findByTestId('model-route')).toBeInTheDocument();
+    second.unmount();
   });
 
   it('clears the definition highlight to show every model', async () => {

@@ -62,13 +62,20 @@ type StoragePatch struct {
 // PreviewConfig is the kkFileView configuration. It contains no secrets, so
 // the browser may read it to build the iframe URL.
 type PreviewConfig struct {
-	PreviewServerURL       string   `json:"preview_server_url"`
+	PreviewServerURL string `json:"preview_server_url"`
+	// FileFetchBaseURL is the absolute base kkFileView uses to fetch the
+	// signed capability URL. It must be reachable from the kkFileView
+	// process, which is often not the browser's public origin (compose
+	// network names, private TLS, split DNS). Empty falls back to the
+	// frontend's VITE_FILE_API_BASE_URL or the browser origin.
+	FileFetchBaseURL       string   `json:"file_fetch_base_url"`
 	ForceUpdatedCacheTypes []string `json:"force_updated_cache_types"`
 }
 
 // PreviewPatch is the partial preview update.
 type PreviewPatch struct {
 	PreviewServerURL       *string   `json:"preview_server_url"`
+	FileFetchBaseURL       *string   `json:"file_fetch_base_url"`
 	ForceUpdatedCacheTypes *[]string `json:"force_updated_cache_types"`
 }
 
@@ -82,15 +89,19 @@ type TestResult struct {
 // them field by field; these values are what a fresh install sees before an
 // administrator saves anything.
 type Options struct {
-	DefaultLocalPath         string
-	DefaultStorageBackend    string
-	DefaultS3EndpointURL     string
-	DefaultS3AccessKey       string
-	DefaultS3SecretKey       string
-	DefaultS3BucketName      string
-	DefaultS3Region          string
-	DefaultS3UseSSL          *bool
-	DefaultPreviewURL        string
+	DefaultLocalPath      string
+	DefaultStorageBackend string
+	DefaultS3EndpointURL  string
+	DefaultS3AccessKey    string
+	DefaultS3SecretKey    string
+	DefaultS3BucketName   string
+	DefaultS3Region       string
+	DefaultS3UseSSL       *bool
+	DefaultPreviewURL     string
+	// DefaultFileFetchBaseURL prefills the preview settings' file access
+	// address. The bundled compose sets the CMDB service name so kkFileView
+	// does not depend on the public host or its TLS certificate.
+	DefaultFileFetchBaseURL  string
 	PreviewInternalURL       string
 	DefaultAllowedExtensions []string
 	DefaultMaxFileSizeMB     int
@@ -142,12 +153,42 @@ func defaultStorage(opts Options) StorageConfig {
 func defaultPreview(opts Options) PreviewConfig {
 	return PreviewConfig{
 		PreviewServerURL: strings.TrimSpace(opts.DefaultPreviewURL),
+		FileFetchBaseURL: normalizeBaseURL(opts.DefaultFileFetchBaseURL),
 		ForceUpdatedCacheTypes: []string{
 			"txt", "html", "htm", "asp", "jsp", "xml", "json", "properties",
 			"md", "gitignore", "log", "java", "py", "c", "cpp", "sql", "sh",
 			"bat", "m", "bas", "prg", "cmd",
 		},
 	}
+}
+
+func normalizeBaseURL(raw string) string {
+	return strings.TrimRight(strings.TrimSpace(raw), "/")
+}
+
+// validateFileFetchBaseURL accepts an empty value (the frontend falls back to
+// its build-time base or the browser origin). A configured value must be an
+// absolute HTTP(S) URL: kkFileView receives the signed capability path after
+// it, so a scheme-less value would be resolved against kkFileView itself.
+func validateFileFetchBaseURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("file access address must be an absolute http(s) URL")
+	}
+	if scheme := strings.ToLower(parsed.Scheme); scheme != "http" && scheme != "https" {
+		return fmt.Errorf("file access address must use http or https")
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("file access address must not contain credentials")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("file access address must not contain a query or fragment")
+	}
+	return nil
 }
 
 func normalizeExtensions(values []string) []string {
@@ -196,7 +237,14 @@ func (c StorageConfig) validate() error {
 }
 
 func validatePreview(c PreviewConfig) error {
-	raw := strings.TrimSpace(c.PreviewServerURL)
+	if err := validatePreviewServerURL(c.PreviewServerURL); err != nil {
+		return err
+	}
+	return validateFileFetchBaseURL(c.FileFetchBaseURL)
+}
+
+func validatePreviewServerURL(raw string) error {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return fmt.Errorf("preview server URL is required")
 	}
@@ -210,7 +258,7 @@ func validatePreview(c PreviewConfig) error {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return fmt.Errorf("preview server URL must be an absolute http(s) URL")
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+	if scheme := strings.ToLower(parsed.Scheme); scheme != "http" && scheme != "https" {
 		return fmt.Errorf("preview server URL must use http or https")
 	}
 	return nil

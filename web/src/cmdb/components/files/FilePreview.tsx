@@ -9,7 +9,7 @@ import {
   type CIFile,
   type FilePreviewConfig,
 } from '../../api/files';
-import { buildKkFilePreviewURL, filePreviewBaseUrl } from '../../lib/file-preview';
+import { buildKkFilePreviewURL, resolveFileFetchBase } from '../../lib/file-preview';
 
 /**
  * The kkFileView iframe.
@@ -22,7 +22,10 @@ import { buildKkFilePreviewURL, filePreviewBaseUrl } from '../../lib/file-previe
 export function FilePreview({ file }: { file: CIFile }) {
   const { tr } = useI18n();
   const [config, setConfig] = useState<FilePreviewConfig | null>(null);
-  const [previewURL, setPreviewURL] = useState('');
+  const [kkFileURL, setKkFileURL] = useState('');
+  // Browser-reachable capability path for "open in new tab". The kkFileURL
+  // may point at an internal compose service the browser cannot resolve.
+  const [openURL, setOpenURL] = useState('');
   const [downloadURL, setDownloadURL] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,7 +38,8 @@ export function FilePreview({ file }: { file: CIFile }) {
       .then(([cfg, preview, download]) => {
         if (!live) return;
         setConfig(cfg);
-        setPreviewURL(`${filePreviewBaseUrl()}${preview.url}`);
+        setKkFileURL(`${resolveFileFetchBase(cfg.file_fetch_base_url)}${preview.url}`);
+        setOpenURL(preview.url);
         setDownloadURL(download.url);
         if (!cfg.preview_server_url) setLoading(false);
       })
@@ -48,14 +52,14 @@ export function FilePreview({ file }: { file: CIFile }) {
   }, [file.file_id]);
 
   const iframeURL = useMemo(() => {
-    if (!config || !previewURL) return '';
+    if (!config || !kkFileURL) return '';
     return buildKkFilePreviewURL(
       config.preview_server_url,
-      previewURL,
+      kkFileURL,
       file.original_name,
       config.force_updated_cache_types,
     );
-  }, [config, file.original_name, previewURL]);
+  }, [config, file.original_name, kkFileURL]);
 
   // A dead kkFileView often returns an error page that still fires onLoad, but
   // a network hang does not. Stop the spinner anyway and leave the download
@@ -122,9 +126,9 @@ export function FilePreview({ file }: { file: CIFile }) {
             {tr('下载', 'Download')}
           </a>
         )}
-        {previewURL && (
+        {openURL && (
           <a
-            href={previewURL}
+            href={openURL}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-text-muted hover:bg-bg hover:text-text"

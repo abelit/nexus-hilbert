@@ -23,7 +23,8 @@ import {
   type CIType,
 } from '../api/citype';
 import { AttributeControl } from './AttributeControl';
-import { VALUE_TYPE_LABELS, isValueTypeCode, toWireValue } from '../lib/valuetype';
+import { ATTRIBUTE_TYPE_META, type AttributeDisplayType } from '../lib/attribute-type';
+import { VALUE_TYPE_LABELS, isValueTypeCode, toWireValue, type ValueTypeCode } from '../lib/valuetype';
 
 // The attribute dictionary editor.
 //
@@ -50,9 +51,30 @@ type FlagKey =
   | 'is_bool'
   | 'is_password'
   | 'is_link'
-  | 'is_file'
   | 'is_reference'
   | 'is_computed';
+
+// The form exposes the storage types plus one pseudo type. File is TEXT
+// storage with the is_file flag, matching cantor's type picker; the remaining
+// pseudo types (password, link, reference, boolean) stay flags because they
+// apply to several storage types.
+type FormType = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '12';
+
+// The form's storage type and the model-attribute display type are not always
+// the same code: boolean storage is 7 here, while the attribute surface calls
+// that type 10. Reuse the shared type metadata so every icon matches the rest
+// of model configuration.
+const FORM_TYPE_DISPLAY: Record<FormType, AttributeDisplayType> = {
+  '0': '0',
+  '1': '1',
+  '2': '2',
+  '3': '3',
+  '4': '4',
+  '5': '5',
+  '6': '6',
+  '7': '10',
+  '12': '12',
+};
 
 type Flags = Record<FlagKey, boolean>;
 
@@ -72,7 +94,6 @@ const flagLabels: Array<{ key: FlagKey; zh: string; en: string; hintZh: string; 
   { key: 'is_bool', zh: '布尔', en: 'Boolean', hintZh: '用开关展示；通常配合布尔值类型', hintEn: 'Rendered as a switch; usually paired with the boolean value type' },
   { key: 'is_password', zh: '密码', en: 'Secret', hintZh: '读取接口永不回显；列表和详情都会隐藏', hintEn: 'Never echoed by the read API; hidden from lists and details' },
   { key: 'is_link', zh: '链接', en: 'Link', hintZh: '外部链接；读取接口不返回链接值', hintEn: 'External link; the read API does not return the link value' },
-  { key: 'is_file', zh: '文件', en: 'File', hintZh: '文件属性的值由专用上传控件维护，保存文件元数据', hintEn: 'File values use the attachment control and store file metadata' },
   { key: 'is_reference', zh: '引用', en: 'Reference', hintZh: '值指向另一个模型的实例', hintEn: 'The value points at an instance of another model' },
 ];
 
@@ -86,10 +107,15 @@ function initialFlags(attribute: Attribute | null): Flags {
     is_bool: attribute?.is_bool ?? false,
     is_password: attribute?.is_password ?? false,
     is_link: attribute?.is_link ?? false,
-    is_file: attribute?.is_file ?? false,
     is_reference: attribute?.is_reference ?? false,
     is_computed: attribute?.is_computed ?? false,
   };
+}
+
+function initialFormType(attribute: Attribute | null): FormType {
+  if (attribute?.is_file) return '12';
+  const code = attribute?.value_type ?? '';
+  return isValueTypeCode(code) ? code : '2';
 }
 
 function initialChoiceMode(attribute: Attribute | null): ChoiceMode {
@@ -137,9 +163,7 @@ export function AttributeForm({
   const editing = attribute !== null;
   const [name, setName] = useState(attribute?.name ?? '');
   const [alias, setAlias] = useState(attribute?.alias ?? '');
-  const [valueType, setValueType] = useState<'0' | '1' | '2' | '3' | '4' | '5' | '6' | '7'>(
-    isValueTypeCode(attribute?.value_type ?? '') ? (attribute?.value_type as '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7') : '2',
-  );
+  const [formType, setFormType] = useState<FormType>(() => initialFormType(attribute));
   const [flags, setFlags] = useState<Flags>(() => initialFlags(attribute));
   const [referenceTypeID, setReferenceTypeID] = useState(attribute?.reference_type_id ? String(attribute.reference_type_id) : '');
   const [models, setModels] = useState<CIType[]>([]);
@@ -165,25 +189,61 @@ export function AttributeForm({
       .catch(() => setModels([]));
   }, []);
 
-  const typeOptions = useMemo(
-    () => (['0', '1', '2', '3', '4', '5', '6', '7'] as const).map((code) => ({
-      value: code,
-      label: tr(VALUE_TYPE_LABELS[code][0], VALUE_TYPE_LABELS[code][1]),
-    })),
-    [tr],
-  );
+  const typeOptions = useMemo(() => {
+    const iconFor = (code: FormType) => {
+      const Icon = ATTRIBUTE_TYPE_META[FORM_TYPE_DISPLAY[code]].icon;
+      return <Icon size={14} className="shrink-0 text-text-muted" aria-hidden="true" />;
+    };
+    return [
+      ...(['0', '1', '2', '3', '4', '5', '6', '7'] as const).map((code) => ({
+        value: code,
+        label: tr(VALUE_TYPE_LABELS[code][0], VALUE_TYPE_LABELS[code][1]),
+        icon: iconFor(code),
+      })),
+      { value: '12' as const, label: tr('文件', 'File'), icon: iconFor('12') },
+    ];
+  }, [tr]);
 
   const modelOptions = useMemo(
     () => models.map((model) => ({ value: String(model.id), label: model.alias || model.name })),
     [models],
   );
 
-  const choiceSupported = valueType !== '6' && valueType !== '7';
+  const fileAttribute = formType === '12';
+  // File is a pseudo type over TEXT storage, exactly like cantor's type 12.
+  const storageType: ValueTypeCode = formType === '12' ? '2' : formType;
+  const choiceSupported = !fileAttribute && storageType !== '6' && storageType !== '7';
   useEffect(() => {
     if (!choiceSupported && choiceMode !== 'none') setChoiceMode('none');
   }, [choiceMode, choiceSupported]);
 
   const setFlag = (key: FlagKey, next: boolean) => setFlags((current) => ({ ...current, [key]: next }));
+
+  // File attributes are stored as TEXT and are single-valued, unindexed and
+  // never a secret/link/reference/boolean/computed value. Selecting the type
+  // clears the conflicting choices instead of letting the form submit a
+  // combination the value planner cannot store.
+  const selectFormType = (next: string) => {
+    if (next === '12') {
+      setFormType('12');
+      setFlags((current) => ({
+        ...current,
+        is_list: false,
+        is_unique: false,
+        is_index: false,
+        is_sortable: false,
+        is_dynamic: false,
+        is_bool: false,
+        is_password: false,
+        is_link: false,
+        is_reference: false,
+        is_computed: false,
+      }));
+      setChoiceMode('none');
+      return;
+    }
+    if (isValueTypeCode(next)) setFormType(next);
+  };
 
   const updateChoice = (index: number, patch: Partial<ChoiceRow>) => {
     setChoices((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -227,7 +287,7 @@ export function AttributeForm({
     const input: Partial<AttributeInput> & { name: string; alias: string; value_type: string } = {
       name: trimmedName,
       alias: trimmedAlias,
-      value_type: valueType,
+      value_type: storageType,
       is_unique: flags.is_unique,
       is_index: flags.is_index,
       is_sortable: flags.is_sortable,
@@ -235,7 +295,7 @@ export function AttributeForm({
       is_bool: flags.is_bool,
       is_password: flags.is_password,
       is_link: flags.is_link,
-      is_file: flags.is_file,
+      is_file: fileAttribute,
       is_reference: flags.is_reference,
       reference_type_id: flags.is_reference && referenceTypeID ? Number(referenceTypeID) : undefined,
       is_computed: flags.is_computed,
@@ -264,7 +324,7 @@ export function AttributeForm({
             option.style = { ...style, backgroundColor: row.color.trim() };
           }
           return {
-            value: toWireValue(valueType, row.value),
+            value: toWireValue(storageType, row.value),
             option,
           };
         });
@@ -280,6 +340,27 @@ export function AttributeForm({
       if (clearOther) input.choice_other = {};
       else if (other) input.choice_other = other;
     } else if (editing) {
+      input.choice_value = [];
+      input.choice_web_hook = {};
+      input.choice_other = {};
+    }
+
+    if (fileAttribute) {
+      // The file type wins over any state that was set before it was chosen.
+      // Keep an existing attribute's stored value_type (immutable on update).
+      input.value_type = editing ? storageType : '2';
+      input.is_list = false;
+      input.is_unique = false;
+      input.is_index = false;
+      input.is_sortable = false;
+      input.is_dynamic = false;
+      input.is_bool = false;
+      input.is_password = false;
+      input.is_link = false;
+      input.is_reference = false;
+      input.reference_type_id = undefined;
+      input.is_computed = false;
+      input.default = {};
       input.choice_value = [];
       input.choice_web_hook = {};
       input.choice_other = {};
@@ -351,56 +432,75 @@ export function AttributeForm({
             <Select
               id="cmdb-attr-type"
               label={tr('值类型', 'Value type')}
-              value={valueType}
-              onValueChange={(next) => {
-                if (isValueTypeCode(next)) setValueType(next);
-              }}
+              value={formType}
+              onValueChange={selectFormType}
               options={typeOptions}
               disabled={editing}
               className="mt-1 w-full"
             />
             <p className="mt-1 text-[11px] text-text-faint">
-              {editing
-                ? tr('值类型创建后不能修改，避免已有值落入错误的存储表。', 'The value type is immutable after creation, so existing values cannot move to the wrong storage table.')
-                : tr('值类型决定存储表和控制控件。', 'The value type selects the storage table and the input control.')}
+              {fileAttribute
+                ? tr('文件属性固定使用文本存储；上传、下载、预览和删除在资源数据页完成。', 'File attributes use text storage; upload, download, preview and delete happen in resource data.')
+                : editing
+                  ? tr('值类型创建后不能修改，避免已有值落入错误的存储表。', 'The value type is immutable after creation, so existing values cannot move to the wrong storage table.')
+                  : tr('值类型决定存储表和控制控件。', 'The value type selects the storage table and the input control.')}
             </p>
           </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="cmdb-attr-default">{tr('默认值', 'Default')}</Label>
-            <AttributeControl
-              id="cmdb-attr-default"
-              type={valueType}
-              value={defaultValue}
-              onChange={setDefaultValue}
-              isList={flags.is_list}
-              aria-label={tr('默认值', 'Default')}
-            />
-            <p className="text-[11px] text-text-faint">
-              {tr('留空表示没有默认值。', 'Leave it empty for no default.')}
-            </p>
-          </div>
+          {!fileAttribute && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="cmdb-attr-default">{tr('默认值', 'Default')}</Label>
+              <AttributeControl
+                id="cmdb-attr-default"
+                type={storageType}
+                value={defaultValue}
+                onChange={setDefaultValue}
+                isList={flags.is_list}
+                aria-label={tr('默认值', 'Default')}
+              />
+              <p className="text-[11px] text-text-faint">
+                {tr('留空表示没有默认值。', 'Leave it empty for no default.')}
+              </p>
+            </div>
+          )}
         </div>
       </fieldset>
 
       <fieldset className={fieldsetClass}>
         <legend className={legendClass}>{tr('类型与存储', 'Type and storage')}</legend>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {flagLabels.map((flag) => (
-            <label key={flag.key} className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-xs">
-              <Checkbox
-                checked={flags[flag.key]}
-                disabled={editing && (flag.key === 'is_list')}
-                onCheckedChange={(next) => setFlag(flag.key, next === true)}
-                aria-label={tr(flag.zh, flag.en)}
-              />
-              <span className="min-w-0">
-                <span className="block font-medium text-text">{tr(flag.zh, flag.en)}</span>
-                <span className="block text-[11px] text-text-faint">{tr(flag.hintZh, flag.hintEn)}</span>
-              </span>
-            </label>
-          ))}
+          {flagLabels.map((flag) => {
+            const disabled = (editing && flag.key === 'is_list') || fileAttribute;
+            return (
+              <label
+                key={flag.key}
+                className={cn(
+                  'flex items-start gap-2 rounded-md border border-border px-3 py-2 text-xs',
+                  disabled && 'cursor-not-allowed opacity-60',
+                )}
+              >
+                <Checkbox
+                  checked={flags[flag.key]}
+                  disabled={disabled}
+                  onCheckedChange={(next) => setFlag(flag.key, next === true)}
+                  aria-label={tr(flag.zh, flag.en)}
+                />
+                <span className="min-w-0">
+                  <span className="block font-medium text-text">{tr(flag.zh, flag.en)}</span>
+                  <span className="block text-[11px] text-text-faint">{tr(flag.hintZh, flag.hintEn)}</span>
+                </span>
+              </label>
+            );
+          })}
         </div>
-        {flags.is_reference && (
+        {fileAttribute && (
+          <p className="rounded-md border border-border px-3 py-2 text-[11px] text-text-faint">
+            {tr(
+              '文件属性固定为单值、非索引，不能同时使用唯一、排序、动态、密码、链接、引用、布尔或计算。',
+              'File attributes are single-valued and unindexed; unique, sort, dynamic, secret, link, reference, boolean and computed flags are not available.',
+            )}
+          </p>
+        )}
+        {!fileAttribute && flags.is_reference && (
           <div>
             <Label htmlFor="cmdb-attr-reference">{tr('引用模型', 'Reference model')}</Label>
             <Select
@@ -561,7 +661,9 @@ export function AttributeForm({
       </fieldset>
       ) : (
         <p className="rounded-lg border border-border px-4 py-3 text-[11px] text-text-faint">
-          {tr('JSON 与布尔类型不支持可选值。', 'JSON and boolean types cannot carry a choice list.')}
+          {fileAttribute
+            ? tr('文件属性不支持可选值。', 'File attributes cannot carry a choice list.')
+            : tr('JSON 与布尔类型不支持可选值。', 'JSON and boolean types cannot carry a choice list.')}
         </p>
       )}
 
@@ -590,20 +692,22 @@ export function AttributeForm({
             />
           </div>
         </div>
-        <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-xs">
-          <Checkbox
-            checked={flags.is_computed}
-            onCheckedChange={(next) => setFlag('is_computed', next === true)}
-            aria-label={tr('计算属性', 'Computed attribute')}
-          />
-          <span className="min-w-0">
-            <span className="block font-medium text-text">{tr('计算属性', 'Computed attribute')}</span>
-            <span className="block text-[11px] text-text-faint">
-              {tr('值由表达式推导；写入时忽略外部值。', 'The value is derived from an expression; external values are ignored.')}
+        {!fileAttribute && (
+          <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-xs">
+            <Checkbox
+              checked={flags.is_computed}
+              onCheckedChange={(next) => setFlag('is_computed', next === true)}
+              aria-label={tr('计算属性', 'Computed attribute')}
+            />
+            <span className="min-w-0">
+              <span className="block font-medium text-text">{tr('计算属性', 'Computed attribute')}</span>
+              <span className="block text-[11px] text-text-faint">
+                {tr('值由表达式推导；写入时忽略外部值。', 'The value is derived from an expression; external values are ignored.')}
+              </span>
             </span>
-          </span>
-        </label>
-        {flags.is_computed && (
+          </label>
+        )}
+        {!fileAttribute && flags.is_computed && (
           <div>
             <Label htmlFor="cmdb-attr-compute-expr">{tr('计算表达式', 'Compute expression')}</Label>
             <Textarea

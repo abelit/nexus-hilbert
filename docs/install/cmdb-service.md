@@ -26,6 +26,7 @@ CMDB API 不直接发布到宿主机；外部访问走 `https://<host>/api/v1/cm
 | `ONGRID_CMDB_FILE_BACKEND` | 首次启动的 backend：`local`（默认）或 `s3`。 |
 | `ONGRID_CMDB_S3_ENDPOINT_URL` / `_ACCESS_KEY` / `_SECRET_KEY` / `_BUCKET_NAME` / `_REGION` / `_USE_SSL` | S3 首次启动默认值，用于预填管理页；compose 默认指向内置 RustFS。 |
 | `ONGRID_CMDB_FILE_PREVIEW_URL` | kkFileView 的浏览器地址；留空时由 `ONGRID_PUBLIC_URL + /file-preview/onlinePreview` 派生。 |
+| `ONGRID_CMDB_FILE_FETCH_BASE_URL` | kkFileView 拉取签名附件的 CMDB 地址，默认 `http://ongrid-cmdb:8082`；可在「设置 → 文件预览 → 文件访问地址」运行时修改。 |
 | `ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL` | CMDB 侧探测 kkFileView 的内部地址，默认 `http://kkfileview:8012`。 |
 | `ONGRID_CMDB_FILE_MAX_MB` | 管理员保存存储设置前的单文件上限，默认 `50`。 |
 | `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` | 内置 RustFS 凭据；`install.sh` 会生成 blank 的 secret。 |
@@ -40,7 +41,7 @@ CMDB 文件属性的附件由 `ongrid-cmdb` 自己管理；compose 同时提供�
 - `rustfs` 使用 `${ONGRID_DATA_DIR}/rustfs`（uid `10001`），S3 API 只在 `127.0.0.1:9000` 暴露，控制台在 `127.0.0.1:9001`；默认镜像沿用 cantor 的 `harbor.it.cgzair.com/rustfs/rustfs:latest`，无法拉取时用 `ONGRID_RUSTFS_IMAGE` 指向可访问的 RustFS 镜像。CMDB 通过 compose 网络使用 `http://rustfs:9000`；首次上传/测试会自动创建 `cmdb-files` bucket。
 - 在「设置 → 文件存储」切到 S3/MinIO 即可使用 RustFS；S3 字段已由 compose 预填。切换不会迁移旧文件，旧附件仍按上传时记录的 backend 读取。多副本部署应使用共享 S3，而不要依赖单机 RustFS 卷。
 - 本地单文件默认上限 50 MB；nginx 对 `/api/v1/cmdb/` 使用 60 MB 的请求上限以容纳 multipart 开销。调大单文件上限时同步调整 nginx 和 `ONGRID_CMDB_FILE_MAX_MB`。
-- 预览由内置 kkFileView 提供，nginx 将其挂在同源的 `/file-preview/`；`ONGRID_CMDB_FILE_PREVIEW_URL` 留空时自动使用 `${ONGRID_PUBLIC_URL}/file-preview/onlinePreview`。kkFileView 必须能访问 CMDB 的签名预览 URL；若前后端分离部署，构建前端时把 `VITE_FILE_API_BASE_URL` 设为 kkFileView 能访问的 CMDB 地址（如 `http://host.docker.internal:5000`），否则默认使用浏览器 origin。未配置预览服务时附件仍可下载。
+- 预览由内置 kkFileView 提供，nginx 将其挂在同源的 `/file-preview/`；`ONGRID_CMDB_FILE_PREVIEW_URL` 留空时自动使用 `${ONGRID_PUBLIC_URL}/file-preview/onlinePreview`。kkFileView 必须能访问 CMDB 的签名预览 URL：「设置 → 文件预览 → 文件访问地址」控制该地址，内置 compose 默认 `http://ongrid-cmdb:8082`，留空则回退到前端构建时的 `VITE_FILE_API_BASE_URL` 或浏览器 origin。若前后端分离或 kkFileView 不在 compose 网络内，在这里填写 kkFileView 能访问的 CMDB 地址（如 `http://host.docker.internal:5000`），无需重新构建前端。未配置预览服务时附件仍可下载。
 
 管理接口（`/api/v1/cmdb`，JWT）：
 

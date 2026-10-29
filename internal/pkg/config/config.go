@@ -88,6 +88,10 @@ type CMDBFileStorageConfig struct {
 	// PreviewURL is the browser-facing kkFileView endpoint. env:
 	// ONGRID_CMDB_FILE_PREVIEW_URL; empty derives from ONGRID_PUBLIC_URL.
 	PreviewURL string
+	// FileFetchBaseURL is the base kkFileView uses to fetch the signed
+	// capability URL. env: ONGRID_CMDB_FILE_FETCH_BASE_URL; empty falls back
+	// to the frontend build-time base or the browser origin.
+	FileFetchBaseURL string
 	// PreviewInternalURL is how the CMDB process reaches the bundled
 	// kkFileView for the settings "test connection" action. env:
 	// ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL.
@@ -517,6 +521,7 @@ func Load() (*Config, error) {
 			S3Region:           getEnv("ONGRID_CMDB_S3_REGION", "us-east-1"),
 			S3UseSSL:           getEnvBool("ONGRID_CMDB_S3_USE_SSL", true),
 			PreviewURL:         getEnv("ONGRID_CMDB_FILE_PREVIEW_URL", ""),
+			FileFetchBaseURL:   getEnv("ONGRID_CMDB_FILE_FETCH_BASE_URL", ""),
 			PreviewInternalURL: getEnv("ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL", ""),
 			MaxFileSizeMB:      getEnvInt("ONGRID_CMDB_FILE_MAX_MB", 50),
 		},

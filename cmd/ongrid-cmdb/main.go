@@ -131,18 +131,19 @@ func main() {
 
 	s3UseSSL := cfg.FileStorage.S3UseSSL
 	handlers := buildHandlers(db, log, cmdbfilebiz.Options{
-		DefaultLocalPath:      cfg.FileStorage.LocalDir,
-		DefaultStorageBackend: cfg.FileStorage.Backend,
-		DefaultS3EndpointURL:  cfg.FileStorage.S3EndpointURL,
-		DefaultS3AccessKey:    cfg.FileStorage.S3AccessKey,
-		DefaultS3SecretKey:    cfg.FileStorage.S3SecretKey,
-		DefaultS3BucketName:   cfg.FileStorage.S3BucketName,
-		DefaultS3Region:       cfg.FileStorage.S3Region,
-		DefaultS3UseSSL:       &s3UseSSL,
-		DefaultPreviewURL:     cfg.FileStorage.PreviewURL,
-		PreviewInternalURL:    cfg.FileStorage.PreviewInternalURL,
-		DefaultMaxFileSizeMB:  cfg.FileStorage.MaxFileSizeMB,
-		SignerSecret:          cfg.JWT.Secret,
+		DefaultLocalPath:        cfg.FileStorage.LocalDir,
+		DefaultStorageBackend:   cfg.FileStorage.Backend,
+		DefaultS3EndpointURL:    cfg.FileStorage.S3EndpointURL,
+		DefaultS3AccessKey:      cfg.FileStorage.S3AccessKey,
+		DefaultS3SecretKey:      cfg.FileStorage.S3SecretKey,
+		DefaultS3BucketName:     cfg.FileStorage.S3BucketName,
+		DefaultS3Region:         cfg.FileStorage.S3Region,
+		DefaultS3UseSSL:         &s3UseSSL,
+		DefaultPreviewURL:       cfg.FileStorage.PreviewURL,
+		DefaultFileFetchBaseURL: cfg.FileStorage.FileFetchBaseURL,
+		PreviewInternalURL:      cfg.FileStorage.PreviewInternalURL,
+		DefaultMaxFileSizeMB:    cfg.FileStorage.MaxFileSizeMB,
+		SignerSecret:            cfg.JWT.Secret,
 	})
 	signer := auth.NewSigner(cfg.JWT.Secret, cfg.JWT.AccessTTL, cfg.JWT.RefreshTTL)
 	apiMux := newRouter(db, signer, handlers, version)

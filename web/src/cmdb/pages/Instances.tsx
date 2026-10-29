@@ -58,7 +58,6 @@ import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { Drawer } from '../components/Drawer';
 import { FileField } from '../components/files/FileField';
-import { FileSummary } from '../components/files/FileSummary';
 import { InstanceDetailDrawer } from '../components/instance-detail/InstanceDetailDrawer';
 import { InstanceFieldsDialog } from '../components/InstanceFieldsDialog';
 import { ExportMenu } from '../components/ipam/ExportMenu';
@@ -341,6 +340,24 @@ export default function InstancesPage() {
     }
   };
 
+  // File uploads/deletes are immediate in the manager dialog. Persist the new
+  // metadata JSON on the instance and update the visible row in place: a quiet
+  // list reload would drop file metadata again when the current view is a
+  // server search result.
+  const saveFileValue = useCallback(
+    async (row: Instance, attribute: TypeAttribute, serialized: string) => {
+      await updateInstance(row.ci_id, { values: { [attribute.name]: serialized } });
+      setRows((current) =>
+        current.map((item) =>
+          item.ci_id === row.ci_id
+            ? { ...item, values: { ...item.values, [attribute.name]: serialized } }
+            : item,
+        ),
+      );
+    },
+    [],
+  );
+
   const envAttribute = attributes.find((attribute) => attribute.name === 'environment');
   const levelAttribute = attributes.find((attribute) => attribute.name === 'level');
   const statusAttribute = attributes.find((attribute) => attribute.name === 'data_status');
@@ -561,7 +578,15 @@ export default function InstancesPage() {
           title={attribute.is_file ? undefined : label && label !== raw ? `${label} (${raw})` : raw}
         >
           {attribute.is_file ? (
-            <FileSummary value={value} />
+            <FileField
+              key={`${row.ci_id}-${attribute.id}`}
+              compact
+              attribute={attribute}
+              value={value}
+              disabled={attribute.is_computed}
+              loadValue={async () => (await getInstanceFileValues(row.ci_id))[attribute.name]}
+              onChange={(_files, serialized) => saveFileValue(row, attribute, serialized)}
+            />
           ) : (
             <AttributeValue
               type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
@@ -1261,6 +1286,7 @@ export default function InstancesPage() {
                           onTopology={() => setViewing({ id: row.ci_id, tab: 'topology' })}
                           onEdit={() => setEditing({ mode: 'edit', id: row.ci_id })}
                           onDelete={() => void remove(row)}
+                          onSaveFile={(attribute, serialized) => saveFileValue(row, attribute, serialized)}
                         />
                       ))}
                     </div>
@@ -1344,6 +1370,7 @@ function InstanceCard({
   onTopology,
   onEdit,
   onDelete,
+  onSaveFile,
 }: {
   row: Instance;
   columns: TypeAttribute[];
@@ -1356,6 +1383,7 @@ function InstanceCard({
   onTopology(): void;
   onEdit(): void;
   onDelete(): void;
+  onSaveFile(attribute: TypeAttribute, serialized: string): void | Promise<void>;
 }) {
   const { tr } = useI18n();
   const titleAttribute =
@@ -1424,7 +1452,15 @@ function InstanceCard({
                   title={attribute.is_file ? undefined : label && label !== raw ? `${label} (${raw})` : raw}
                 >
                   {attribute.is_file ? (
-                    <FileSummary value={value} />
+                    <FileField
+                      key={`${row.ci_id}-${attribute.id}`}
+                      compact
+                      attribute={attribute}
+                      value={value}
+                      disabled={attribute.is_computed}
+                      loadValue={async () => (await getInstanceFileValues(row.ci_id))[attribute.name]}
+                      onChange={(_files, serialized) => onSaveFile(attribute, serialized)}
+                    />
                   ) : (
                     <AttributeValue
                       type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}

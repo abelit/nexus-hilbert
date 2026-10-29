@@ -16,6 +16,7 @@ vi.mock('@/cmdb/api/files', () => ({
 
 const config = {
   preview_server_url: 'http://kk:8012/onlinePreview',
+  file_fetch_base_url: 'http://ongrid-cmdb:8082',
   force_updated_cache_types: ['txt', 'md'],
 };
 
@@ -28,18 +29,26 @@ beforeEach(() => {
 });
 
 describe('file preview settings', () => {
-  it('tests and saves the preview endpoint', async () => {
+  it('tests and saves the preview endpoint and file access address', async () => {
     const user = userEvent.setup();
     render(<SettingsFilePreview />);
     const input = await screen.findByLabelText('预览服务地址');
     await user.clear(input);
     await user.type(input, 'http://kk.local/onlinePreview');
+    const fetchBase = screen.getByLabelText('文件访问地址');
+    await user.clear(fetchBase);
+    await user.type(fetchBase, 'http://ongrid-cmdb:8082/');
     await user.click(screen.getByRole('button', { name: '测试连接' }));
     await waitFor(() => expect(testMock).toHaveBeenCalledWith('http://kk.local/onlinePreview'));
     expect(await screen.findByText('预览服务可访问。')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() =>
-      expect(saveMock).toHaveBeenCalledWith(expect.objectContaining({ preview_server_url: 'http://kk.local/onlinePreview' })),
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          preview_server_url: 'http://kk.local/onlinePreview',
+          file_fetch_base_url: 'http://ongrid-cmdb:8082/',
+        }),
+      ),
     );
   });
 });

@@ -13,6 +13,11 @@ ARG VERSION=dev
 FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 ARG VERSION
+# Optional fallback base URL for signed preview downloads fetched by
+# kkFileView. The runtime setting under Settings -> File preview takes
+# precedence; empty falls back to the browser origin.
+ARG VITE_FILE_API_BASE_URL=
+ENV VITE_FILE_API_BASE_URL=${VITE_FILE_API_BASE_URL}
 WORKDIR /app
 
 # Cache dependency install layer separately from the source tree.

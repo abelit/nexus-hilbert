@@ -39,6 +39,18 @@ type FileFieldProps = {
   value: unknown;
   onChange(files: CIFile[], serialized: string): void | Promise<void>;
   disabled?: boolean;
+  /**
+   * Compact trigger for table cells and grid cards. The default trigger keeps
+   * its dashed attachment-button shape for forms and detail fields.
+   */
+  compact?: boolean;
+  /**
+   * Load the current value before opening the manager. List rows normally
+   * carry file metadata, but search results do not; opening from a result
+   * without this fetch would replace a non-empty file list with only the new
+   * upload. Returning undefined means the attribute has no files.
+   */
+  loadValue?: () => Promise<unknown>;
 };
 
 const formatSize = (bytes: number): string => {
@@ -73,16 +85,26 @@ const fileIconFor = (name: string): LucideIcon => {
  * c_value_texts. The manager dialog is also the only place a person sees the
  * file preview, so an unconfigured kkFileView still leaves download available.
  */
-export function FileField({ attribute, value, onChange, disabled = false }: FileFieldProps) {
+export function FileField({
+  attribute,
+  value,
+  onChange,
+  disabled = false,
+  compact = false,
+  loadValue,
+}: FileFieldProps) {
   const { tr } = useI18n();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState<{ value: unknown } | null>(null);
+  const [resolving, setResolving] = useState(false);
   const [preview, setPreview] = useState<CIFile | null>(null);
   const [uploading, setUploading] = useState<{ name: string; percent: number } | null>(null);
   const [links, setLinks] = useState<Record<string, { inline: string; download: string }>>({});
-  const files = parseCIFiles(value);
+  const effectiveValue = loaded ? loaded.value : value;
+  const files = parseCIFiles(effectiveValue);
   const fileIDs = files.map((file) => file.file_id).filter(Boolean).join(',');
 
   // Capability URLs are short-lived and file-scoped. Fetch them when the
@@ -115,16 +137,36 @@ export function FileField({ attribute, value, onChange, disabled = false }: File
 
   const apply = async (next: CIFile[]) => {
     try {
-      await onChange(next, serializeCIFiles(next));
+      const serialized = serializeCIFiles(next);
+      await onChange(next, serialized);
+      // Keep the manager on the value we just persisted when the trigger
+      // loaded a fresher value than the row prop (search results).
+      if (loadValue) setLoaded({ value: serialized });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : tr('保存文件失败', 'Could not save the file list'));
     }
   };
 
+  const openManager = async () => {
+    if (disabled || resolving) return;
+    if (loadValue) {
+      setResolving(true);
+      try {
+        setLoaded({ value: await loadValue() });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tr('加载文件失败', 'Could not load files'));
+        setResolving(false);
+        return;
+      }
+      setResolving(false);
+    }
+    setOpen(true);
+  };
+
   const upload = async (selected: File[]) => {
     if (disabled || selected.length === 0 || uploading) return;
     try {
-      let next = parseCIFiles(value);
+      let next = parseCIFiles(effectiveValue);
       for (const file of selected) {
         setUploading({ name: file.name, percent: 0 });
         const uploaded = await uploadCIFiles([file], attribute.id, (percent) =>
@@ -157,7 +199,7 @@ export function FileField({ attribute, value, onChange, disabled = false }: File
     try {
       if (file.file_id) await deleteCIFiles([file.file_id]);
       const key = file.file_id || file.stored_path;
-      await apply(parseCIFiles(value).filter((item) => (item.file_id || item.stored_path) !== key));
+      await apply(parseCIFiles(effectiveValue).filter((item) => (item.file_id || item.stored_path) !== key));
       toast.success(tr('已删除', 'Deleted'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : tr('删除失败', 'Delete failed'));
@@ -170,20 +212,40 @@ export function FileField({ attribute, value, onChange, disabled = false }: File
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
+        onClick={() => void openManager()}
+        disabled={disabled || resolving}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-md border border-dashed px-2.5 py-1 text-xs transition-colors',
+          'inline-flex items-center transition-colors',
           'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500',
-          files.length ? 'border-border text-text hover:border-indigo-500/50' : 'border-indigo-500/40 text-indigo-500 hover:bg-indigo-500/5',
-          disabled && 'cursor-not-allowed opacity-50',
+          compact
+            ? 'max-w-full gap-1 rounded px-1 py-0.5 text-[11px] text-text-muted hover:bg-bg hover:text-text'
+            : 'gap-1.5 rounded-md border border-dashed px-2.5 py-1 text-xs',
+          !compact &&
+            (files.length
+              ? 'border-border text-text hover:border-indigo-500/50'
+              : 'border-indigo-500/40 text-indigo-500 hover:bg-indigo-500/5'),
+          compact && !files.length && 'text-indigo-500 hover:bg-indigo-500/5',
+          (disabled || resolving) && 'cursor-not-allowed opacity-50',
         )}
         title={tr(`管理文件：${label}`, `Manage files: ${label}`)}
+        aria-label={tr(`管理文件：${label}`, `Manage files: ${label}`)}
       >
-        <Paperclip size={13} aria-hidden="true" />
-        {files.length
-          ? tr(`${files.length} 个文件`, `${files.length} ${files.length === 1 ? 'file' : 'files'}`)
-          : tr('未上传文件', 'No files')}
+        {resolving ? (
+          <Loader2 size={compact ? 11 : 13} className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Paperclip size={compact ? 11 : 13} aria-hidden="true" />
+        )}
+        {compact ? (
+          files.length ? (
+            <span className="tabular-nums">{files.length}</span>
+          ) : (
+            <span>{tr('上传', 'Upload')}</span>
+          )
+        ) : files.length ? (
+          tr(`${files.length} 个文件`, `${files.length} ${files.length === 1 ? 'file' : 'files'}`)
+        ) : (
+          tr('未上传文件', 'No files')
+        )}
       </button>
 
       <Modal

@@ -18,6 +18,7 @@ import '@xyflow/react/dist/style.css';
 
 import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/i18n/locale';
+import { cn } from '@/lib/cn';
 import { useThemeMode } from '@/store/mode';
 
 import {
@@ -105,7 +106,11 @@ function ModelNode({ id, data }: NodeProps<Node<ModelNodeData>>) {
         boxShadow: accent ? '0 0 0 2px rgb(99 102 241 / 0.25)' : undefined,
         opacity: data.dimmed ? 0.32 : 1,
       }}
-      className="flex items-center gap-1.5 rounded-lg border-2 bg-card px-2.5 text-text shadow-sm transition-[opacity,border-color] duration-150"
+      className={cn(
+        'flex items-center gap-1.5 rounded-lg border-2 bg-card px-2.5 text-text shadow-sm transition-[opacity,border-color] duration-150',
+        data.editMode ? 'cursor-default' : 'cursor-pointer',
+      )}
+      title={data.editMode ? undefined : tr('查看模型详情', 'View model details')}
     >
       <Handle id="target-left" type="target" position={Position.Left} style={HIDDEN_HANDLE_STYLE} />
       <Handle id="target-top" type="target" position={Position.Top} style={HIDDEN_HANDLE_STYLE} />
@@ -151,6 +156,8 @@ export function RelationGraph({
   focusKey,
   resetKey,
   onToggleNode,
+  onOpenNode,
+  onCloseNode,
 }: {
   graph: ModelGraph;
   positions: Map<number, ModelPosition>;
@@ -166,6 +173,10 @@ export function RelationGraph({
   /** Incremented by the page's "reset layout" action. */
   resetKey: number;
   onToggleNode(id: number): void;
+  /** View mode: open the model preview card for this node. */
+  onOpenNode(id: number): void;
+  /** Dismiss the preview when the canvas background is clicked. */
+  onCloseNode(): void;
 }) {
   const { resolved } = useThemeMode();
   const isLight = resolved === 'light';
@@ -309,7 +320,9 @@ export function RelationGraph({
           onNodesChange={onNodesChange}
           onNodeClick={(_, node) => {
             if (editMode) onToggleNode(Number(node.id));
+            else onOpenNode(Number(node.id));
           }}
+          onPaneClick={onCloseNode}
           onInit={(instance) => {
             flowRef.current = instance;
             setReady(true);

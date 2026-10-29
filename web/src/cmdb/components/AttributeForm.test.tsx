@@ -60,6 +60,43 @@ describe('the full attribute editor', () => {
     expect(onSaved).toHaveBeenCalled();
   });
 
+  it('stores a file attribute as text and clears incompatible flags', async () => {
+    const user = userEvent.setup();
+    let posted: Record<string, unknown> | null = null;
+    server.use(
+      http.post('/api/v1/cmdb/attributes', async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ id: 102, ...posted });
+      }),
+    );
+    renderForm();
+
+    await user.type(screen.getByLabelText('属性名'), 'attachment');
+    await user.click(screen.getByRole('checkbox', { name: '可检索' }));
+    await selectOption(screen.getByLabelText('值类型'), '文件');
+
+    expect(screen.getByText(/文件属性固定使用文本存储/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({
+      name: 'attachment',
+      value_type: '2',
+      is_file: true,
+      is_list: false,
+      is_index: false,
+      is_password: false,
+      is_link: false,
+      is_reference: false,
+      is_bool: false,
+      is_computed: false,
+      default: {},
+      choice_value: [],
+      choice_web_hook: {},
+      choice_other: {},
+    });
+  });
+
   it('sends a reference model and keeps a text attribute unindexed when asked', async () => {
     const user = userEvent.setup();
     let posted: Record<string, unknown> | null = null;
@@ -78,6 +115,37 @@ describe('the full attribute editor', () => {
 
     await waitFor(() => expect(posted).not.toBeNull());
     expect(posted).toMatchObject({ is_reference: true, reference_type_id: 1 });
+  });
+
+  it('shows an existing file attribute as the file type and locks the selector', () => {
+    renderForm({
+      id: 11,
+      name: 'attachment',
+      alias: '附件',
+      value_type: '2',
+      is_choice: false,
+      is_list: false,
+      is_unique: false,
+      is_index: false,
+      is_link: false,
+      is_password: false,
+      is_sortable: false,
+      is_dynamic: false,
+      is_bool: false,
+      is_file: true,
+      is_reference: false,
+      is_computed: false,
+      has_compute_script: false,
+      has_choice_web_hook: false,
+      has_choice_other: false,
+      is_indexed: false,
+      storage_table: 'c_value_texts',
+    });
+
+    const type = screen.getByRole('combobox', { name: '值类型' });
+    expect(type).toBeDisabled();
+    expect(type).toHaveTextContent('文件');
+    expect(screen.getByText(/文件属性固定使用文本存储/)).toBeInTheDocument();
   });
 
   it('does not edit the immutable value type or list flag on an existing attribute', () => {

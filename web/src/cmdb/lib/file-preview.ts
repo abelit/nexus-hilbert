@@ -8,6 +8,18 @@ export function filePreviewBaseUrl(): string {
   return import.meta.env.VITE_FILE_API_BASE_URL || window.location.origin;
 }
 
+/**
+ * Base for the signed file URL handed to kkFileView. The admin-configured
+ * value wins because it is resolved at request time and can name the compose
+ * service (for example http://ongrid-cmdb:8082) even when the browser origin
+ * is not reachable from kkFileView. Trailing slashes are removed so the
+ * relative capability path can be appended directly.
+ */
+export function resolveFileFetchBase(configured?: string | null): string {
+  const value = (configured ?? '').trim();
+  return (value || filePreviewBaseUrl()).replace(/\/+$/, '');
+}
+
 /** UTF-8 safe base64 without the deprecated unescape() round-trip. */
 export function base64UTF8(value: string): string {
   const bytes = new TextEncoder().encode(value);

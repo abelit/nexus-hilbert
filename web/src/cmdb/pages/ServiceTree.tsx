@@ -40,6 +40,7 @@ import { MetaPill } from '../components/MetaPill';
 import { DefinitionCard } from '../components/service-tree/DefinitionCard';
 import { DefinitionDialog } from '../components/service-tree/DefinitionDialog';
 import { DefinitionPairsDialog } from '../components/service-tree/DefinitionPairsDialog';
+import { ModelNodeCard } from '../components/service-tree/ModelNodeCard';
 import { RelationGraph } from '../components/service-tree/RelationGraph';
 import { useToast } from '../components/Toast';
 import { WorkspaceBar } from '../components/WorkspaceBar';
@@ -112,6 +113,9 @@ export default function ServiceTreePage() {
   // until the labels disappear.
   const [focusOverride, setFocusOverride] = useState<number[] | null>(null);
   const [focusVersion, setFocusVersion] = useState(0);
+  // View-mode node preview. Edit mode owns the canvas click to toggle a
+  // model into the definition, so the card is closed when editing starts.
+  const [previewNodeID, setPreviewNodeID] = useState<number | null>(null);
 
   const load = useCallback(
     async (quiet = false) => {
@@ -145,7 +149,20 @@ export default function ServiceTreePage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (editMode) setPreviewNodeID(null);
+  }, [editMode]);
+
   const graph = useMemo(() => buildModelGraph(models, relations), [models, relations]);
+
+  const previewModel = useMemo(
+    () => (previewNodeID == null ? null : models.find((item) => item.id === previewNodeID) ?? null),
+    [models, previewNodeID],
+  );
+
+  const togglePreviewNode = useCallback((id: number) => {
+    setPreviewNodeID((current) => (current === id ? null : id));
+  }, []);
 
   const labelByID = useMemo(() => {
     const map = new Map<number, string>();
@@ -714,7 +731,16 @@ export default function ServiceTreePage() {
                     focusIDs={focusIDs}
                     focusKey={focusKey}
                     onToggleNode={toggleModel}
+                    onOpenNode={togglePreviewNode}
+                    onCloseNode={() => setPreviewNodeID(null)}
                   />
+                  {!editMode && previewModel && (
+                    <ModelNodeCard
+                      key={previewModel.id}
+                      model={previewModel}
+                      onClose={() => setPreviewNodeID(null)}
+                    />
+                  )}
                 </div>
               </div>
             </section>

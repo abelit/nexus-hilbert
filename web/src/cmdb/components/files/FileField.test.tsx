@@ -74,7 +74,7 @@ describe('the CMDB file field', () => {
       </ToastProvider>,
     );
 
-    await user.click(screen.getByRole('button', { name: /2 个文件/ }));
+    await user.click(screen.getByRole('button', { name: '管理文件：附件' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText('a.txt')).toBeInTheDocument();
     expect(within(dialog).getByText('b.pdf')).toBeInTheDocument();
@@ -83,6 +83,30 @@ describe('the CMDB file field', () => {
     await user.click(within(dialog).getByRole('button', { name: '删除 a.txt' }));
     await waitFor(() => expect(deleteMock).toHaveBeenCalledWith(['f1']));
     expect(onChange).toHaveBeenCalledWith([files[1]], JSON.stringify([files[1]]));
+  });
+
+  it('loads the current files before opening a compact trigger', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const loadValue = vi.fn().mockResolvedValue(JSON.stringify([files[0]]));
+    render(
+      <ToastProvider>
+        <FileField
+          compact
+          attribute={{ id: 7, name: 'attachment', alias: '附件' }}
+          value={undefined}
+          onChange={onChange}
+          loadValue={loadValue}
+        />
+      </ToastProvider>,
+    );
+
+    const trigger = screen.getByRole('button', { name: '管理文件：附件' });
+    expect(within(trigger).getByText('上传')).toBeInTheDocument();
+    await user.click(trigger);
+    await waitFor(() => expect(loadValue).toHaveBeenCalled());
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('a.txt')).toBeInTheDocument();
   });
 
   it('uploads one file and appends its metadata to the value', async () => {
@@ -103,7 +127,7 @@ describe('the CMDB file field', () => {
       </ToastProvider>,
     );
 
-    await user.click(screen.getByRole('button', { name: /未上传文件/ }));
+    await user.click(screen.getByRole('button', { name: '管理文件：附件' }));
     const dialog = await screen.findByRole('dialog');
     await user.upload(within(dialog).getByLabelText('上传文件'), new File(['abc'], 'new.txt', { type: 'text/plain' }));
     await waitFor(() => expect(uploadMock).toHaveBeenCalled());
