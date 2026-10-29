@@ -55,6 +55,7 @@ const attributes = [
 ];
 
 const switchModel = { ...model, id: 2, name: 'switch', alias: '交换机' };
+const databaseModel = { ...model, id: 3, name: 'database', alias: '数据库', order: 2 };
 
 function renderPage(path = '/cmdb/instances?type=host') {
   return render(
@@ -76,6 +77,11 @@ function handlers(instances: unknown[] = []) {
     // The rail loads groups beside the models; an empty set keeps older tests
     // on the flat list.
     http.get('/api/v1/cmdb/preferences/model-groups', () => HttpResponse.json({ items: [], total: 0 })),
+    // The rail reads the operator's own order (c_pcto). The default is empty,
+    // which keeps the older tests on the catalogue order.
+    http.get('/api/v1/cmdb/preferences/ci-types', () =>
+      HttpResponse.json({ groups: [], type_ids: [] }),
+    ),
     http.get('/api/v1/cmdb/preferences/ci-types/host/fields', () =>
       HttpResponse.json({
         type_id: 1,
@@ -383,6 +389,39 @@ describe('the workspace layout', () => {
     expect(screen.queryByText('web-01')).not.toBeInTheDocument();
     expect(within(rail).getByRole('button', { name: '交换机' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(rail).getByRole('button', { name: '主机' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('orders the model rail like 我的订阅, including groups and models inside them', async () => {
+    handlers([]);
+    server.use(
+      http.get('/api/v1/cmdb/ci-types', () =>
+        HttpResponse.json({ items: [model, switchModel, databaseModel], total: 3 }),
+      ),
+      http.get('/api/v1/cmdb/preferences/model-groups', () =>
+        HttpResponse.json({
+          items: [
+            { id: 10, name: '服务器', ci_types: [model, databaseModel], is_other: false },
+            { id: 11, name: '网络', ci_types: [switchModel], is_other: false },
+          ],
+          total: 2,
+        }),
+      ),
+      http.get('/api/v1/cmdb/preferences/ci-types', () =>
+        // 数据库 is first in 我的订阅 even though the group's API order starts
+        // with 主机; the rail must follow the subscription, not the catalogue.
+        HttpResponse.json({ groups: [], type_ids: [databaseModel.id, model.id] }),
+      ),
+    );
+    renderPage('/cmdb/instances?type=host');
+
+    const nav = await screen.findByRole('navigation', { name: '模型对象' });
+    expect(within(nav).getAllByRole('button', { name: /^(数据库|主机|交换机)$/ }).map((button) =>
+      button.getAttribute('aria-label'),
+    )).toEqual(['数据库', '主机', '交换机']);
+
+    const headings = within(nav).getAllByRole('button', { name: /服务器|网络/ });
+    expect(headings[0]).toHaveTextContent('服务器');
+    expect(headings[1]).toHaveTextContent('网络');
   });
 
   it('groups the model rail by the configured model groups', async () => {

@@ -45,7 +45,12 @@ import {
   updateInstance,
   type Instance,
 } from '../api/instance';
-import { getShowFields, listModelGroups, type ModelGroup } from '../api/preferences';
+import {
+  getShowFields,
+  listModelGroups,
+  listSubscribedModels,
+  type ModelGroup,
+} from '../api/preferences';
 import { AttributeControl, AttributeValue } from '../components/AttributeControl';
 import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
@@ -59,7 +64,7 @@ import { WorkspaceBar } from '../components/WorkspaceBar';
 import { attributeSections } from '../lib/attribute-sections';
 import { choiceText } from '../lib/choice-labels';
 import { instanceSearchQuery, searchRowToInstance } from '../lib/instance-search';
-import { groupModels } from '../lib/model-groups';
+import { groupModels, orderModelsBySubscription } from '../lib/model-groups';
 import { referenceRawText, referenceText, useReferenceLabels, type ReferenceLabels } from '../lib/reference-labels';
 import { displayValue, isValueTypeCode } from '../lib/valuetype';
 
@@ -89,6 +94,9 @@ export default function InstancesPage() {
 
   const [models, setModels] = useState<CIType[]>([]);
   const [modelsErr, setModelsErr] = useState<string | null>(null);
+  // The operator's own model order (c_pcto), which is what 我的订阅 arranges.
+  // The rail uses it before the schema's global order so the two pages agree.
+  const [subscriptionOrder, setSubscriptionOrder] = useState<number[]>([]);
   // Groups are a separate snapshot, exactly as on the 模型配置 page: a group
   // failure must not blank the rail, it only leaves it flat.
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
@@ -141,9 +149,17 @@ export default function InstancesPage() {
     setModelsErr(null);
     void loadModelGroups();
     try {
-      const all = await listCITypes();
-      setModels(all);
-      setTypeRef((current) => current || all[0]?.name || '');
+      // The subscription is a preference, not part of the model catalogue. If
+      // it cannot be read the rail still works, in the schema's own order.
+      const [all, subscribed] = await Promise.all([
+        listCITypes(),
+        listSubscribedModels().catch(() => null),
+      ]);
+      const order = subscribed?.type_ids ?? [];
+      setSubscriptionOrder(order);
+      const ranked = orderModelsBySubscription(all, order);
+      setModels(ranked);
+      setTypeRef((current) => current || ranked[0]?.name || '');
     } catch (error) {
       setModelsErr(describeError(error, tr('无法读取模型', 'Could not load models')));
     }
@@ -337,17 +353,55 @@ export default function InstancesPage() {
     return models.filter((item) => `${item.alias} ${item.name}`.toLowerCase().includes(needle));
   }, [models, modelQuery]);
 
-  // The rail mirrors 模型配置's grouping: groups come from c_ci_type_groups,
-  // the model order inside them is the same, and the trailing 其他 bucket
-  // collects every model no group claims. Searching narrows each section.
+  const subscriptionRank = useMemo(() => {
+    const rank = new Map<number, number>();
+    subscriptionOrder.forEach((id, index) => {
+      if (!rank.has(id)) rank.set(id, index);
+    });
+    return rank;
+  }, [subscriptionOrder]);
+
+  // A group's place is the earliest place any of its models holds in 我的订阅.
+  // Groups with no arranged models keep the catalogue's order (the sort is
+  // stable for equal ranks). 其他 stays last, the trailing bucket the model
+  // configuration and cantor both use.
+  const orderedModelGroups = useMemo(() => {
+    if (subscriptionRank.size === 0) return modelGroups;
+    const groupRank = (group: ModelGroup) => {
+      let rank = Number.MAX_SAFE_INTEGER;
+      for (const item of group.ci_types ?? []) {
+        const candidate = subscriptionRank.get(item.id);
+        if (candidate != null && candidate < rank) rank = candidate;
+      }
+      return rank;
+    };
+    return [...modelGroups].sort((left, right) => groupRank(left) - groupRank(right));
+  }, [modelGroups, subscriptionRank]);
+
+  const rankOfModel = useCallback(
+    (item: CIType) => subscriptionRank.get(item.id) ?? Number.MAX_SAFE_INTEGER,
+    [subscriptionRank],
+  );
+
+  // The rail mirrors 模型配置's grouping, but the order inside each group and
+  // the group order follow 我的订阅. Searching narrows each section without
+  // changing the order of what remains.
   const modelSections = useMemo(
     () =>
-      groupModels(filteredModels, modelGroups, {
+      groupModels(filteredModels, orderedModelGroups, {
         other: tr('其他', 'Other'),
         all: tr('全部模型', 'All models'),
         unnamed: tr('未命名分组', 'Untitled group'),
-      }),
-    [filteredModels, modelGroups, tr],
+      }).map((section) => ({
+        ...section,
+        rows: [...section.rows].sort(
+          (left, right) =>
+            rankOfModel(left) - rankOfModel(right) ||
+            left.order - right.order ||
+            left.name.localeCompare(right.name),
+        ),
+      })),
+    [filteredModels, orderedModelGroups, rankOfModel, tr],
   );
   const groupedRail = modelGroups.some((group) => !group.is_other);
 

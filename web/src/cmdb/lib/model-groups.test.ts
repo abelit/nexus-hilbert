@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CIType } from '../api/citype';
 import type { ModelGroup } from '../api/preferences';
-import { groupModels, type ModelGroupLabels } from './model-groups';
+import { groupModels, orderModelsBySubscription, type ModelGroupLabels } from './model-groups';
 
 const labels: ModelGroupLabels = {
   other: '其他',
@@ -32,6 +32,23 @@ const host = model(1, 'host', 20);
 const switchModel = model(2, 'switch', 10);
 const database = model(3, 'database', 30);
 const router = model(4, 'router', 5);
+
+describe('orderModelsBySubscription', () => {
+  it('puts the arranged models first and appends the rest in catalogue order', () => {
+    const ordered = orderModelsBySubscription([host, switchModel, database, router], [database.id, router.id]);
+    expect(ordered.map((row) => row.name)).toEqual(['database', 'router', 'switch', 'host']);
+  });
+
+  it('falls back to the catalogue order when no subscription exists', () => {
+    const ordered = orderModelsBySubscription([host, switchModel], []);
+    expect(ordered).toEqual([host, switchModel]);
+  });
+
+  it('keeps an unnamed model after the arranged ones instead of dropping it', () => {
+    const ordered = orderModelsBySubscription([host, switchModel], [switchModel.id]);
+    expect(ordered.map((row) => row.id)).toEqual([switchModel.id, host.id]);
+  });
+});
 
 describe('groupModels', () => {
   it('keeps the API group order and each group’s membership order', () => {

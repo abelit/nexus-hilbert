@@ -37,6 +37,28 @@ function compareModels(left: CIType, right: CIType): number {
   return left.order - right.order || left.name.localeCompare(right.name);
 }
 
+/**
+ * Puts models in the operator's subscription order, then the schema's order.
+ *
+ * `type_ids` is what 我的订阅 arranges. A model the subscription does not name —
+ * an unsubscribed model, or every model when the preference could not be read —
+ * follows the arranged ones and keeps the catalogue's stable order, so the rail
+ * still reaches every model.
+ */
+export function orderModelsBySubscription(models: CIType[], typeIDs: number[]): CIType[] {
+  if (typeIDs.length === 0) return models;
+  const rank = new Map<number, number>();
+  typeIDs.forEach((id, index) => {
+    if (!rank.has(id)) rank.set(id, index);
+  });
+  return [...models].sort((left, right) => {
+    const leftRank = rank.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = rank.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return compareModels(left, right);
+  });
+}
+
 export function groupModels(
   models: CIType[],
   groups: ModelGroup[],

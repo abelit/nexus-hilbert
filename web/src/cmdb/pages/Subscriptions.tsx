@@ -128,7 +128,13 @@ export function buildSubscriptionSections(groups: ModelGroup[], orderedIDs: numb
   }
   const rankOf = (section: SubscriptionSection) =>
     section.items.reduce((lowest, model) => Math.min(lowest, rank.get(model.id) ?? Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
-  return sections.sort((left, right) => rankOf(left) - rankOf(right));
+  // 其他 is the trailing bucket everywhere else (the resource-data rail and
+  // cantor), so an ungrouped model cannot pull it into the middle of the named
+  // groups by happening to sort first.
+  return sections.sort((left, right) => {
+    if (left.isOther !== right.isOther) return left.isOther ? 1 : -1;
+    return rankOf(left) - rankOf(right);
+  });
 }
 
 /**

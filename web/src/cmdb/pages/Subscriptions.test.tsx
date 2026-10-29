@@ -336,7 +336,9 @@ describe('subscription grouping and drag persistence', () => {
         { id: 2, name: '网络', ci_types: [idcModel, switchModel] },
         { id: undefined, name: '', ci_types: [routerModel, ipam], is_other: true },
       ],
-      [3, 2, 1, 4, 9],
+      // Router (in 其他) is the earliest model, so a plain rank sort would put
+      // 其他 first; it must stay the trailing bucket.
+      [4, 3, 2, 1, 9],
     );
 
     expect(sections.map((section) => section.key)).toEqual(['g:2', 'g:1', 'other']);
