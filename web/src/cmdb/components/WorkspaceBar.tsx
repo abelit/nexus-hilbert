@@ -32,13 +32,13 @@ export function WorkspaceBar({ leading, actions }: { leading: ReactNode; actions
         <span className="hidden h-5 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
         <nav
           aria-label={tr('面包屑', 'Breadcrumb')}
-          className="flex min-w-0 items-center gap-1 text-xs text-text-muted"
+          className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-text-muted"
         >
           {leading}
         </nav>
       </div>
       {actions && (
-        <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 lg:ml-auto lg:shrink-0">
+        <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 lg:ml-auto lg:w-auto lg:shrink-0 lg:justify-end">
           {actions}
         </div>
       )}

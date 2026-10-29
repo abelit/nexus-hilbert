@@ -368,3 +368,30 @@ func TestUsecaseWithoutAWiringReportsNotWired(t *testing.T) {
 		t.Fatalf("Get() error = %v", err)
 	}
 }
+
+func TestListWithFilesIncludesFileMetadataButNotSecrets(t *testing.T) {
+	repo, res, _ := readFixture(t)
+	res.specs[4] = AttributeSpec{ID: 4, Name: "attachment", Alias: "附件", ValueType: value.TypeText, IsFile: true}
+	repo.rows = append(repo.rows, ValueRow{
+		RowID: 4, AttrID: 4, Table: value.TableTexts,
+		Text: `[{"file_id":"f1","original_name":"a.txt"}]`,
+	})
+	uc := NewUsecase(repo, res, nil)
+
+	page, err := uc.ListByTypeWithFiles(context.Background(), "host", 1, 0, nil, RetKeyName)
+	if err != nil {
+		t.Fatalf("ListByTypeWithFiles: %v", err)
+	}
+	if got := page.Items[0].Values["attachment"]; got != `[{"file_id":"f1","original_name":"a.txt"}]` {
+		t.Fatalf("file value = %#v", got)
+	}
+	assertNoSecret(t, "list with files", page.Items[0].Values)
+
+	plain, err := uc.ListByType(context.Background(), "host", 1, 0, nil, RetKeyName)
+	if err != nil {
+		t.Fatalf("ListByType: %v", err)
+	}
+	if _, present := plain.Items[0].Values["attachment"]; present {
+		t.Fatal("ordinary list leaked a file value")
+	}
+}

@@ -75,9 +75,10 @@ func (p ExistPolicy) Valid() bool {
 
 // Usecase applies the CI use cases.
 type Usecase struct {
-	repo  Repo
-	types TypeResolver
-	log   *slog.Logger
+	repo        Repo
+	types       TypeResolver
+	log         *slog.Logger
+	fileCleaner FileCleaner
 
 	// Now is the clock the write path stamps defaults and audit rows with.
 	// Injected so a test can pin it; cantor read the wall clock inline, which
@@ -262,6 +263,20 @@ func (u *Usecase) Update(ctx context.Context, ciID model.ID, in WriteRequest) (*
 		return nil, err
 	}
 
+	// File values are opaque JSON to this layer, but the objects they reference
+	// still need cleanup when an attachment is removed. The hook is optional so
+	// a deployment or a test that does not wire file storage keeps the old
+	// behaviour.
+	var oldFileRows []ValueRow
+	if u.fileCleaner != nil {
+		rows, loadErr := u.repo.LoadValueRows(ctx, ciID)
+		if loadErr != nil {
+			u.log.Warn("cmdb ci: could not load previous file values", slog.Any("err", loadErr))
+		} else {
+			oldFileRows = rows
+		}
+	}
+
 	changes, err := u.repo.UpsertCIValues(ctx, UpdateInput{
 		CIID: ciID, TypeID: set.Type.ID,
 		Specs: u.plannerSpecs(set), Values: values, Audit: in.Audit,
@@ -269,6 +284,7 @@ func (u *Usecase) Update(ctx context.Context, ciID model.ID, in WriteRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	u.cleanupChangedFiles(ctx, set, oldFileRows, values)
 	return &WriteResult{CIID: ciID, Created: false, Changes: changes}, nil
 }
 
@@ -287,7 +303,23 @@ func (u *Usecase) Delete(ctx context.Context, ciID model.ID) error {
 	if ci == nil {
 		return ErrInstanceNotFound
 	}
-	return u.repo.DeleteCI(ctx, ciID)
+	// Collect the file values while the rows still exist. The delete itself is
+	// the primary operation; object cleanup is best effort and must not turn a
+	// successful CI deletion into an error.
+	var fileValues []string
+	if u.fileCleaner != nil && u.types != nil {
+		set, setErr := u.types.ResolveForCI(ctx, fmt.Sprint(ci.TypeID))
+		if setErr == nil && set != nil {
+			if rows, rowErr := u.repo.LoadValueRows(ctx, ciID); rowErr == nil {
+				fileValues = fileValuesForRows(set, rows)
+			}
+		}
+	}
+	if err := u.repo.DeleteCI(ctx, ciID); err != nil {
+		return err
+	}
+	u.cleanupDeletedFiles(fileValues)
+	return nil
 }
 
 // --- helpers ---

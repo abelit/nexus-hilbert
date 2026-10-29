@@ -296,8 +296,27 @@ services:
       ONGRID_DB_MAX_IDLE_CONNS: ${ONGRID_CMDB_DB_MAX_IDLE_CONNS:-5}
       ONGRID_JWT_SECRET: ${ONGRID_JWT_SECRET:?ONGRID_JWT_SECRET is required in .env}
       ONGRID_SECRET_KEY: ${ONGRID_SECRET_KEY:-}
+      ONGRID_PUBLIC_URL: ${ONGRID_PUBLIC_URL:-}
+      ONGRID_CMDB_FILE_DIR: ${ONGRID_CMDB_FILE_DIR:-/var/lib/ongrid/cmdb-files}
+      ONGRID_CMDB_FILE_BACKEND: ${ONGRID_CMDB_FILE_BACKEND:-local}
+      # RustFS is the bundled S3-compatible object store. These defaults
+      # prefill Settings -> File storage; the local backend remains the
+      # first-boot default and old local attachments keep working.
+      ONGRID_CMDB_S3_ENDPOINT_URL: ${ONGRID_CMDB_S3_ENDPOINT_URL:-http://rustfs:9000}
+      ONGRID_CMDB_S3_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-minioadmin}
+      ONGRID_CMDB_S3_SECRET_KEY: ${RUSTFS_SECRET_KEY:?RUSTFS_SECRET_KEY is required in .env}
+      ONGRID_CMDB_S3_BUCKET_NAME: ${ONGRID_CMDB_S3_BUCKET_NAME:-cmdb-files}
+      ONGRID_CMDB_S3_REGION: ${RUSTFS_REGION:-us-east-1}
+      ONGRID_CMDB_S3_USE_SSL: "false"
+      ONGRID_CMDB_FILE_PREVIEW_URL: ${ONGRID_CMDB_FILE_PREVIEW_URL:-}
+      ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL: ${ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL:-http://kkfileview:8012}
+      ONGRID_CMDB_FILE_MAX_MB: ${ONGRID_CMDB_FILE_MAX_MB:-50}
       ONGRID_OTEL_ENDPOINT: ${ONGRID_OTEL_ENDPOINT:-tempo:4318}
       ONGRID_OTEL_SAMPLING_RATIO: ${ONGRID_OTEL_SAMPLING_RATIO:-1}
+    volumes:
+      # Local attachment storage. Attachments survive container replacement;
+      # choose S3 in Settings -> File storage when running multiple replicas.
+      - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/cmdb-files:${ONGRID_CMDB_FILE_DIR:-/var/lib/ongrid/cmdb-files}
     healthcheck:
       test: ["CMD", "/ongrid-cmdb", "--healthcheck"]
       interval: 10s
@@ -312,6 +331,95 @@ services:
       options:
         max-size: 50m
         max-file: "5"
+
+  # ===== kkFileView (browser file preview) ==================================
+  # Served behind nginx at /file-preview/, so the browser can use a
+  # same-origin URL and kkFileView's assets stay under the same context path.
+  kkfileview:
+    image: wangbowen/kkfileview:5.1.0
+    container_name: ongrid-kkfileview
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      KK_CONTEXT_PATH: /file-preview
+      KK_WATERMARK_TXT: ${ONGRID_KKFILEVIEW_WATERMARK:-Ongrid}
+      TRUST_HOST_ENABLE: "false"
+      KK_TRUST_HOST: "*"
+      LOGGING_LEVEL_ROOT: INFO
+    expose:
+      - "8012"
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "3"
+
+  # ===== RustFS (S3-compatible object storage) =============================
+  # A one-shot container gives the bind mount the uid RustFS runs as. S3 API
+  # and console are bound to loopback; CMDB reaches the service over the
+  # compose network as http://rustfs:9000.
+  rustfs-perms:
+    image: alpine:3.20
+    container_name: ongrid-rustfs-perms
+    network_mode: none
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - mkdir -p /data/rustfs0 /data/rustfs1 /data/rustfs2 /data/rustfs3 && chown -R 10001:10001 /data
+    volumes:
+      - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/rustfs:/data
+
+  rustfs:
+    image: ${ONGRID_RUSTFS_IMAGE:-harbor.it.cgzair.com/rustfs/rustfs:latest}
+    container_name: ongrid-rustfs
+    restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      TZ: Asia/Shanghai
+      RUSTFS_VOLUMES: /data/rustfs{0..3}
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-minioadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?RUSTFS_SECRET_KEY is required in .env}
+      RUSTFS_OBS_LOGGER_LEVEL: info
+      RUSTFS_REGION: ${RUSTFS_REGION:-us-east-1}
+      RUSTFS_BROWSER: "on"
+      RUSTFS_UNSAFE_BYPASS_DISK_CHECK: "true"
+    volumes:
+      - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/rustfs:/data
+    ports:
+      - "127.0.0.1:${ONGRID_RUSTFS_PORT:-9000}:9000"
+      - "127.0.0.1:${ONGRID_RUSTFS_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      rustfs-perms:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "3"
 
   frontier:
     # Upstream broker mirrored to the project CNB registry. The pinned tag is
@@ -344,6 +452,8 @@ services:
       ongrid:
         condition: service_started
       ongrid-cmdb:
+        condition: service_started
+      kkfileview:
         condition: service_started
       profiles-gateway:
         condition: service_started

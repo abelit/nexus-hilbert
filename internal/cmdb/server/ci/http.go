@@ -62,6 +62,7 @@ func (h *Handler) Register(r chi.Router) {
 	h.registerImport(r)
 	r.Get("/v1/cmdb/ci-types/{ref}/instances", h.listInstances)
 	r.Get("/v1/cmdb/instances/{id}", h.getInstance)
+	r.Get("/v1/cmdb/instances/{id}/files", h.getInstanceFiles)
 	r.Post("/v1/cmdb/instances", h.createInstance)
 	r.Put("/v1/cmdb/instances", h.replaceInstance)
 	r.Put("/v1/cmdb/instances/{id}", h.updateInstance)
@@ -346,8 +347,14 @@ func (h *Handler) listInstances(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	got, err := h.uc.ListByType(r.Context(), chi.URLParam(r, "ref"), page, size,
-		splitList(q.Get("fields")), cibiz.RetKey(q.Get("ret_key")))
+	var got *cibiz.InstancePage
+	if q.Get("include_files") == "1" || q.Get("include_files") == "true" {
+		got, err = h.uc.ListByTypeWithFiles(r.Context(), chi.URLParam(r, "ref"), page, size,
+			splitList(q.Get("fields")), cibiz.RetKey(q.Get("ret_key")))
+	} else {
+		got, err = h.uc.ListByType(r.Context(), chi.URLParam(r, "ref"), page, size,
+			splitList(q.Get("fields")), cibiz.RetKey(q.Get("ret_key")))
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -384,6 +391,23 @@ func (h *Handler) getInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toInstanceDTO(*got))
+}
+
+// getInstanceFiles returns the file-attribute values that the ordinary
+// instance read deliberately omits. The file manager needs them to preselect
+// an existing attachment when a form opens.
+func (h *Handler) getInstanceFiles(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	values, err := h.uc.FileValues(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"values": values})
 }
 
 // splitList reads a comma-separated query parameter.

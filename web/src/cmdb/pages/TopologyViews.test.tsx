@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router-dom';
@@ -13,8 +13,20 @@ import { ToastProvider } from '../components/Toast';
 // The shared graph is replaced by a label list: this file tests the page's
 // data flow, not React Flow's canvas.
 vi.mock('@/components/topology/Graph', () => ({
-  TopologyGraph: ({ nodes }: { nodes: Array<{ name: string }> }) => (
-    <div data-testid="topo-graph">{nodes.map((node) => node.name).join(',')}</div>
+  TopologyGraph: ({
+    nodes,
+    onSelect,
+  }: {
+    nodes: Array<{ id: number; name: string; props?: Record<string, unknown> }>;
+    onSelect(node: unknown): void;
+  }) => (
+    <div data-testid="topo-graph">
+      {nodes.map((node) => (
+        <button key={node.id} type="button" onClick={() => onSelect(node)}>
+          {node.name}
+        </button>
+      ))}
+    </div>
   ),
 }));
 
@@ -35,8 +47,26 @@ const view = {
 
 const group = { id: 1, name: '网络', order: 1, views: [view] };
 
+const hostnameAttribute = {
+  id: 5,
+  name: 'hostname',
+  alias: '主机名',
+  value_type: '2',
+  is_list: false,
+  is_index: true,
+  is_indexed: true,
+  is_required: false,
+  order: 5,
+  default_show: true,
+  inherited: false,
+  is_password: false,
+  is_reference: false,
+  storage_table: 'c_value_index_texts',
+};
+
 function baseHandlers() {
   server.use(
+    http.get('/cmdb/cmdb-icons.json', () => HttpResponse.json({})),
     http.get('/api/v1/cmdb/topology-views/groups', () =>
       HttpResponse.json({ items: [group], total: 1 }),
     ),
@@ -77,8 +107,92 @@ describe('the topology views page', () => {
 
     expect(await screen.findByRole('heading', { name: '拓扑视图' })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: '查看拓扑视图 机房拓扑' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '拖动分组 网络' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '拖动视图 机房拓扑' })).toBeInTheDocument();
     expect(await screen.findByTestId('topo-graph')).toHaveTextContent('web-01');
     expect(screen.getByText('1 个节点，0 条边')).toBeInTheDocument();
+  });
+
+  it('filters the rail and offers a working clear action', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    renderPage();
+
+    await screen.findByRole('button', { name: '查看拓扑视图 机房拓扑' });
+    await user.type(screen.getByRole('searchbox', { name: '搜索拓扑视图' }), '不存在');
+    expect(screen.queryByRole('button', { name: '查看拓扑视图 机房拓扑' })).not.toBeInTheDocument();
+    expect(screen.getByText('没有匹配的视图')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '清除搜索' }));
+    expect(await screen.findByRole('button', { name: '查看拓扑视图 机房拓扑' })).toBeInTheDocument();
+  });
+
+  it('renames a group from its header', async () => {
+    const user = userEvent.setup();
+    let put: unknown = null;
+    baseHandlers();
+    server.use(
+      http.put('/api/v1/cmdb/topology-views/groups/1', async ({ request }) => {
+        put = await request.json();
+        return HttpResponse.json({ ...group, name: '新网络' });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '编辑分组 网络' }));
+    const dialog = await screen.findByRole('dialog');
+    const name = within(dialog).getByLabelText('分组名称');
+    await user.clear(name);
+    await user.type(name, '新网络');
+    await user.click(within(dialog).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(put).toEqual({ name: '新网络', view_ids: [7] }));
+  });
+
+  it('edits a view from the rail, not only from the canvas header', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '编辑视图 机房拓扑' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('名称')).toHaveValue('机房拓扑');
+  });
+
+  it('shows subscribed attributes when a graph node is picked', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/host/attributes', () =>
+        HttpResponse.json({
+          type_id: 1,
+          unique_id: 5,
+          unique: 'hostname',
+          attributes: [hostnameAttribute],
+        }),
+      ),
+      http.get('/api/v1/cmdb/preferences/ci-types/host/fields', () =>
+        HttpResponse.json({
+          type_id: 1,
+          is_subscribed: true,
+          fields: [{ attr_id: 5, is_fixed: false }],
+        }),
+      ),
+      http.get('/api/v1/cmdb/instances/100', () =>
+        HttpResponse.json({
+          ci_id: 100,
+          type_id: 1,
+          values: { hostname: 'host-a', note: 'hello' },
+        }),
+      ),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'web-01' }));
+    const card = await screen.findByRole('complementary', { name: '节点详情' });
+    expect(within(card).getByText('主机名')).toBeInTheDocument();
+    expect(within(card).getByText('host-a')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: '在资源数据中查看' })).toBeInTheDocument();
   });
 
   it('does not leave the previous graph on screen when the next view fails', async () => {

@@ -72,7 +72,7 @@ const flagLabels: Array<{ key: FlagKey; zh: string; en: string; hintZh: string; 
   { key: 'is_bool', zh: '布尔', en: 'Boolean', hintZh: '用开关展示；通常配合布尔值类型', hintEn: 'Rendered as a switch; usually paired with the boolean value type' },
   { key: 'is_password', zh: '密码', en: 'Secret', hintZh: '读取接口永不回显；列表和详情都会隐藏', hintEn: 'Never echoed by the read API; hidden from lists and details' },
   { key: 'is_link', zh: '链接', en: 'Link', hintZh: '外部链接；读取接口不返回链接值', hintEn: 'External link; the read API does not return the link value' },
-  { key: 'is_file', zh: '文件', en: 'File', hintZh: '文件句柄；本服务不提供文件上传/下载', hintEn: 'File handle; this service has no upload/download endpoint' },
+  { key: 'is_file', zh: '文件', en: 'File', hintZh: '文件属性的值由专用上传控件维护，保存文件元数据', hintEn: 'File values use the attachment control and store file metadata' },
   { key: 'is_reference', zh: '引用', en: 'Reference', hintZh: '值指向另一个模型的实例', hintEn: 'The value points at an instance of another model' },
 ];
 

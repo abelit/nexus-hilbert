@@ -41,13 +41,14 @@ export type RetKey = 'name' | 'alias' | 'id';
  */
 export function listInstances(
   typeRef: string | number,
-  params?: { page?: number; count?: number; fields?: string[]; ret_key?: RetKey },
+  params?: { page?: number; count?: number; fields?: string[]; ret_key?: RetKey; include_files?: boolean },
 ): Promise<InstanceList> {
   const query: Record<string, string> = {};
   if (params?.page) query.page = String(params.page);
   if (params?.count) query.count = String(params.count);
   if (params?.fields?.length) query.fields = params.fields.join(',');
   if (params?.ret_key) query.ret_key = params.ret_key;
+  if (params?.include_files) query.include_files = '1';
   return cmdbGet<InstanceList>(`/ci-types/${encodeURIComponent(String(typeRef))}/instances`, query);
 }
 

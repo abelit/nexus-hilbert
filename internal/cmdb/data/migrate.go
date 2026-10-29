@@ -17,6 +17,7 @@ import (
 	cistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
 	citypestore "github.com/ongridio/ongrid/internal/cmdb/data/citype/store"
 	discoverystore "github.com/ongridio/ongrid/internal/cmdb/data/discovery/store"
+	filestore "github.com/ongridio/ongrid/internal/cmdb/data/file/store"
 	metastore "github.com/ongridio/ongrid/internal/cmdb/data/meta/store"
 	topologystore "github.com/ongridio/ongrid/internal/cmdb/data/topology/store"
 	"github.com/ongridio/ongrid/internal/cmdb/model/meta"
@@ -82,6 +83,7 @@ func Migrate(db *gorm.DB) error {
 		{"ci", cistore.Migrate},
 		{"discovery", discoverystore.Migrate},
 		{"topology", topologystore.Migrate},
+		{"file", filestore.Migrate},
 	} {
 		if err := m.fn(db); err != nil {
 			return fmt.Errorf("cmdb data: migrate %s: %w", m.name, err)

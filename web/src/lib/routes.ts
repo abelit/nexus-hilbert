@@ -50,6 +50,8 @@ const ROUTE_DEFS: RouteDef[] = [
   { path: '/settings/notifications', zh: '设置 / 通知', en: 'Settings / Notifications', keywords: ['notifications', 'tongzhi', 'communications'], group: '设置' },
   { path: '/settings/channels', zh: '设置 / 渠道', en: 'Settings / Channels', keywords: ['channels', 'qudao', 'bots', 'im'], group: '设置' },
   { path: '/settings/general', zh: '设置 / 全局配置', en: 'Settings / Global', keywords: ['global', 'network discovery', 'wangluofaxian'], group: '设置' },
+  { path: '/settings/file-storage', zh: '设置 / 文件存储', en: 'Settings / File storage', keywords: ['settings', 'file', 'storage', 's3', 'minio', 'wenjian', 'cunchu'], group: '设置' },
+  { path: '/settings/file-preview', zh: '设置 / 文件预览', en: 'Settings / File preview', keywords: ['settings', 'file', 'preview', 'kkfileview', 'wenjian', 'yulan'], group: '设置' },
   { path: '/settings/preferences', zh: '设置 / 偏好', en: 'Settings / Preferences', keywords: ['preferences', 'pianhao'], group: '设置' },
 
   { path: '/admin/users', zh: '用户管理 / 用户', en: 'Admin / Users', keywords: ['users', 'yonghu', 'admin'], group: '用户管理' },

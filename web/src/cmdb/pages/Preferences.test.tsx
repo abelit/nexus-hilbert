@@ -70,6 +70,9 @@ describe('the my-subscriptions page', () => {
 
     const button = await screen.findByRole('button', { name: /自动订阅/ });
     expect(button).toBeEnabled();
+    // The subscription controls live in the page header, above the tabs.
+    expect(button.closest('header')).not.toBeNull();
+    expect(screen.getByRole('button', { name: '刷新' }).closest('header')).not.toBeNull();
     await userEvent.click(button);
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });

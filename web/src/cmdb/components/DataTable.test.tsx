@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -83,6 +83,43 @@ describe('sorting', () => {
     // larger set would produce an order that is wrong past the page.
     expect(onSortChange).toHaveBeenCalledWith({ key: 'name', desc: false });
     expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[0]).toHaveTextContent('web-01');
+  });
+});
+
+describe('actions', () => {
+  it('drops the action column below the caller’s breakpoint', () => {
+    const original = window.innerWidth;
+    try {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 800 });
+      render(
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          actions={() => <button type="button">edit</button>}
+          actionsHideBelow={1024}
+        />,
+      );
+      expect(screen.queryByRole('columnheader', { name: '操作' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'edit' })).not.toBeInTheDocument();
+      cleanup();
+
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+      render(
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          actions={() => <button type="button">edit</button>}
+          actionsHideBelow={1024}
+        />,
+      );
+      expect(screen.getByRole('columnheader', { name: '操作' })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'edit' })).toHaveLength(rows.length);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: original });
+      cleanup();
+    }
   });
 });
 

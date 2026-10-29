@@ -32,6 +32,8 @@ type Props = {
   view: TopologyView | null;
   groups: TopologyGroup[];
   models: CIType[];
+  /** Preselects the folder when a view is created from a group header. */
+  initialGroupID?: number | null;
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
 };
@@ -44,7 +46,7 @@ function parsePath(raw: string): Record<string, number[]> {
   const out: Record<string, number[]> = {};
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     const level = Number(key);
-    if (!Number.isInteger(level) || level === 0) throw new Error(`invalid level ${key}`);
+    if (!Number.isInteger(level)) throw new Error(`invalid level ${key}`);
     if (!Array.isArray(value) || value.some((item) => !Number.isInteger(Number(item)) || Number(item) <= 0)) {
       throw new Error(`level ${key} must be a list of model ids`);
     }
@@ -53,10 +55,12 @@ function parsePath(raw: string): Record<string, number[]> {
   return out;
 }
 
-export function TopologyViewDrawer({ view, groups, models, onClose, onSaved }: Props) {
+export function TopologyViewDrawer({ view, groups, models, initialGroupID, onClose, onSaved }: Props) {
   const { tr } = useI18n();
   const [name, setName] = useState(view?.name ?? '');
-  const [groupID, setGroupID] = useState(view?.group_id ? String(view.group_id) : '');
+  const [groupID, setGroupID] = useState(
+    view?.group_id ? String(view.group_id) : initialGroupID != null ? String(initialGroupID) : '',
+  );
   const [centralType, setCentralType] = useState(view ? String(view.central_node_type) : '');
   const [instances, setInstances] = useState(view?.central_node_instances ?? '');
   const [pathText, setPathText] = useState(JSON.stringify(view?.path ?? {}, null, 2));
@@ -220,8 +224,8 @@ export function TopologyViewDrawer({ view, groups, models, onClose, onSaved }: P
           />
           <p className="mt-1 text-[11px] text-text-faint">
             {tr(
-              '键是层级（正数向下、负数向上，绝对值 ≤ 5），值是该层允许的模型 id。示例：{"1":[2],"-1":[4]}',
-              'Keys are levels (positive downward, negative upward, absolute value ≤ 5); values are the model ids allowed at that level. Example: {"1":[2],"-1":[4]}',
+              '键是层级（0 表示中心层，正数向下、负数向上，绝对值 ≤ 5），值是该层允许的模型 id。示例：{"0":[1],"1":[2],"-1":[4]}',
+              'Keys are levels (0 marks the central level, positive downward, negative upward, absolute value ≤ 5); values are the model ids allowed at that level. Example: {"0":[1],"1":[2],"-1":[4]}',
             )}
           </p>
         </div>

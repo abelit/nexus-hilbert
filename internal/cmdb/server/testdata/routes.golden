@@ -8,6 +8,7 @@ DELETE /v1/cmdb/ci-types/{ref}/attributes
 DELETE /v1/cmdb/ci-types/{ref}/relation-children/{child}
 DELETE /v1/cmdb/ci-types/{ref}/triggers/{id}
 DELETE /v1/cmdb/ci-types/{ref}/unique-constraints/{id}
+DELETE /v1/cmdb/ci/files
 DELETE /v1/cmdb/dcim/server-rooms/{roomID}/racks/{rackID}/devices/{deviceID}
 DELETE /v1/cmdb/dcim/{type}/{id}
 DELETE /v1/cmdb/discovery/accounts/{id}
@@ -47,6 +48,7 @@ GET /v1/cmdb/ci-types/{ref}/relation-descendants
 GET /v1/cmdb/ci-types/{ref}/relation-parents
 GET /v1/cmdb/ci-types/{ref}/triggers
 GET /v1/cmdb/ci-types/{ref}/unique-constraints
+GET /v1/cmdb/ci/files
 GET /v1/cmdb/ci/s
 GET /v1/cmdb/ci/search
 GET /v1/cmdb/dcim/history/operations
@@ -77,6 +79,8 @@ GET /v1/cmdb/discovery/target-types
 GET /v1/cmdb/discovery/targets/{id}
 GET /v1/cmdb/discovery/targets/{id}/sync-histories
 GET /v1/cmdb/discovery/templates/export
+GET /v1/cmdb/file-preview
+GET /v1/cmdb/file-storage
 GET /v1/cmdb/health
 GET /v1/cmdb/history/attributes
 GET /v1/cmdb/history/ci-triggers
@@ -85,6 +89,7 @@ GET /v1/cmdb/history/ci/{id}
 GET /v1/cmdb/history/ci/{id}/triggers
 GET /v1/cmdb/history/relations
 GET /v1/cmdb/instances/{id}
+GET /v1/cmdb/instances/{id}/files
 GET /v1/cmdb/ipam/addresses
 GET /v1/cmdb/ipam/history/operations
 GET /v1/cmdb/ipam/history/scans
@@ -105,6 +110,7 @@ GET /v1/cmdb/topology-views/groups
 GET /v1/cmdb/topology-views/type-relations/{ref}
 GET /v1/cmdb/topology-views/{id}
 GET /v1/cmdb/topology-views/{id}/graph
+HEAD /v1/cmdb/ci/files
 POST /v1/cmdb/attributes
 POST /v1/cmdb/ci-relations/batch
 POST /v1/cmdb/ci-relations/path/s
@@ -120,6 +126,8 @@ POST /v1/cmdb/ci-types/{ref}/relation-children/{child}
 POST /v1/cmdb/ci-types/{ref}/triggers
 POST /v1/cmdb/ci-types/{ref}/triggers/{id}/test
 POST /v1/cmdb/ci-types/{ref}/unique-constraints
+POST /v1/cmdb/ci/files
+POST /v1/cmdb/ci/files/preview-url
 POST /v1/cmdb/ci/s
 POST /v1/cmdb/ci/search
 POST /v1/cmdb/dcim/racks/recalc-units
@@ -132,6 +140,8 @@ POST /v1/cmdb/discovery/rules
 POST /v1/cmdb/discovery/rules/builtin
 POST /v1/cmdb/discovery/targets/{id}/test
 POST /v1/cmdb/discovery/templates/import
+POST /v1/cmdb/file-preview/test
+POST /v1/cmdb/file-storage/test
 POST /v1/cmdb/import/commit
 POST /v1/cmdb/import/preview
 POST /v1/cmdb/instances
@@ -159,6 +169,8 @@ PUT /v1/cmdb/discovery/ci-types/{ref}/target-relations
 PUT /v1/cmdb/discovery/rules/{ref}
 PUT /v1/cmdb/discovery/rules/{ref}/accounts
 PUT /v1/cmdb/discovery/targets/{id}
+PUT /v1/cmdb/file-preview
+PUT /v1/cmdb/file-storage
 PUT /v1/cmdb/instances
 PUT /v1/cmdb/instances/{id}
 PUT /v1/cmdb/ipam/scopes/{id}

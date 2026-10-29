@@ -240,8 +240,14 @@ func levelsOf(path map[string][]model.ID) ([]graphLevel, error) {
 	out := make([]graphLevel, 0, len(path))
 	for key, typeIDs := range path {
 		level, err := strconv.Atoi(key)
-		if err != nil || level == 0 {
+		if err != nil {
 			return nil, fmt.Errorf("%w: path level %q", errs.ErrInvalid, key)
+		}
+		// ZERO IS CANTOR'S CENTRAL-LEVEL MARKER, not a walk direction. Saved
+		// views carry it ({"0":[central], …}); the roots already come from
+		// CentralNodeType, so it adds no step and is accepted for compatibility.
+		if level == 0 {
+			continue
 		}
 		if level > MaxDepth || level < -MaxDepth {
 			return nil, fmt.Errorf("%w: path level %d exceeds %d", ErrGraphTooLarge, level, MaxDepth)

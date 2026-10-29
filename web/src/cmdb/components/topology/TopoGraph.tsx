@@ -10,10 +10,28 @@ import type { TopologyGraph as CMDBGraph } from '../../api/topology';
 // relation. Mapping at this boundary keeps the CMDB module from owning a second
 // React Flow implementation, and keeps the shared component from learning about
 // CI models.
-export function TopoGraph({ graph }: { graph: CMDBGraph }) {
+
+export type TopoSelectedNode = {
+  id: number;
+  typeID: number;
+  name: string;
+};
+
+export function TopoGraph({
+  graph,
+  selectedID,
+  typeLabels,
+  onSelect,
+}: {
+  graph: CMDBGraph;
+  selectedID?: number | null;
+  /** model id → display alias, used as the node's subtitle instead of the id. */
+  typeLabels?: Record<number, string>;
+  onSelect?(node: TopoSelectedNode): void;
+}) {
   const nodes: TopologyNode[] = graph.nodes.map((node) => ({
     id: node.id,
-    type: String(node.type_id),
+    type: typeLabels?.[node.type_id] ?? String(node.type_id),
     name: node.name,
     props: { type_id: node.type_id, icon: graph.type2meta?.[String(node.type_id)] ?? '' },
     created_at: '',
@@ -30,13 +48,19 @@ export function TopoGraph({ graph }: { graph: CMDBGraph }) {
   }));
 
   return (
-    <div className="h-[calc(100vh-16rem)] min-h-[24rem] w-full">
+    <div className="cmdb-topology-view h-full min-h-0 w-full">
       <TopologyGraph
         nodes={nodes}
         relations={relations}
         relationTypes={[]}
-        selectedID={null}
-        onSelect={() => {}}
+        selectedID={selectedID ?? null}
+        onSelect={(node) => {
+          onSelect?.({
+            id: node.id,
+            typeID: Number(node.props?.type_id ?? node.type ?? 0),
+            name: node.name,
+          });
+        }}
       />
     </div>
   );

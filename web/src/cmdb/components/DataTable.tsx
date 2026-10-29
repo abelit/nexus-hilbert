@@ -89,6 +89,12 @@ type Props<T> = {
   /** Row actions, drawn in the sticky last column. */
   actions?: (row: T) => ReactNode;
   actionsHeader?: ReactNode;
+  /**
+   * Drop the action column below this viewport width. A narrow viewport keeps
+   * the identity column readable instead of parking the actions off-screen at
+   * the end of a wide table; the row click remains the action on touch.
+   */
+  actionsHideBelow?: number;
 
   selection?: {
     selected: ReadonlySet<string | number>;
@@ -136,6 +142,7 @@ export function DataTable<T>({
   onSortChange,
   actions,
   actionsHeader,
+  actionsHideBelow = 0,
   selection,
   onRowClick,
   storageKey,
@@ -222,6 +229,7 @@ export function DataTable<T>({
   };
 
   const selectable = Boolean(selection);
+  const showActions = Boolean(actions) && viewport >= actionsHideBelow;
   const pageKeys = sortedRows.map((row) => rowKey(row));
   const allSelected = selectable && pageKeys.length > 0 && pageKeys.every((key) => selection!.selected.has(key));
   const someSelected = selectable && !allSelected && pageKeys.some((key) => selection!.selected.has(key));
@@ -285,9 +293,9 @@ export function DataTable<T>({
             {column.cell(row)}
           </td>
         ))}
-        {actions && (
+        {showActions && (
           <td className="sticky right-0 w-px whitespace-nowrap px-4 py-2 text-left align-middle max-2xl:static">
-            <div className="flex items-center gap-1">{actions(row)}</div>
+            <div className="flex items-center gap-1">{actions!(row)}</div>
           </td>
         )}
       </tr>
@@ -329,7 +337,7 @@ export function DataTable<T>({
         // its container; letting it push the page wide would take the header and
         // the first columns out of reach on a narrow window.
         <div className={cn('min-w-0 overflow-x-auto', fill && 'cmdb-table-scroll min-h-0 flex-1 overflow-y-auto')}>
-          <table className={cn('og-resource-table', actions && 'og-action-table')}>
+          <table className={cn('og-resource-table', showActions && 'og-action-table')}>
             <thead>
               <tr>
                 {selectable && (
@@ -382,7 +390,7 @@ export function DataTable<T>({
                     </th>
                   );
                 })}
-                {actions && (
+                {showActions && (
                   // LEFT-ALIGNED AND CONTENT-SIZED: the design language fixes the
                   // operation column's alignment and forbids a guessed width.
                   // THE HEADER IS PINNED WITH THE CELLS. Without `sticky
@@ -400,7 +408,7 @@ export function DataTable<T>({
                   <tr className="cmdb-liquid-group-row">
                     <th
                       scope="rowgroup"
-                      colSpan={Math.max(1, visible.length + (selectable ? 1 : 0) + (actions ? 1 : 0))}
+                      colSpan={Math.max(1, visible.length + (selectable ? 1 : 0) + (showActions ? 1 : 0))}
                     >
                       {group.header}
                     </th>

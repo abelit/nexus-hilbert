@@ -17,6 +17,7 @@ import (
 	cmdbcibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	cmdbcitypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	cmdbdiscoverybiz "github.com/ongridio/ongrid/internal/cmdb/biz/discovery"
+	cmdbfilebiz "github.com/ongridio/ongrid/internal/cmdb/biz/file"
 	cmdbhistorybiz "github.com/ongridio/ongrid/internal/cmdb/biz/history"
 	cmdbmetabiz "github.com/ongridio/ongrid/internal/cmdb/biz/meta"
 	cmdbrelationtypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/relationtype"
@@ -24,6 +25,7 @@ import (
 	cmdbcistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
 	cmdbcitypedata "github.com/ongridio/ongrid/internal/cmdb/data/citype/store"
 	cmdbdiscoverydata "github.com/ongridio/ongrid/internal/cmdb/data/discovery/store"
+	cmdbfiledata "github.com/ongridio/ongrid/internal/cmdb/data/file/store"
 	cmdbhistorydata "github.com/ongridio/ongrid/internal/cmdb/data/history/store"
 	cmdbmetastore "github.com/ongridio/ongrid/internal/cmdb/data/meta/store"
 	cmdbrelationtypedata "github.com/ongridio/ongrid/internal/cmdb/data/relationtype/store"
@@ -32,6 +34,7 @@ import (
 	cmdbciserver "github.com/ongridio/ongrid/internal/cmdb/server/ci"
 	cmdbcitypeserver "github.com/ongridio/ongrid/internal/cmdb/server/citype"
 	cmdbdiscoveryserver "github.com/ongridio/ongrid/internal/cmdb/server/discovery"
+	cmdbfileserver "github.com/ongridio/ongrid/internal/cmdb/server/file"
 	cmdbhistoryserver "github.com/ongridio/ongrid/internal/cmdb/server/history"
 	cmdbservermeta "github.com/ongridio/ongrid/internal/cmdb/server/meta"
 	cmdbserverrelationtype "github.com/ongridio/ongrid/internal/cmdb/server/relationtype"
@@ -42,7 +45,7 @@ import (
 // buildHandlers constructs the CMDB use cases and handlers in the same order
 // as cmd/ongrid's historical wiring. The cross-package ports stay in this
 // assembly layer: neither business package imports the other's implementation.
-func buildHandlers(db *gorm.DB, log *slog.Logger) cmdbserver.Handlers {
+func buildHandlers(db *gorm.DB, log *slog.Logger, fileOpts cmdbfilebiz.Options) cmdbserver.Handlers {
 	citypeUC := cmdbcitypebiz.NewUsecase(cmdbcitypedata.NewRepo(db), log)
 	ciUC := cmdbcibiz.NewUsecase(
 		cmdbcistore.NewRepo(db),
@@ -69,6 +72,9 @@ func buildHandlers(db *gorm.DB, log *slog.Logger) cmdbserver.Handlers {
 		WithGraph(cmdbcibiz.NewTopologyGraph(ciUC)).
 		WithModelRelations(cmdbcitypebiz.NewTopologyModelRelations(citypeUC))
 
+	fileUC := cmdbfilebiz.NewUsecase(cmdbfiledata.NewRepo(db), fileOpts)
+	ciUC.WithFileCleaner(fileUC)
+
 	return cmdbserver.Handlers{
 		Meta:         cmdbservermeta.NewHandler(cmdbmetabiz.NewUsecase(cmdbmetastore.NewRepo(db), log)),
 		RelationType: cmdbserverrelationtype.NewHandler(cmdbrelationtypebiz.NewUsecase(cmdbrelationtypedata.NewRepo(db), log)),
@@ -77,6 +83,7 @@ func buildHandlers(db *gorm.DB, log *slog.Logger) cmdbserver.Handlers {
 		Topology:     cmdbservertopology.NewHandler(topologyUC),
 		CIType:       cmdbcitypeserver.NewHandler(citypeUC),
 		CI:           cmdbciserver.NewHandler(ciUC),
+		File:         cmdbfileserver.NewHandler(fileUC),
 	}
 }
 
@@ -112,6 +119,12 @@ func newRouter(db *gorm.DB, signer *auth.Signer, h cmdbserver.Handlers, version 
 			"version": version,
 		})
 	})
+	// Preview capabilities are fetched by kkFileView, which has no JWT. The
+	// handler verifies a short-lived, file-scoped HMAC token itself, so this
+	// route deliberately sits outside auth.Middleware.
+	if h.File != nil {
+		h.File.RegisterPublic(mux)
+	}
 	mux.Route("/api", func(api chi.Router) {
 		api.Group(func(protected chi.Router) {
 			protected.Use(auth.Middleware(signer))

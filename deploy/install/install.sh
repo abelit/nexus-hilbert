@@ -584,6 +584,8 @@ mkdir -p \
     "$ONGRID_DATA_DIR/embeddings" \
     "$ONGRID_DATA_DIR/skills" \
     "$ONGRID_DATA_DIR/pages" \
+    "$ONGRID_DATA_DIR/cmdb-files" \
+    "$ONGRID_DATA_DIR/rustfs" \
     "$ONGRID_DATA_DIR/packet-captures" \
     "$ONGRID_DATA_DIR/workspace" \
     "$ONGRID_DATA_DIR/tools" \
@@ -615,6 +617,8 @@ chown -R 65532:65532 "$ONGRID_DATA_DIR/skills" 2>/dev/null || true
 # manager can't write: serve_page fails "mkdir page dir: permission denied",
 # cloud_bash fails "mkdir session" (workspace) + can't install tools.
 chown -R 65532:65532 "$ONGRID_DATA_DIR/pages" 2>/dev/null || true
+chown -R 65532:65532 "$ONGRID_DATA_DIR/cmdb-files" 2>/dev/null || true
+chown -R 10001:10001 "$ONGRID_DATA_DIR/rustfs" 2>/dev/null || true
 chown -R 65532:65532 "$ONGRID_DATA_DIR/packet-captures" 2>/dev/null || true
 chown -R 65532:65532 "$ONGRID_DATA_DIR/workspace" 2>/dev/null || true
 chown -R 65532:65532 "$ONGRID_DATA_DIR/tools" 2>/dev/null || true
@@ -751,6 +755,16 @@ fi
 if is_blank GRAFANA_ADMIN_PASSWORD; then
     fill_blank GRAFANA_ADMIN_PASSWORD "$(gen_secret 20)"
     log_info "generated GRAFANA_ADMIN_PASSWORD"
+fi
+
+# RUSTFS_SECRET_KEY (bundled S3-compatible store). Keep it stable: existing
+# attachments become unreadable if the credentials change.
+if ! grep -qE '^RUSTFS_SECRET_KEY=' "$ENV_FILE"; then
+    set_env_value RUSTFS_SECRET_KEY "$(gen_secret 32)"
+    log_info "generated RUSTFS_SECRET_KEY"
+elif is_blank RUSTFS_SECRET_KEY; then
+    fill_blank RUSTFS_SECRET_KEY "$(gen_secret 32)"
+    log_info "generated RUSTFS_SECRET_KEY"
 fi
 
 # ONGRID_PUBLIC_URL — the address EDGES use to reach this manager's data

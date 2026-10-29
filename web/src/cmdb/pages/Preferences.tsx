@@ -36,6 +36,10 @@ export default function PreferencesPage() {
   const { tr } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>(() => tabFrom(searchParams.get('tab')) ?? 'subscriptions');
+  // The subscription panel owns the refresh and auto-subscription controls,
+  // but they belong in the page header like every other page's actions. The
+  // panel portals them into this slot instead of duplicating their state here.
+  const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
 
   // The URL is also the state when the operator uses back/forward or follows a
   // deep link while the page is already mounted.
@@ -61,6 +65,11 @@ export default function PreferencesPage() {
           '选择每个模型显示的列与层级，并管理共享分组和你的保存搜索。',
           'Choose the columns and hierarchy each model shows, and manage shared groups and your saved searches.',
         )}
+        actions={
+          tab === 'subscriptions' ? (
+            <div ref={setActionsSlot} className="flex flex-wrap items-center gap-2" />
+          ) : undefined
+        }
       />
 
       {/* The root is a flex column so a tab panel can fill the remaining height
@@ -75,7 +84,10 @@ export default function PreferencesPage() {
         </TabsList>
 
         <TabsContent value="subscriptions" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <SubscriptionsPage embedded />
+          <SubscriptionsPage
+            embedded
+            headerActionsTarget={tab === 'subscriptions' ? actionsSlot : null}
+          />
         </TabsContent>
         <TabsContent value="groups" className="min-h-0 flex-1 overflow-y-auto p-6">
           <ModelGroupsPanel />

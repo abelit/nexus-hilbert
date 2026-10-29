@@ -721,3 +721,20 @@ html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabl
     justify-content: flex-start;
   }
 }
+
+/* Below the rail breakpoint the minimap covers more of the canvas than the
+   graph itself; keep the pan / zoom controls and let fit-view orient the
+   operator. */
+@media (max-width: 1023.98px) {
+  .cmdb-topology-view .react-flow__minimap {
+    display: none;
+  }
+}
+
+/* The definition canvas has its own minimap; below the rail breakpoint it
+   would cover more of the focused chain than it explains. */
+@media (max-width: 1023.98px) {
+  .cmdb-relation-graph .react-flow__minimap {
+    display: none;
+  }
+}

@@ -373,7 +373,7 @@ func (u *Usecase) renderHits(ctx context.Context, rows []cimodel.CI, fields []st
 		if err != nil {
 			return nil, err
 		}
-		instance, err := u.renderInstance(set, row, fallback[row.ID], wanted, key)
+		instance, err := u.renderInstance(set, row, fallback[row.ID], wanted, key, false)
 		if err != nil {
 			return nil, err
 		}

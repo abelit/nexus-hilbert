@@ -46,6 +46,7 @@ import {
   updateInstance,
   type Instance,
 } from '../api/instance';
+import { getInstanceFileValues } from '../api/files';
 import {
   getShowFields,
   listModelGroups,
@@ -56,6 +57,8 @@ import { AttributeControl, AttributeValue } from '../components/AttributeControl
 import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { Drawer } from '../components/Drawer';
+import { FileField } from '../components/files/FileField';
+import { FileSummary } from '../components/files/FileSummary';
 import { InstanceDetailDrawer } from '../components/instance-detail/InstanceDetailDrawer';
 import { InstanceFieldsDialog } from '../components/InstanceFieldsDialog';
 import { ExportMenu } from '../components/ipam/ExportMenu';
@@ -268,7 +271,7 @@ export default function InstancesPage() {
           setRows((got.result ?? []).map(searchRowToInstance));
           setNumFound(got.numfound ?? 0);
         } else {
-          const got = await listInstances(typeRef, { page: page + 1, count: PAGE_SIZE });
+          const got = await listInstances(typeRef, { page: page + 1, count: PAGE_SIZE, include_files: true });
           setRows(got.items ?? []);
           setNumFound(got.numfound ?? 0);
         }
@@ -555,13 +558,17 @@ export default function InstancesPage() {
       return (
         <span
           className="block min-w-0 truncate"
-          title={label && label !== raw ? `${label} (${raw})` : raw}
+          title={attribute.is_file ? undefined : label && label !== raw ? `${label} (${raw})` : raw}
         >
-          <AttributeValue
-            type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
-            value={value}
-            label={label}
-          />
+          {attribute.is_file ? (
+            <FileSummary value={value} />
+          ) : (
+            <AttributeValue
+              type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
+              value={value}
+              label={label}
+            />
+          )}
         </span>
       );
     },
@@ -1414,13 +1421,17 @@ function InstanceCard({
                 <dt className="truncate text-[10px] text-text-faint">{attribute.alias || attribute.name}</dt>
                 <dd
                   className="mt-0.5 min-w-0 truncate text-[11px] text-text-muted"
-                  title={label && label !== raw ? `${label} (${raw})` : raw}
+                  title={attribute.is_file ? undefined : label && label !== raw ? `${label} (${raw})` : raw}
                 >
-                  <AttributeValue
-                    type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
-                    value={value}
-                    label={label}
-                  />
+                  {attribute.is_file ? (
+                    <FileSummary value={value} />
+                  ) : (
+                    <AttributeValue
+                      type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
+                      value={value}
+                      label={label}
+                    />
+                  )}
                 </dd>
               </div>
             );
@@ -1512,8 +1523,13 @@ function InstanceDrawer({
     if (instanceID === null) return;
     let live = true;
     setLoading(true);
-    void getInstance(instanceID)
-      .then((got) => live && setValues({ ...(got.values ?? {}) }))
+    void Promise.all([
+      getInstance(instanceID),
+      // The ordinary read omits file values; merge them back before the form
+      // renders, otherwise opening and saving an instance would clear its files.
+      getInstanceFileValues(instanceID).catch(() => ({}) as Record<string, string>),
+    ])
+      .then(([got, files]) => live && setValues({ ...(got.values ?? {}), ...files }))
       .catch((error) => live && setErr(describeError(error, tr('无法读取实例', 'Could not load the instance'))))
       .finally(() => live && setLoading(false));
     return () => {
@@ -1613,7 +1629,16 @@ function InstanceDrawer({
                         )}
                       </Label>
                       <div className="mt-1">
-                        {referenceModel ? (
+                        {attribute.is_file ? (
+                          <FileField
+                            attribute={attribute}
+                            value={values[attribute.name]}
+                            disabled={attribute.is_computed}
+                            onChange={(_files, serialized) =>
+                              setValues((current) => ({ ...current, [attribute.name]: serialized }))
+                            }
+                          />
+                        ) : referenceModel ? (
                           <ReferencePicker
                             id={id}
                             attribute={attribute}

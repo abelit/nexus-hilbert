@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	cmdbfilebiz "github.com/ongridio/ongrid/internal/cmdb/biz/file"
 	cmdbdata "github.com/ongridio/ongrid/internal/cmdb/data"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
 	"github.com/ongridio/ongrid/internal/pkg/config"
@@ -40,7 +44,17 @@ func newTestApp(t *testing.T) (http.Handler, *auth.Signer) {
 	}
 	signer := auth.NewSigner("test-secret", time.Minute, time.Hour)
 	log := testLogger()
-	return newRouter(db, signer, buildHandlers(db, log), "test"), signer
+	return newRouter(db, signer, buildHandlers(db, log, fileOptions(t)), "test"), signer
+}
+
+func fileOptions(t *testing.T) cmdbfilebiz.Options {
+	t.Helper()
+	return cmdbfilebiz.Options{
+		DefaultLocalPath:     filepath.Join(t.TempDir(), "cmdb-files"),
+		DefaultPreviewURL:    "http://127.0.0.1:8012/onlinePreview",
+		DefaultMaxFileSizeMB: 50,
+		SignerSecret:         "test-secret",
+	}
 }
 
 func tokenFor(t *testing.T, signer *auth.Signer, admin bool) string {
@@ -253,5 +267,104 @@ func TestRunHealthcheckProbesTheLocalServer(t *testing.T) {
 	}
 	if err := runHealthcheck("127.0.0.1:1", 100*time.Millisecond); err == nil {
 		t.Fatal("runHealthcheck against a closed port succeeded")
+	}
+}
+
+func multipartUpload(t *testing.T, h http.Handler, token, filename, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("files", filename)
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(content)); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/cmdb/ci/files", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestFileUploadDownloadCapabilityAndDelete(t *testing.T) {
+	app, signer := newTestApp(t)
+	token := tokenFor(t, signer, false)
+
+	upload := multipartUpload(t, app, token, "report.txt", "hello attachment")
+	if upload.Code != http.StatusOK {
+		t.Fatalf("upload = %d %s", upload.Code, upload.Body.String())
+	}
+	var uploaded struct {
+		Files []struct {
+			FileID string `json:"file_id"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(upload.Body.Bytes(), &uploaded); err != nil || len(uploaded.Files) != 1 {
+		t.Fatalf("upload body = %s (%v)", upload.Body.String(), err)
+	}
+	fileID := uploaded.Files[0].FileID
+	if fileID == "" {
+		t.Fatal("upload returned an empty file_id")
+	}
+
+	download := request(t, app, http.MethodGet, "/api/v1/cmdb/ci/files?file_id="+url.QueryEscape(fileID), token, "")
+	if download.Code != http.StatusOK || download.Body.String() != "hello attachment" {
+		t.Fatalf("download = %d %q", download.Code, download.Body.String())
+	}
+	if got := download.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("nosniff = %q", got)
+	}
+
+	preview := request(t, app, http.MethodPost, "/api/v1/cmdb/ci/files/preview-url", token, `{"file_id":"`+fileID+`"}`)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview-url = %d %s", preview.Code, preview.Body.String())
+	}
+	var link struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &link); err != nil || link.URL == "" {
+		t.Fatalf("preview link = %s (%v)", preview.Body.String(), err)
+	}
+	public := request(t, app, http.MethodGet, link.URL, "", "")
+	if public.Code != http.StatusOK || public.Body.String() != "hello attachment" {
+		t.Fatalf("public capability = %d %q", public.Code, public.Body.String())
+	}
+
+	remove := request(t, app, http.MethodDelete, "/api/v1/cmdb/ci/files", token, `{"files":[{"file_id":"`+fileID+`"}]}`)
+	if remove.Code != http.StatusOK {
+		t.Fatalf("delete = %d %s", remove.Code, remove.Body.String())
+	}
+	missing := request(t, app, http.MethodGet, "/api/v1/cmdb/ci/files?file_id="+url.QueryEscape(fileID), token, "")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("download after delete = %d %s", missing.Code, missing.Body.String())
+	}
+}
+
+func TestFileSettingsPermissions(t *testing.T) {
+	app, signer := newTestApp(t)
+	admin := tokenFor(t, signer, true)
+	user := tokenFor(t, signer, false)
+
+	if rec := request(t, app, http.MethodGet, "/api/v1/cmdb/file-storage", admin, ""); rec.Code != http.StatusOK {
+		t.Fatalf("admin storage = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := request(t, app, http.MethodGet, "/api/v1/cmdb/file-storage", user, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("user storage = %d, want 403", rec.Code)
+	}
+	if rec := request(t, app, http.MethodGet, "/api/v1/cmdb/file-preview", user, ""); rec.Code != http.StatusOK {
+		t.Fatalf("user preview = %d %s", rec.Code, rec.Body.String())
+	}
+	body := `{"preview_server_url":"http://kk.example/onlinePreview","force_updated_cache_types":["txt"]}`
+	if rec := request(t, app, http.MethodPut, "/api/v1/cmdb/file-preview", admin, body); rec.Code != http.StatusOK {
+		t.Fatalf("admin preview save = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := request(t, app, http.MethodPut, "/api/v1/cmdb/file-preview", user, body); rec.Code != http.StatusForbidden {
+		t.Fatalf("user preview save = %d, want 403", rec.Code)
 	}
 }

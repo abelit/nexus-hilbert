@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Boxes, Database, FileUp, GitBranch, History, Inbox, Layers3, ListTree, Network, Radar, Rss, Search, Server, Share2, Waypoints } from 'lucide-react';
+import { Boxes, Database, FileUp, GitBranch, History, Inbox, ListTree, Network, Radar, Rss, Search, Server, Share2, Waypoints } from 'lucide-react';
 
 import type { IconType } from '@/lib/icon';
 import { useI18n } from '@/i18n/locale';
@@ -24,7 +24,6 @@ const RelationTypesPage = lazy(() => import('./pages/RelationTypes'));
 const ModelsPage = lazy(() => import('./pages/Models'));
 const ModelDetailPage = lazy(() => import('./pages/ModelDetail'));
 const ModelRelationsPage = lazy(() => import('./pages/ModelRelations'));
-const ServiceTreesPage = lazy(() => import('./pages/ServiceTrees'));
 const PreferencesPage = lazy(() => import('./pages/Preferences'));
 const SubscriptionsPage = lazy(() => import('./pages/Subscriptions'));
 const InstancesPage = lazy(() => import('./pages/Instances'));
@@ -114,13 +113,10 @@ export const cmdbRoutes: CMDBRoute[] = [
       </PageShell>
     ),
   },
+  // Definitions are edited inside the relation view now; old bookmarks follow.
   {
     path: '/cmdb/service-trees',
-    element: (
-      <PageShell>
-        <ServiceTreesPage />
-      </PageShell>
-    ),
+    element: <Navigate to="/cmdb/service-tree" replace />,
   },
   {
     path: '/cmdb/preferences',
@@ -278,7 +274,6 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
       { key: 'models', to: '/cmdb/models', icon: Boxes, label: tr('模型配置', 'Model configuration'), group: tr('模型管理', 'Models') },
       { key: 'relations', to: '/cmdb/relations', icon: Share2, label: tr('关系', 'Relations'), group: tr('模型管理', 'Models') },
       { key: 'relation-types', to: '/cmdb/relation-types', icon: GitBranch, label: tr('关系类型', 'Relation types'), group: tr('模型管理', 'Models') },
-      { key: 'service-trees', to: '/cmdb/service-trees', icon: Layers3, label: tr('服务树定义', 'Tree definitions'), group: tr('模型管理', 'Models') },
       { key: 'preferences', to: '/cmdb/preferences', icon: Rss, label: tr('我的订阅', 'My subscriptions'), group: tr('模型管理', 'Models') },
       { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources'), group: tr('资源管理', 'Resources') },
       { key: 'batch', to: '/cmdb/batch', icon: FileUp, label: tr('批量导入', 'Batch import'), group: tr('资源管理', 'Resources') },
@@ -325,13 +320,6 @@ export const cmdbPaletteRoutes: Array<{
     group: 'CMDB',
   },
   {
-    path: '/cmdb/service-trees',
-    zh: 'CMDB / 服务树定义',
-    en: 'CMDB / Tree definitions',
-    keywords: ['cmdb', 'service tree', 'shu', 'dingyi'],
-    group: 'CMDB',
-  },
-  {
     path: '/cmdb/preferences',
     zh: 'CMDB / 我的订阅',
     en: 'CMDB / My subscriptions',
@@ -370,7 +358,7 @@ export const cmdbPaletteRoutes: Array<{
     path: '/cmdb/service-tree',
     zh: 'CMDB / 关系视图',
     en: 'CMDB / Relation views',
-    keywords: ['cmdb', 'service tree', 'relation view', 'guanxi', 'fuwushu'],
+    keywords: ['cmdb', 'service tree', 'tree definitions', 'relation view', 'guanxi', 'fuwushu', 'shu', 'dingyi'],
     group: 'CMDB',
   },
   {

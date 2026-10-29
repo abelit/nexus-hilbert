@@ -154,6 +154,19 @@ ensure_pcap_parser_upgrade_env() {
     fi
 }
 
+ensure_file_services_upgrade_env() {
+    local secret
+    secret=$(grep -E '^RUSTFS_SECRET_KEY=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    if [[ -z "$secret" ]]; then
+        secret=$(openssl rand -base64 48 | tr -d '=+/\n' | cut -c1-32) || {
+            log_error "could not generate RUSTFS_SECRET_KEY"
+            return 1
+        }
+        set_env_value RUSTFS_SECRET_KEY "$secret"
+        log_info "backfilled RUSTFS_SECRET_KEY"
+    fi
+}
+
 host_from_url() {
     local url="$1" hostport host
     hostport="${url#*://}"
@@ -408,6 +421,7 @@ fi
 # Compose inputs before rendering or pulling the new stack so a missing value
 # cannot take the running version down during an upgrade.
 ensure_pcap_parser_upgrade_env
+ensure_file_services_upgrade_env
 
 # Download, extract, and checksum the Edge payload while the current service is
 # still online. A network, architecture, or checksum failure therefore leaves

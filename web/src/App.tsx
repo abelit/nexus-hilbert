@@ -56,6 +56,8 @@ const SettingsNotifications = lazy(() => import('@/pages/settings/Notifications'
 const SettingsChannels = lazy(() => import('@/pages/settings/Channels'));
 const SettingsIntegrations = lazy(() => import('@/pages/settings/Integrations'));
 const SettingsGeneral = lazy(() => import('@/pages/settings/General'));
+const SettingsFileStorage = lazy(() => import('@/pages/settings/FileStorage'));
+const SettingsFilePreview = lazy(() => import('@/pages/settings/FilePreview'));
 const SettingsPreferences = lazy(() => import('@/pages/settings/Preferences'));
 const SettingsAgent = lazy(() => import('@/pages/settings/Agent'));
 const SettingsAbout = lazy(() => import('@/pages/settings/About'));
@@ -197,6 +199,8 @@ export default function App() {
           <Route path="channels" element={<SettingsChannels />} />
           <Route path="integrations" element={<SettingsIntegrations />} />
           <Route path="general" element={<SettingsGeneral />} />
+          <Route path="file-storage" element={<SettingsFileStorage />} />
+          <Route path="file-preview" element={<SettingsFilePreview />} />
           <Route path="health" element={<SettingsHealth />} />
           <Route path="upgrade" element={<SettingsUpgrade />} />
           {/* /settings/marketplace retired (2026-05-19). Install surface

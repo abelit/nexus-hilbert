@@ -145,6 +145,28 @@ func TestBuildGraphWalksBothDirectionsAndDeduplicates(t *testing.T) {
 	}
 }
 
+// Cantor wrote the central model at path level "0". The graph does not walk
+// it — CentralNodeType already seeds the roots — but existing views must still
+// load rather than fail validation when the console upgrades.
+func TestBuildGraphAcceptsTheCentralLevelZero(t *testing.T) {
+	q := graphFixture()
+	got, err := BuildGraph(context.Background(), q, GraphInput{
+		CentralNodeType:      1,
+		CentralNodeInstances: "web",
+		Path: map[string][]model.ID{
+			"0":  {1},
+			"1":  {2},
+			"-1": {4},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildGraph: %v", err)
+	}
+	if len(got.Nodes) != 4 || len(got.Links) != 2 {
+		t.Fatalf("graph = %+v, want the same 4 nodes and 2 links as without level 0", got)
+	}
+}
+
 func TestBuildGraphRefusesTooManyRoots(t *testing.T) {
 	q := graphFixture()
 	q.roots = make([]Node, MaxRoots+1)

@@ -79,6 +79,8 @@ type Props<T, G extends SortableGroup> = {
   canDragItem?(item: T): boolean;
   /** Blocks a drop into a different group when false. */
   allowCrossGroup?: boolean;
+  /** Called after Esc or another cancelled drag so the caller can restore. */
+  onCancel?(): void;
   /** Layout for one group's children; defaults to a vertical list. */
   itemsClassName?: string;
 };
@@ -96,6 +98,7 @@ export function GroupedSortable<T, G extends SortableGroup = SortableGroup>({
   canDragGroup,
   canDragItem,
   allowCrossGroup = true,
+  onCancel,
   itemsClassName = 'space-y-0.5',
 }: Props<T, G>) {
   const [active, setActive] = useState<DragSource | null>(null);
@@ -164,6 +167,7 @@ export function GroupedSortable<T, G extends SortableGroup = SortableGroup>({
   const cancel = () => {
     sourceRef.current = null;
     setActive(null);
+    onCancel?.();
   };
 
   return (

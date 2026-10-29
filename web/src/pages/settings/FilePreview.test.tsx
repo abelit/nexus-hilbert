@@ -1,0 +1,45 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import SettingsFilePreview from './FilePreview';
+
+const fetchMock = vi.fn();
+const saveMock = vi.fn();
+const testMock = vi.fn();
+
+vi.mock('@/cmdb/api/files', () => ({
+  fetchFilePreviewConfig: () => fetchMock(),
+  saveFilePreviewConfig: (patch: unknown) => saveMock(patch),
+  testFilePreviewConfig: (url: string) => testMock(url),
+}));
+
+const config = {
+  preview_server_url: 'http://kk:8012/onlinePreview',
+  force_updated_cache_types: ['txt', 'md'],
+};
+
+beforeEach(() => {
+  localStorage.clear();
+  localStorage.setItem('ongrid-locale', 'zh-CN');
+  fetchMock.mockReset().mockResolvedValue(config);
+  saveMock.mockReset().mockImplementation((patch) => Promise.resolve({ ...config, ...(patch as object) }));
+  testMock.mockReset().mockResolvedValue({ ok: true, error: '' });
+});
+
+describe('file preview settings', () => {
+  it('tests and saves the preview endpoint', async () => {
+    const user = userEvent.setup();
+    render(<SettingsFilePreview />);
+    const input = await screen.findByLabelText('预览服务地址');
+    await user.clear(input);
+    await user.type(input, 'http://kk.local/onlinePreview');
+    await user.click(screen.getByRole('button', { name: '测试连接' }));
+    await waitFor(() => expect(testMock).toHaveBeenCalledWith('http://kk.local/onlinePreview'));
+    expect(await screen.findByText('预览服务可访问。')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(expect.objectContaining({ preview_server_url: 'http://kk.local/onlinePreview' })),
+    );
+  });
+});

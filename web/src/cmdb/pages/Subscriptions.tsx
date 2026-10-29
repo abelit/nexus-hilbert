@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronDown,
   Database,
@@ -41,7 +42,8 @@ import {
   type TreeLevel,
 } from '../api/preferences';
 import { CMDBIcon } from '../components/CMDBIcon';
-import { GroupedSortable, type DragSource, type SortableHandle } from '../components/GroupedSortable';
+import { DragHandle } from '../components/DragHandle';
+import { GroupedSortable, type DragSource } from '../components/GroupedSortable';
 import { AutoSubscriptionModal } from '../components/preferences/AutoSubscriptionModal';
 import { SubscriptionEditor, type EditorTab } from '../components/preferences/SubscriptionEditor';
 import { useToast } from '../components/Toast';
@@ -164,7 +166,14 @@ export function subscriptionDragPlan(source: DragSource, next: SubscriptionSecti
   return { order, setMembers: { groupID: target.groupID, typeIDs: target.items.map((model) => model.id) } };
 }
 
-export default function SubscriptionsPage({ embedded = false }: { embedded?: boolean } = {}) {
+export default function SubscriptionsPage({
+  embedded = false,
+  headerActionsTarget = null,
+}: {
+  embedded?: boolean;
+  /** When embedded, the page header owns the refresh and auto-subscribe slot. */
+  headerActionsTarget?: HTMLElement | null;
+} = {}) {
   const { tr } = useI18n();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
@@ -559,7 +568,9 @@ export default function SubscriptionsPage({ embedded = false }: { embedded?: boo
       )}
 
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
-        {embedded && <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{actions}</div>}
+        {embedded && !headerActionsTarget && (
+          <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{actions}</div>
+        )}
         {err && (
           <div role="alert" className="mb-4 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
             {err}
@@ -980,6 +991,10 @@ export default function SubscriptionsPage({ embedded = false }: { embedded?: boo
         />
       )}
 
+      {embedded && headerActionsTarget
+        ? createPortal(actions, headerActionsTarget)
+        : null}
+
       {dialog}
     </div>
   );
@@ -1015,33 +1030,5 @@ function SectionHeader({ icon, title, count }: { icon: ReactNode; title: string;
       <h3 className="text-sm font-medium text-text">{title}</h3>
       <Chip>{count}</Chip>
     </div>
-  );
-}
-
-/** The grip is the only activator; the row's buttons keep their own actions. */
-function DragHandle({
-  handle,
-  label,
-  className,
-}: {
-  handle: SortableHandle;
-  label: string;
-  className?: string;
-}) {
-  if (!handle.draggable) return <span className="inline-block size-6 shrink-0" aria-hidden="true" />;
-  return (
-    <button
-      type="button"
-      {...handle.attributes}
-      {...handle.listeners}
-      aria-label={label}
-      title={label}
-      className={cn(
-        'inline-flex size-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-text-faint hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 active:cursor-grabbing',
-        className,
-      )}
-    >
-      <GripVertical size={12} aria-hidden="true" />
-    </button>
   );
 }

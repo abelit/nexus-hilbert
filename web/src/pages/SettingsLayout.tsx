@@ -9,8 +9,10 @@ import {
   MessagesSquare,
   Gauge,
   HeartPulse,
+  HardDrive,
   Info,
   Lock,
+  MonitorPlay,
   Plug,
   Shield,
   SlidersHorizontal,
@@ -39,6 +41,8 @@ const RAIL_ITEMS: RailItem[] = [
   { to: 'upgrade', icon: UploadCloud, labelZh: '升级', labelEn: 'Upgrade', hintZh: '检测版本 / 复制命令', hintEn: 'Check version / copy command' },
   { to: 'integrations', icon: Plug, labelZh: '集成', labelEn: 'Integrations', hintZh: 'Prometheus / Grafana 等外部系统', hintEn: 'External systems — Prometheus / Grafana / etc.' },
   { to: 'general', icon: SlidersHorizontal, labelZh: '全局配置', labelEn: 'Global', hintZh: '平台级基础能力开关', hintEn: 'Platform-wide capability controls' },
+  { to: 'file-storage', icon: HardDrive, labelZh: '文件存储', labelEn: 'File storage', hintZh: '附件本地卷 / S3 兼容存储', hintEn: 'Attachments — local volume / S3-compatible storage' },
+  { to: 'file-preview', icon: MonitorPlay, labelZh: '文件预览', labelEn: 'File preview', hintZh: 'kkFileView 在线预览服务', hintEn: 'kkFileView online preview service' },
   // marketplace entry retired 2026-05-19 — install/uninstall moved to
   // /skills?tab=install so the whole skill story (loaded + installed)
   // lives on one page. The Settings route still redirects bookmarks.
@@ -87,7 +91,7 @@ export default function SettingsLayout() {
             className={cn(
               'border-zinc-800 bg-zinc-950/40',
               'lg:h-full lg:overflow-y-auto lg:border-r',
-              'flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-3 lg:flex-col lg:gap-0.5 lg:px-3 lg:py-4'
+              'flex shrink-0 items-start gap-1 overflow-x-auto border-b px-3 py-3 lg:flex-col lg:items-stretch lg:gap-0.5 lg:px-3 lg:py-4'
             )}
           >
             {RAIL_ITEMS.map((item) => (

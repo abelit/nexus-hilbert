@@ -172,7 +172,11 @@ v0.7.45 起所有有状态服务（MySQL / Prometheus / Loki / Tempo / qdrant / 
 ├── loki/         # Loki chunks (uid 10001)
 ├── tempo/        # Tempo blocks (uid 10001)
 ├── qdrant/       # 向量 collection (root)
-└── grafana/      # Grafana SQLite + plugins (uid 472)
+├── grafana/      # Grafana SQLite + plugins (uid 472)
+├── cmdb-files/   # CMDB 文件属性附件 (uid 65532)
+├── rustfs/       # 内置 RustFS 对象存储 (uid 10001)
+├── pages/        # AI 生成页面 (uid 65532)
+└── chat-attachments/ # 会话图片附件 (uid 65532)
 
 /var/log/ongrid/  # manager slog 输出，可被宿主机 Collector / Vector / Fluent Bit 直接抓取
 ```
@@ -198,6 +202,12 @@ sudo tar czf /backup/prom-$(date +%F).tar.gz -C /var/lib/ongrid/prometheus .
 
 # Loki / Tempo / qdrant 同理
 sudo tar czf /backup/loki-$(date +%F).tar.gz   -C /var/lib/ongrid/loki .
+
+# CMDB 文件属性附件（选择本地存储时）
+sudo tar czf /backup/cmdb-files-$(date +%F).tar.gz -C /var/lib/ongrid/cmdb-files .
+
+# 内置 RustFS 对象存储（选择 S3 时）
+sudo tar czf /backup/rustfs-$(date +%F).tar.gz -C /var/lib/ongrid/rustfs .
 sudo tar czf /backup/tempo-$(date +%F).tar.gz  -C /var/lib/ongrid/tempo .
 sudo tar czf /backup/qdrant-$(date +%F).tar.gz -C /var/lib/ongrid/qdrant .
 ```

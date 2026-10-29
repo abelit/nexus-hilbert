@@ -14,6 +14,7 @@ import type { AttributeGroup, CIType, TypeAttribute } from '../../api/citype';
 import { listAttributeGroups, listCITypes, listTypeAttributes } from '../../api/citype';
 import { describeError } from '../../api/http';
 import { getInstance, updateInstance, type Instance } from '../../api/instance';
+import { getInstanceFileValues } from '../../api/files';
 import { choiceText } from '../../lib/choice-labels';
 import { displayValue } from '../../lib/valuetype';
 import { CMDBIcon } from '../CMDBIcon';
@@ -108,9 +109,15 @@ export function InstanceDetailDrawer({
     const id = subject.id;
     setLoading(true);
     setError(null);
-    void getInstance(id)
-      .then((got) => {
-        if (live) setLoaded({ id, instance: got });
+    void Promise.all([
+      getInstance(id),
+      // File values are deliberately omitted from the ordinary instance read;
+      // fetch them separately so an existing attachment list is not replaced
+      // with an empty form on the next save.
+      getInstanceFileValues(id).catch(() => ({}) as Record<string, string>),
+    ])
+      .then(([got, files]) => {
+        if (live) setLoaded({ id, instance: { ...got, values: { ...got.values, ...files } } });
       })
       .catch((err) => {
         if (live) setError(describeError(err, tr('无法读取实例', 'Could not load the instance')));
@@ -185,9 +192,16 @@ export function InstanceDetailDrawer({
       );
       toast.success(tr('已保存', 'Saved'));
       onInstanceSaved?.(target);
-      void getInstance(target)
-        .then((got) => {
-          setLoaded((current) => (current && current.id === target ? { id: target, instance: got } : current));
+      void Promise.all([
+        getInstance(target),
+        getInstanceFileValues(target).catch(() => ({}) as Record<string, string>),
+      ])
+        .then(([got, files]) => {
+          setLoaded((current) =>
+            current && current.id === target
+              ? { id: target, instance: { ...got, values: { ...got.values, ...files } } }
+              : current,
+          );
         })
         .catch(() => undefined);
     },

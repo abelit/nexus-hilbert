@@ -101,6 +101,8 @@ ongrid_prepare_data_directories() {
         "$data_dir/embeddings" \
         "$data_dir/skills" \
         "$data_dir/pages" \
+        "$data_dir/cmdb-files" \
+        "$data_dir/rustfs" \
         "$data_dir/packet-captures" \
         "$data_dir/chat-attachments" \
         "$data_dir/workspace" \
@@ -122,6 +124,8 @@ ongrid_prepare_data_directories() {
     ongrid_ensure_path_owner 65532:65532 "$data_dir/embeddings" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/skills" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/pages" || failed=1
+    ongrid_ensure_path_owner 65532:65532 "$data_dir/cmdb-files" || failed=1
+    ongrid_ensure_path_owner 10001:10001 "$data_dir/rustfs" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/packet-captures" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/chat-attachments" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/workspace" || failed=1
@@ -148,6 +152,8 @@ ongrid_repair_data_permissions() {
     ongrid_chown_tree_required 65532:65532 "$data_dir/embeddings" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/skills" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/pages" || failed=1
+    ongrid_chown_tree_required 65532:65532 "$data_dir/cmdb-files" || failed=1
+    ongrid_chown_tree_required 10001:10001 "$data_dir/rustfs" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/packet-captures" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/chat-attachments" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/workspace" || failed=1

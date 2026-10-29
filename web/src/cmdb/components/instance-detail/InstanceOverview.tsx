@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 import type { AttributeGroup, CIType, TypeAttribute } from '../../api/citype';
 import type { Instance } from '../../api/instance';
 import { AttributeValue } from '../AttributeControl';
+import { FileField } from '../files/FileField';
 import { attributeSections } from '../../lib/attribute-sections';
 import { choiceText } from '../../lib/choice-labels';
 import { referenceRawText, referenceText, useReferenceLabels } from '../../lib/reference-labels';
@@ -150,7 +151,16 @@ export function InstanceOverview({
                       )}
                     </dt>
                     <dd className="min-w-0 break-words text-xs text-text">
-                      {editingRow ? (
+                      {attribute.is_file ? (
+                        <FileField
+                          attribute={attribute}
+                          value={value}
+                          disabled={!onSaveValue || attribute.is_computed}
+                          onChange={(_files, serialized) =>
+                            onSaveValue ? onSaveValue(attribute.name, serialized) : undefined
+                          }
+                        />
+                      ) : editingRow ? (
                         <AttributeInlineEditor
                           attribute={attribute}
                           value={value}

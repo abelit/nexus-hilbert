@@ -62,6 +62,39 @@ type Config struct {
 	Profiles       ProfilesConfig
 	PacketCapture  PacketCaptureConfig
 	Skills         SkillsConfig
+	FileStorage    CMDBFileStorageConfig
+}
+
+// CMDBFileStorageConfig holds process-level defaults for the standalone CMDB
+// service's attachment store. The admin settings page can override the saved
+// storage backend and S3 connection; these values are the first-boot local
+// directory and the default kkFileView endpoint.
+type CMDBFileStorageConfig struct {
+	// LocalDir is the directory used when the local backend is selected.
+	// env: ONGRID_CMDB_FILE_DIR; default /var/lib/ongrid/cmdb-files.
+	LocalDir string
+	// Backend is the first-boot storage backend (local or s3). env:
+	// ONGRID_CMDB_FILE_BACKEND; default local.
+	Backend string
+	// S3* are first-boot S3 defaults. They prefill the admin form even when
+	// the local backend is active, so switching to S3 is one click.
+	// env: ONGRID_CMDB_S3_*.
+	S3EndpointURL string
+	S3AccessKey   string
+	S3SecretKey   string
+	S3BucketName  string
+	S3Region      string
+	S3UseSSL      bool
+	// PreviewURL is the browser-facing kkFileView endpoint. env:
+	// ONGRID_CMDB_FILE_PREVIEW_URL; empty derives from ONGRID_PUBLIC_URL.
+	PreviewURL string
+	// PreviewInternalURL is how the CMDB process reaches the bundled
+	// kkFileView for the settings "test connection" action. env:
+	// ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL.
+	PreviewInternalURL string
+	// MaxFileSizeMB bounds one attachment before the saved setting exists.
+	// env: ONGRID_CMDB_FILE_MAX_MB; default 50.
+	MaxFileSizeMB int
 }
 
 // SkillsConfig wires the manager-side subprocess skill loader. The
@@ -474,6 +507,19 @@ func Load() (*Config, error) {
 		Logs:                    LogsConfig{URL: getOptionalURL("ONGRID_LOG_QUERY_URL", "http://loki:3100")},
 		Traces:                  TracesConfig{URL: getOptionalURL("ONGRID_TRACE_QUERY_URL", "http://tempo:3200")},
 		Profiles:                ProfilesConfig{URL: getOptionalURL("ONGRID_PROFILE_QUERY_URL", "http://pyroscope:4040")},
+		FileStorage: CMDBFileStorageConfig{
+			LocalDir:           getEnv("ONGRID_CMDB_FILE_DIR", "/var/lib/ongrid/cmdb-files"),
+			Backend:            getEnv("ONGRID_CMDB_FILE_BACKEND", "local"),
+			S3EndpointURL:      getEnv("ONGRID_CMDB_S3_ENDPOINT_URL", ""),
+			S3AccessKey:        getEnv("ONGRID_CMDB_S3_ACCESS_KEY", ""),
+			S3SecretKey:        getEnv("ONGRID_CMDB_S3_SECRET_KEY", ""),
+			S3BucketName:       getEnv("ONGRID_CMDB_S3_BUCKET_NAME", "cmdb-files"),
+			S3Region:           getEnv("ONGRID_CMDB_S3_REGION", "us-east-1"),
+			S3UseSSL:           getEnvBool("ONGRID_CMDB_S3_USE_SSL", true),
+			PreviewURL:         getEnv("ONGRID_CMDB_FILE_PREVIEW_URL", ""),
+			PreviewInternalURL: getEnv("ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL", ""),
+			MaxFileSizeMB:      getEnvInt("ONGRID_CMDB_FILE_MAX_MB", 50),
+		},
 		PacketCapture: PacketCaptureConfig{
 			RawDir:                      getEnv("ONGRID_PACKET_CAPTURE_RAW_DIR", ""),
 			ParserURL:                   getEnv("ONGRID_PACKET_PARSER_URL", ""),
@@ -486,6 +532,13 @@ func Load() (*Config, error) {
 			ParserMaxBytes:              uint64(getEnvInt("ONGRID_PACKET_PARSER_MAX_BYTES", 64<<20)),
 			ParserIncludeHex:            getEnvBool("ONGRID_PACKET_PARSER_INCLUDE_HEX", true),
 		},
+	}
+
+	if strings.TrimSpace(c.FileStorage.PreviewURL) == "" {
+		c.FileStorage.PreviewURL = "/file-preview/onlinePreview"
+		if base := strings.TrimRight(strings.TrimSpace(c.PublicURL), "/"); base != "" {
+			c.FileStorage.PreviewURL = base + "/file-preview/onlinePreview"
+		}
 	}
 
 	c.DB.Dialect = getEnv("ONGRID_DB_DIALECT", "mysql")

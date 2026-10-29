@@ -7,6 +7,7 @@ import (
 	"github.com/ongridio/ongrid/internal/cmdb/server/ci"
 	"github.com/ongridio/ongrid/internal/cmdb/server/citype"
 	"github.com/ongridio/ongrid/internal/cmdb/server/discovery"
+	"github.com/ongridio/ongrid/internal/cmdb/server/file"
 	"github.com/ongridio/ongrid/internal/cmdb/server/history"
 	"github.com/ongridio/ongrid/internal/cmdb/server/meta"
 	"github.com/ongridio/ongrid/internal/cmdb/server/relationtype"
@@ -22,6 +23,7 @@ type Handlers struct {
 	Topology     *topology.Handler
 	CIType       *citype.Handler
 	CI           *ci.Handler
+	File         *file.Handler
 }
 
 // RegisterAll mounts every CMDB handler on r.
@@ -39,7 +41,7 @@ func RegisterAll(r chi.Router, h Handlers) {
 		panic("cmdb server: RegisterAll called with a nil router")
 	}
 	if h.Meta == nil || h.RelationType == nil || h.Discovery == nil || h.History == nil ||
-		h.Topology == nil || h.CIType == nil || h.CI == nil {
+		h.Topology == nil || h.CIType == nil || h.CI == nil || h.File == nil {
 		panic("cmdb server: RegisterAll called with an incomplete Handlers set")
 	}
 	h.Meta.Register(r)
@@ -49,4 +51,5 @@ func RegisterAll(r chi.Router, h Handlers) {
 	h.Topology.Register(r)
 	h.CIType.Register(r)
 	h.CI.Register(r)
+	h.File.Register(r)
 }

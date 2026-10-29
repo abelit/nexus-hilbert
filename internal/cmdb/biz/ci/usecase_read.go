@@ -97,6 +97,18 @@ type InstancePage struct {
 // the value tables remain authoritative, and the fallback is one query for the
 // page, not one per row.
 func (u *Usecase) ListByType(ctx context.Context, ref string, page, size int, fields []string, key RetKey) (*InstancePage, error) {
+	return u.listByType(ctx, ref, page, size, fields, key, false)
+}
+
+// ListByTypeWithFiles is ListByType plus the file-attribute metadata. File
+// values are normally omitted for the same reason passwords are; the resource
+// table opts in explicitly because it shows a file count, not the stored
+// payload.
+func (u *Usecase) ListByTypeWithFiles(ctx context.Context, ref string, page, size int, fields []string, key RetKey) (*InstancePage, error) {
+	return u.listByType(ctx, ref, page, size, fields, key, true)
+}
+
+func (u *Usecase) listByType(ctx context.Context, ref string, page, size int, fields []string, key RetKey, includeFiles bool) (*InstancePage, error) {
 	if u.repo == nil || u.types == nil {
 		return nil, errs.ErrNotWiredYet
 	}
@@ -128,6 +140,14 @@ func (u *Usecase) ListByType(ctx context.Context, ref string, page, size int, fi
 	// was asked for that a snapshot cannot answer.
 	wanted := fieldSet(fields)
 	missing := false
+	if includeFiles {
+		for _, spec := range set.Specs {
+			if spec.IsFile {
+				missing = true
+				break
+			}
+		}
+	}
 	// AN EMPTY PROJECTION STILL NEEDS THE FALLBACK WHEN THE SNAPSHOT IS EMPTY.
 	// The loop below has nothing to check for a caller that asked for no fields,
 	// so an adopted or imported row — whose document column was never rendered —
@@ -164,7 +184,7 @@ func (u *Usecase) ListByType(ctx context.Context, ref string, page, size int, fi
 	}
 
 	for _, row := range rows {
-		item, err := u.renderInstance(set, row, fallback[row.ID], wanted, key)
+		item, err := u.renderInstance(set, row, fallback[row.ID], wanted, key, includeFiles)
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +239,7 @@ func (u *Usecase) Get(ctx context.Context, ciID model.ID, fields []string, key R
 		rows = byCI[ciID]
 	}
 
-	item, err := u.renderInstance(set, *ci, rows, wanted, key)
+	item, err := u.renderInstance(set, *ci, rows, wanted, key, false)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +253,7 @@ func (u *Usecase) Get(ctx context.Context, ciID model.ID, fields []string, key R
 // decision rather than a rule each endpoint has to remember. The snapshot
 // already omits secrets — BuildPropsDocument skips them — but the fallback read
 // does not, and it is exactly the path a later change would forget.
-func (u *Usecase) renderInstance(set *AttributeSet, ci cimodel.CI, fallbackRows []ValueRow, fields map[string]bool, key RetKey) (Instance, error) {
+func (u *Usecase) renderInstance(set *AttributeSet, ci cimodel.CI, fallbackRows []ValueRow, fields map[string]bool, key RetKey, includeFiles bool) (Instance, error) {
 	out := Instance{
 		ID: ci.ID, TypeID: ci.TypeID, CreatedAt: ci.CreatedAt, UpdatedAt: ci.UpdatedAt,
 		UpdatedBy: updatedBy(ci),
@@ -271,8 +291,10 @@ func (u *Usecase) renderInstance(set *AttributeSet, ci cimodel.CI, fallbackRows 
 		}
 		// Secrets, opaque file handles and outbound links never leave this
 		// function. cantor served them from a dedicated endpoint that the
-		// console calls only when a person asks to see the value.
-		if !spec.Modifiers().IsPasswordSafe() {
+		// console calls only when a person asks to see the value. The resource
+		// table opts into file metadata explicitly; passwords and outbound links
+		// never get that exception.
+		if !spec.Modifiers().IsPasswordSafe() && !(includeFiles && spec.IsFile) {
 			continue
 		}
 		if fields != nil && !fields[spec.Name] && !fields[spec.Alias] {

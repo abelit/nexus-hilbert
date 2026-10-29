@@ -1,248 +1,834 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { RefreshCw } from 'lucide-react';
+import {
+  ChevronRight,
+  CircleDot,
+  GitFork,
+  ListChecks,
+  ListTree,
+  Network,
+  PanelRightClose,
+  Pencil,
+  PanelRightOpen,
+  Plus,
+  Radar,
+  RefreshCw,
+  RotateCcw,
+  Waypoints,
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
-import { Button } from '@/components/ui';
-import { Card } from '@/components/ui/Card';
+import { Button, EmptyStateCard } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
-import { PageHeader } from '@/components/ui/PageHeader';
+import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
+import { cn } from '@/lib/cn';
+import { usePermissions } from '@/store/me';
 
-import { listCITypes, listTypeAttributes, type CIType, type TypeAttribute } from '../api/citype';
-import { getInstance, type SearchRow } from '../api/instance';
-import { listServiceTrees, type ServiceTree } from '../api/preferences';
-import { AttributeValue } from '../components/AttributeControl';
-import { InstanceTree } from '../components/InstanceTree';
+import { listCITypes, listRelations, type CIType, type ModelRelation } from '../api/citype';
 import { describeError } from '../api/http';
-import { displayValue, isValueTypeCode } from '../lib/valuetype';
+import {
+  createServiceTree,
+  deleteServiceTree,
+  listServiceTrees,
+  updateServiceTree,
+  type ServiceTree,
+  type TypePair,
+} from '../api/preferences';
+import { MetaPill } from '../components/MetaPill';
+import { DefinitionCard } from '../components/service-tree/DefinitionCard';
+import { DefinitionDialog } from '../components/service-tree/DefinitionDialog';
+import { DefinitionPairsDialog } from '../components/service-tree/DefinitionPairsDialog';
+import { RelationGraph } from '../components/service-tree/RelationGraph';
+import { useToast } from '../components/Toast';
+import { WorkspaceBar } from '../components/WorkspaceBar';
+import {
+  buildModelGraph,
+  definitionModelIDs,
+  definitionRoot,
+  layoutModelGraph,
+  pairKey,
+  pairKeys,
+  pairsFromSelection,
+  serviceTreeChainTokens,
+  type LayoutMode,
+} from '../lib/model-relation-graph';
 
-// 服务树 — a tree shaped by a definition.
+// 关系视图 — the model-relation canvas and the saved definitions on top of it.
 //
-// IT IS THE SAME WALK AS 资源层级 WITH A DIFFERENT STARTING POINT. A definition
-// names the model pairs (机房 → 机柜 → 主机); the top model's instances are the
-// roots and the chain's length is how far the tree may go. That is the whole
-// difference, which is why the tree itself is one shared component.
+// CANTOR'S SERVICE-TREE PAGE IS THE REFERENCE: the canvas is the CI-type graph,
+// the right rail holds saved definitions as cards, and a definition highlights
+// its chain. The console keeps the same interaction and adds a searchable rail,
+// a definition-click highlight and a node-selection editor for the pairs.
 //
-// A DEFINITION THAT NO LONGER RESOLVES STILL APPEARS. The backend refuses to save
-// one that names a missing relation, but an adopted database can hold one — and
-// a page that hides it leaves the operator unable to see, let alone fix, the
-// entry that is broken.
+// THE DEFINITION IS STILL A SET OF MODEL PAIRS, not instances. Editing selects
+// models on the canvas and derives every live relation between the selected
+// ones; the instance walk stays the resource tree's job.
+//
+// THE EXACT-PAIR EDITOR IS PART OF THIS PAGE, not a second page. The old
+// “tree definitions” table was the only way to repair a branch or drop a stale
+// pair, so its editor now opens from the definition cards and the canvas edit
+// bar. One navigation entry, one save flow, one place to understand.
 
-const MAX_LEVELS = 8;
+const LAYOUT_OPTIONS: Array<{ value: LayoutMode; label: [string, string]; icon: typeof ListTree }> = [
+  { value: 'tree', label: ['树形', 'Tree'], icon: ListTree },
+  { value: 'radial', label: ['径向', 'Radial'], icon: Radar },
+  { value: 'concentric', label: ['同心', 'Ring'], icon: CircleDot },
+  { value: 'mindmap', label: ['思维导图', 'Mind map'], icon: GitFork },
+];
 
 export default function ServiceTreePage() {
   const { tr } = useI18n();
+  const toast = useToast();
+  const { confirmAction, dialog } = useDialogs();
+  const isAdmin = usePermissions().isAdmin;
+  const navigate = useNavigate();
 
   const [definitions, setDefinitions] = useState<ServiceTree[]>([]);
   const [models, setModels] = useState<CIType[]>([]);
-  const [chosenID, setChosenID] = useState<string>('');
-  const [attributes, setAttributes] = useState<TypeAttribute[]>([]);
-  const [picked, setPicked] = useState<SearchRow | null>(null);
-  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [relations, setRelations] = useState<ModelRelation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  const [selectedID, setSelectedID] = useState<number | null>(null);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('tree');
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [definitionQuery, setDefinitionQuery] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const [gotTrees, gotModels] = await Promise.all([listServiceTrees(), listCITypes()]);
-      setDefinitions(gotTrees);
-      setModels(gotModels);
-      setChosenID((current) => current || String(gotTrees[0]?.id ?? ''));
-    } catch (error) {
-      setErr(describeError(error, tr('无法读取服务树', 'Could not load the service trees')));
-    } finally {
-      setLoading(false);
-    }
-  }, [tr]);
+  const [editMode, setEditMode] = useState(false);
+  const [editingTree, setEditingTree] = useState<ServiceTree | null>(null);
+  const [selectedModels, setSelectedModels] = useState<Set<number>>(() => new Set());
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [pairEditor, setPairEditor] = useState<{ tree: ServiceTree | null; pairs: TypePair[] } | null>(null);
+  const [pairSaving, setPairSaving] = useState(false);
+  const [pairErr, setPairErr] = useState<string | null>(null);
+  const [locateValue, setLocateValue] = useState('');
+  // A one-off focus for "locate a model": the node and its direct neighbours,
+  // so a new definition can be built on a 61-node canvas without zooming out
+  // until the labels disappear.
+  const [focusOverride, setFocusOverride] = useState<number[] | null>(null);
+  const [focusVersion, setFocusVersion] = useState(0);
+
+  const load = useCallback(
+    async (quiet = false) => {
+      if (quiet) setRefreshing(true);
+      else setLoading(true);
+      setErr(null);
+      try {
+        const [trees, allModels, allRelations] = await Promise.all([
+          listServiceTrees(),
+          listCITypes(),
+          listRelations(),
+        ]);
+        setDefinitions(trees);
+        setModels(allModels);
+        setRelations(allRelations);
+        setSelectedID((current) => {
+          if (current != null && trees.some((tree) => tree.id === current)) return current;
+          return trees[0]?.id ?? null;
+        });
+      } catch (error) {
+        setErr(describeError(error, tr('无法读取关系视图', 'Could not load the relation view')));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [tr],
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const chosen = useMemo(
-    () => definitions.find((definition) => String(definition.id) === chosenID),
-    [definitions, chosenID],
+  const graph = useMemo(() => buildModelGraph(models, relations), [models, relations]);
+
+  const labelByID = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const model of models) map.set(model.id, model.alias || model.name);
+    for (const node of graph.nodes) if (!map.has(node.id)) map.set(node.id, node.label);
+    return map;
+  }, [graph.nodes, models]);
+  const label = useCallback((id: number) => labelByID.get(id) ?? `#${id}`, [labelByID]);
+
+  const selectedDefinition = definitions.find((tree) => tree.id === selectedID) ?? null;
+  const shownDefinition = editingTree ?? selectedDefinition;
+  const layoutRoot = definitionRoot((editingTree ?? selectedDefinition)?.pairs ?? []);
+  const positions = useMemo(
+    () => layoutModelGraph(graph, layoutMode, layoutRoot),
+    [graph, layoutMode, layoutRoot],
+  );
+  const availablePairKeys = useMemo(
+    () => new Set(graph.links.map((link) => `${link.from}:${link.to}`)),
+    [graph.links],
+  );
+  const selectionPairs = useMemo(
+    () => pairsFromSelection(relations, selectedModels),
+    [relations, selectedModels],
+  );
+  const selectionTokens = useMemo(
+    () => serviceTreeChainTokens(selectionPairs, label),
+    [label, selectionPairs],
   );
 
-  /**
-   * The model a definition starts from.
-   *
-   * THE ROOT IS THE ONE PAIR SIDE THAT IS NEVER A CHILD, which is what makes a
-   * definition a tree rather than a set of edges. A definition whose pairs form a
-   * cycle has no root; the first pair's parent is used and the tree simply shows
-   * what it can.
-   */
-  const shape = useMemo(() => {
-    const pairs = chosen?.pairs ?? [];
-    if (pairs.length === 0) return null;
-    const children = new Set(pairs.map((pair) => pair.child_id));
-    const rootID = pairs.find((pair) => !children.has(pair.parent_id))?.parent_id ?? pairs[0].parent_id;
-    const byID = new Map(models.map((model) => [model.id, model]));
-    // THE DEPTH IS THE LONGEST CHAIN from the root, capped by what the walk
-    // offers. Counting pairs would over-report on a definition with two branches.
-    let depth = 0;
-    let frontier = [rootID];
-    for (let level = 0; level < MAX_LEVELS; level += 1) {
-      const next = pairs.filter((pair) => frontier.includes(pair.parent_id)).map((pair) => pair.child_id);
-      if (next.length === 0) break;
-      depth += 1;
-      frontier = [...new Set(next)];
-    }
-    return { root: byID.get(rootID), depth };
-  }, [chosen, models]);
+  const highlightedNodes = useMemo(() => {
+    if (editMode) return selectedModels;
+    if (!selectedDefinition) return new Set<number>();
+    return new Set(definitionModelIDs(selectedDefinition.pairs));
+  }, [editMode, selectedDefinition, selectedModels]);
 
-  useEffect(() => {
-    if (!shape?.root) {
-      setAttributes([]);
+  const highlightedPairs = useMemo(() => {
+    if (editMode) return pairKeys(selectionPairs);
+    return selectedDefinition ? pairKeys(selectedDefinition.pairs) : new Set<string>();
+  }, [editMode, selectedDefinition, selectionPairs]);
+
+  // The canvas frames the definition (or the selection at the start of an edit)
+  // instead of shrinking 61 models to fit a single viewport. Selecting another
+  // definition re-frames; ticking another node in edit mode does not.
+  const focusIDs = useMemo(
+    () =>
+      focusOverride ??
+      (editMode
+        ? [...selectedModels]
+        : selectedDefinition
+          ? definitionModelIDs(selectedDefinition.pairs)
+          : []),
+    [editMode, focusOverride, selectedDefinition, selectedModels],
+  );
+  const focusKey = `${layoutMode}-${layoutVersion}-${focusVersion}-${
+    editMode ? (editingTree?.id ?? 'new') : (selectedID ?? 'none')
+  }`;
+
+  const filteredDefinitions = useMemo(() => {
+    const term = definitionQuery.trim().toLowerCase();
+    return term ? definitions.filter((tree) => tree.name.toLowerCase().includes(term)) : definitions;
+  }, [definitionQuery, definitions]);
+
+  const unresolved = useCallback(
+    (tree: ServiceTree) => tree.pairs.some((pair) => !availablePairKeys.has(pairKey(pair))),
+    [availablePairKeys],
+  );
+
+  const selectDefinition = (id: number) => {
+    if (editMode) {
+      toast.info(tr('正在编辑定义，请先保存或取消。', 'Finish or cancel the current edit first.'));
       return;
     }
-    let live = true;
-    void listTypeAttributes(shape.root.id)
-      .then((got) => live && setAttributes(got.attributes ?? []))
-      .catch(() => live && setAttributes([]));
-    return () => {
-      live = false;
-    };
-  }, [shape?.root]);
+    setFocusOverride(null);
+    setSelectedID(id);
+  };
 
-  useEffect(() => {
-    if (!picked) {
-      setDetail(null);
+  const startNew = () => {
+    if (!isAdmin || graph.nodes.length === 0) return;
+    setEditMode(true);
+    setEditingTree(null);
+    setSelectedModels(new Set());
+    setSelectedID(null);
+    setSaveErr(null);
+    setFocusOverride(null);
+  };
+
+  const openPairEditor = (tree: ServiceTree | null, pairs: TypePair[]) => {
+    if (!isAdmin) return;
+    setPairErr(null);
+    setPairEditor({ tree, pairs });
+  };
+
+  const startEdit = (tree: ServiceTree) => {
+    if (!isAdmin) return;
+    if (unresolved(tree)) {
+      // The canvas derives pairs from models and would silently drop the broken
+      // edge. Go straight to the exact list so the operator can repair it.
+      toast.info(
+        tr(
+          '这个定义包含已失效的模型关系，已打开精确编辑。',
+          'This definition contains a model relation that no longer exists; the exact editor is open.',
+        ),
+      );
+      setSelectedID(tree.id);
+      openPairEditor(tree, tree.pairs);
       return;
     }
-    let live = true;
-    void getInstance(picked._id)
-      .then((got) => live && setDetail(got.values ?? {}))
-      .catch(() => live && setDetail(null));
-    return () => {
-      live = false;
-    };
-  }, [picked]);
+    setEditMode(true);
+    setEditingTree(tree);
+    setSelectedModels(new Set(definitionModelIDs(tree.pairs)));
+    setSelectedID(tree.id);
+    setSaveErr(null);
+    setFocusOverride(null);
+  };
 
-  const publicCount = definitions.filter((definition) => definition.is_public).length;
+  const cancelEdit = () => {
+    setEditMode(false);
+    setEditingTree(null);
+    setSelectedModels(new Set());
+    setSaveOpen(false);
+    setSaveErr(null);
+    setPairEditor(null);
+    setPairErr(null);
+    setFocusOverride(null);
+  };
+
+  const locateModel = (id: number) => {
+    const neighbours = graph.links.flatMap((link) => {
+      if (link.from === id) return [link.to];
+      if (link.to === id) return [link.from];
+      return [];
+    });
+    setSelectedModels((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
+    setFocusOverride([...new Set([id, ...neighbours])]);
+    setFocusVersion((version) => version + 1);
+  };
+
+  const toggleModel = (id: number) => {
+    if (!editMode) return;
+    setSelectedModels((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const openSave = () => {
+    if (selectionPairs.length === 0) {
+      toast.error(
+        tr('至少选择一对有关系的模型。', 'Select at least one connected pair of models.'),
+      );
+      return;
+    }
+    setSaveErr(null);
+    setSaveOpen(true);
+  };
+
+  const saveDefinition = async (name: string, isPublic: boolean) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setSaveErr(tr('名称不能为空', 'A name is required'));
+      return;
+    }
+    setSaving(true);
+    setSaveErr(null);
+    try {
+      const input = {
+        name: trimmed,
+        cr_ids: selectionPairs,
+        is_public: isPublic,
+        option: editingTree?.option,
+      };
+      const saved = editingTree
+        ? await updateServiceTree(editingTree.id, input)
+        : await createServiceTree(input);
+      setSaveOpen(false);
+      setEditMode(false);
+      setEditingTree(null);
+      setSelectedModels(new Set());
+      setFocusOverride(null);
+      setSelectedID(saved.id);
+      toast.success(editingTree ? tr('已保存', 'Saved') : tr('已创建', 'Created'));
+      await load(true);
+    } catch (error) {
+      setSaveErr(describeError(error, tr('保存失败', 'Could not save')));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveExactDefinition = async (name: string, isPublic: boolean, pairs: TypePair[]) => {
+    const target = pairEditor?.tree ?? null;
+    setPairSaving(true);
+    setPairErr(null);
+    try {
+      const input = {
+        name,
+        cr_ids: pairs,
+        is_public: isPublic,
+        option: target?.option,
+      };
+      const saved = target
+        ? await updateServiceTree(target.id, input)
+        : await createServiceTree(input);
+      setPairEditor(null);
+      setEditMode(false);
+      setEditingTree(null);
+      setSelectedModels(new Set());
+      setSaveOpen(false);
+      setSaveErr(null);
+      setFocusOverride(null);
+      setSelectedID(saved.id);
+      toast.success(target ? tr('已保存', 'Saved') : tr('已创建', 'Created'));
+      await load(true);
+    } catch (error) {
+      setPairErr(describeError(error, tr('保存失败', 'Could not save')));
+    } finally {
+      setPairSaving(false);
+    }
+  };
+
+  const removeDefinition = async (tree: ServiceTree) => {
+    const ok = await confirmAction(
+      tr(`删除服务树定义「${tree.name}」？用它的页面就打不开了。`, `Delete the tree definition “${tree.name}”? Pages that use it stop working.`),
+    );
+    if (!ok) return;
+    try {
+      await deleteServiceTree(tree.id);
+      toast.success(tr('已删除', 'Deleted'));
+      if (selectedID === tree.id) setSelectedID(null);
+      await load(true);
+    } catch (error) {
+      toast.error(describeError(error, tr('删除失败', 'Delete failed')));
+    }
+  };
+
+  const chosenTokens = shownDefinition ? serviceTreeChainTokens(shownDefinition.pairs, label) : [];
+  const noRelations = !loading && graph.nodes.length === 0;
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-      <PageHeader
-        title={tr('服务树', 'Service tree')}
-        subtitle={tr(
-          '按服务树定义展开实例：定义说“哪种资源能挂在哪种下面”，这里展开真实的数据。',
-          'Expand real instances along a definition: the definition says which kinds of resource nest, this shows what actually does.',
-        )}
+      <WorkspaceBar
+        leading={
+          <>
+            <span className="hidden lg:inline">{tr('资源模型', 'Resource models')}</span>
+            <ChevronRight size={10} className="hidden lg:block" aria-hidden="true" />
+            <h1 className="min-w-0 truncate text-xs font-medium text-text">{tr('关系视图', 'Relation view')}</h1>
+            {shownDefinition && (
+              <>
+                <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Waypoints size={13} className="shrink-0 text-text-faint" aria-hidden="true" />
+                  <span className="truncate text-text">{shownDefinition.name}</span>
+                  {shownDefinition.is_public && <Chip tone="info" dense>{tr('公开', 'Public')}</Chip>}
+                </span>
+              </>
+            )}
+          </>
+        }
         actions={
-          <div className="flex items-center gap-2">
+          <>
+            <MetaPill label={tr('模型', 'Models')} value={graph.nodes.length} />
+            <MetaPill label={tr('关系', 'Links')} value={graph.links.length} />
             <Button
               variant="outline"
               size="sm"
               type="button"
-              onClick={() => setReloadKey((key) => key + 1)}
+              onClick={() => void load(true)}
+              disabled={loading || refreshing || editMode}
               className="inline-flex items-center gap-1.5"
             >
-              <RefreshCw size={12} aria-hidden="true" />
-              {tr('重新加载', 'Reload')}
+              <RefreshCw size={12} className={cn((loading || refreshing) && 'animate-spin')} aria-hidden="true" />
+              {tr('刷新', 'Refresh')}
             </Button>
-          </div>
-        }
-        extra={
-          <div className="flex flex-wrap items-center gap-3">
-            <Select
-              label={tr('服务树定义', 'Tree definition')}
-              value={chosenID}
-              onValueChange={setChosenID}
-              options={definitions.map((definition) => ({
-                value: String(definition.id),
-                label: definition.is_public ? `${definition.name} · ${tr('公开', 'public')}` : definition.name,
-              }))}
-              searchable
-              className="w-64"
-            />
-            {shape?.root && (
-              <span className="flex items-center gap-2 text-[11px] text-text-faint">
-                {tr('顶层模型', 'Top model')}
-                <Chip tone="info">{shape.root.alias || shape.root.name}</Chip>
-                <span>
-                  {shape.depth > 0 ? tr(`可展开 ${shape.depth} 层`, `${shape.depth} level(s)`) : tr('没有下级', 'No levels')}
-                </span>
-              </span>
-            )}
-            <Link to="/cmdb/service-trees" className="text-[11px] text-indigo-400 hover:text-indigo-300">
-              {tr('管理定义', 'Manage definitions')} →
-            </Link>
-          </div>
+            <Button
+              variant="primary"
+              size="sm"
+              type="button"
+              onClick={startNew}
+              disabled={!isAdmin || editMode || graph.nodes.length === 0}
+              title={isAdmin ? undefined : tr('需要管理员权限', 'Administrator role required')}
+              className="inline-flex items-center gap-1.5"
+            >
+              <Plus size={12} aria-hidden="true" />
+              {tr('新建定义', 'New definition')}
+            </Button>
+          </>
         }
       />
 
-      <div className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 items-start gap-4 overflow-y-auto p-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
-        <Card className="min-w-0">
+      {loading && graph.nodes.length === 0 && definitions.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-text-muted">
+          {tr('加载中…', 'Loading…')}
+        </div>
+      ) : err && graph.nodes.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-start justify-center p-6">
+          <div role="alert" className="flex w-full max-w-xl flex-wrap items-center gap-3 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300">
+            <span className="min-w-0 flex-1 break-words">{err}</span>
+            <Button variant="outline" size="sm" type="button" onClick={() => void load()}>
+              {tr('重试', 'Retry')}
+            </Button>
+          </div>
+        </div>
+      ) : noRelations ? (
+        <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-6">
+          <EmptyStateCard
+            className="w-full max-w-xl"
+            icon={Waypoints}
+            title={tr('还没有模型关系', 'No model relation yet')}
+            hint={tr(
+              '关系视图的节点来自模型关系。先在「关系」里把模型连起来，再回来定义服务树。',
+              'The relation view is built from model relations. Connect some models under “Relations”, then define a tree here.',
+            )}
+            action={
+              <Button variant="primary" size="sm" type="button" onClick={() => navigate('/cmdb/relations')} className="inline-flex items-center gap-1.5">
+                <ChevronRight size={12} aria-hidden="true" />
+                {tr('去模型关系', 'Go to relations')}
+              </Button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col">
           {err && (
-            <div role="alert" className="mb-3 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
-              {err}
+            <div role="alert" className="mx-3 mt-3 flex flex-wrap items-center gap-3 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300">
+              <span className="min-w-0 flex-1 break-words">{err}</span>
+              <Button variant="outline" size="sm" type="button" onClick={() => void load()}>
+                {tr('重试', 'Retry')}
+              </Button>
             </div>
           )}
-          {loading ? (
-            <p className="py-6 text-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</p>
-          ) : definitions.length === 0 ? (
-            // AN EMPTY STATE THAT NAMES THE NEXT STEP rather than saying "empty".
-            <div className="py-8 text-center text-xs text-text-muted">
-              {tr('还没有服务树定义。', 'No tree definitions yet.')}{' '}
-              <Link to="/cmdb/service-trees" className="text-indigo-400 hover:text-indigo-300">
-                {tr('先创建一条', 'Create one')} →
-              </Link>
-            </div>
-          ) : !shape?.root ? (
-            <p className="py-6 text-center text-xs text-text-muted">
-              {tr('这个定义没有可解析的模型对', 'This definition has no resolvable model pairs')}
-            </p>
-          ) : (
-            <InstanceTree
-              key={`${chosenID}-${reloadKey}`}
-              rootModel={shape.root}
-              maxLevel={Math.max(1, Math.min(shape.depth, MAX_LEVELS))}
-              onSelect={setPicked}
-            />
-          )}
-        </Card>
 
-        <Card className="min-w-0">
-          {!picked ? (
-            <p className="py-6 text-center text-xs text-text-muted">
-              {tr('点一个节点查看它的属性', 'Pick a node to see its attributes')}
-            </p>
-          ) : (
-            <>
-              <div className="mb-2 flex items-center gap-2">
-                <h2 className="min-w-0 truncate text-sm font-medium text-text">
-                  {displayValue(detail?.[shape?.root?.unique_key ?? ''] ?? picked._id)}
-                </h2>
-                <Chip tone="info">{picked.ci_type_alias || picked.ci_type}</Chip>
-              </div>
-              <dl className="flex flex-col gap-2">
-                {attributes.slice(0, 12).map((attribute) => (
-                  <div key={attribute.id} className="min-w-0">
-                    <dt className="text-[11px] text-text-faint">{attribute.alias || attribute.name}</dt>
-                    <dd className="break-words text-xs text-text">
-                      <AttributeValue
-                        type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
-                        value={detail?.[attribute.name]}
-                      />
-                    </dd>
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="cmdb-workspace-band shrink-0 border-b border-border/50 px-4 py-2.5">
+                {editMode ? (
+                  <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold text-text">
+                        {editingTree
+                          ? tr(`编辑 ${editingTree.name}`, `Editing ${editingTree.name}`)
+                          : tr('新建服务树定义', 'New tree definition')}
+                      </span>
+                      <span className="text-[11px] text-text-faint">
+                        {tr(
+                          '点击模型勾选，或用「定位模型」查找；至少组成一对有关系的关系。',
+                          'Tick models on the canvas or use “Find a model”; at least one connected pair is required.',
+                        )}
+                      </span>
+                      <div className="w-44 shrink-0">
+                        <Select
+                          label={tr('定位模型', 'Locate a model')}
+                          value={locateValue}
+                          onValueChange={(value) => {
+                            if (!value) return;
+                            locateModel(Number(value));
+                            setLocateValue('');
+                          }}
+                          options={graph.nodes.map((node) => ({ value: String(node.id), label: node.label }))}
+                          placeholder={tr('定位模型…', 'Find a model…')}
+                          searchable
+                          className="w-full"
+                        />
+                      </div>
+                      {selectionTokens.length > 0 && (
+                        <span className="flex min-w-0 flex-wrap items-center gap-1 text-[11px]">
+                          {selectionTokens.map((token, index) => (
+                            <span key={`${token}-${index}`} className="flex items-center gap-1">
+                              {index > 0 && <ChevronRight size={10} className="text-text-faint" aria-hidden="true" />}
+                              <span className="rounded border border-border bg-card px-1.5 py-0.5 text-text">
+                                {token}
+                              </span>
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        type="button"
+                        onClick={() => openPairEditor(editingTree, editingTree?.pairs ?? selectionPairs)}
+                        className="inline-flex items-center gap-1.5"
+                        title={tr('逐条编辑模型对', 'Edit individual model pairs')}
+                      >
+                        <ListChecks size={12} aria-hidden="true" />
+                        {tr('精确模型对', 'Edit pairs')}
+                      </Button>
+                      <Button variant="outline" size="sm" type="button" onClick={cancelEdit}>
+                        {tr('取消', 'Cancel')}
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        type="button"
+                        onClick={openSave}
+                        disabled={selectionPairs.length === 0}
+                      >
+                        {tr('保存', 'Save')}
+                      </Button>
+                    </div>
                   </div>
-                ))}
-              </dl>
-              <p className="mt-3 text-[11px] text-text-faint">
-                {tr(
-                  `共 ${publicCount} 个公开定义。公开的定义所有人可见。`,
-                  `${publicCount} of these definitions are public, and public ones are visible to everyone.`,
+                ) : (
+                  <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <div className="w-full sm:w-64 lg:hidden">
+                        <Select
+                          label={tr('服务树定义', 'Tree definition')}
+                          value={selectedID != null ? String(selectedID) : ''}
+                          onValueChange={(value) => {
+                            if (value) selectDefinition(Number(value));
+                            else setSelectedID(null);
+                          }}
+                          options={[
+                            { value: '', label: tr('全部模型', 'All models') },
+                            ...definitions.map((tree) => ({
+                              value: String(tree.id),
+                              label: tree.is_public ? `${tree.name} · ${tr('公开', 'public')}` : tree.name,
+                            })),
+                          ]}
+                          searchable
+                          className="w-full"
+                        />
+                      </div>
+                      {shownDefinition ? (
+                        <>
+                          <span className="truncate text-xs font-semibold text-text" title={shownDefinition.name}>
+                            {shownDefinition.name}
+                          </span>
+                          <Chip dense>
+                            {tr(
+                              `${shownDefinition.pairs.length} 对关系`,
+                              `${shownDefinition.pairs.length} ${shownDefinition.pairs.length === 1 ? 'pair' : 'pairs'}`,
+                            )}
+                          </Chip>
+                          <span className="hidden min-w-0 flex-wrap items-center gap-1 text-[11px] lg:flex">
+                            {chosenTokens.map((token, index) => (
+                              <span key={`${token}-${index}`} className="flex items-center gap-1">
+                                {index > 0 && <ChevronRight size={10} className="text-text-faint" aria-hidden="true" />}
+                                <span className="rounded border border-border bg-card px-1.5 py-0.5 text-text">
+                                  {token}
+                                </span>
+                              </span>
+                            ))}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-[11px] text-text-faint">
+                          {definitions.length === 0
+                            ? tr('还没有服务树定义，可先在画布上新建。', 'No definition yet; create one on the canvas.')
+                            : tr('选择一个定义以高亮它的模型链。', 'Choose a definition to highlight its model chain.')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div
+                        role="group"
+                        aria-label={tr('布局', 'Layout')}
+                        className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
+                      >
+                        {LAYOUT_OPTIONS.map((option) => {
+                          const Icon = option.icon;
+                          return (
+                            <Button
+                              key={option.value}
+                              variant="plain"
+                              size="sm"
+                              type="button"
+                              aria-pressed={layoutMode === option.value}
+                              aria-label={tr(option.label[0], option.label[1])}
+                              title={tr(option.label[0], option.label[1])}
+                              onClick={() => setLayoutMode(option.value)}
+                              className={cn(
+                                'inline-flex items-center gap-1 rounded px-2 py-1 text-[11px]',
+                                layoutMode === option.value
+                                  ? 'bg-card font-medium text-text shadow-sm'
+                                  : 'text-text-muted hover:text-text',
+                              )}
+                            >
+                              <Icon size={12} aria-hidden="true" />
+                              <span className="hidden xl:inline">{tr(option.label[0], option.label[1])}</span>
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      {selectedDefinition && isAdmin && (
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          type="button"
+                          onClick={() => startEdit(selectedDefinition)}
+                          aria-label={tr('编辑当前定义', 'Edit the selected definition')}
+                          title={tr('编辑当前定义', 'Edit the selected definition')}
+                          className="inline-flex items-center gap-1 lg:hidden"
+                        >
+                          <Pencil size={12} aria-hidden="true" />
+                        </Button>
+                      )}
+                      {selectedDefinition && (
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          type="button"
+                          onClick={() => setSelectedID(null)}
+                          aria-label={tr('显示全部模型', 'Show all models')}
+                          title={tr('显示全部模型', 'Show all models')}
+                          className="inline-flex items-center gap-1"
+                        >
+                          <Network size={12} aria-hidden="true" />
+                          <span className="hidden sm:inline">{tr('全部', 'All')}</span>
+                        </Button>
+                      )}
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        type="button"
+                        onClick={() => setLayoutVersion((version) => version + 1)}
+                        aria-label={tr('重置布局', 'Reset layout')}
+                        title={tr('重置布局', 'Reset layout')}
+                      >
+                        <RotateCcw size={12} aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        type="button"
+                        onClick={() => setSidebarOpen((open) => !open)}
+                        aria-label={sidebarOpen ? tr('收起定义栏', 'Collapse definitions') : tr('展开定义栏', 'Expand definitions')}
+                        title={sidebarOpen ? tr('收起定义栏', 'Collapse definitions') : tr('展开定义栏', 'Expand definitions')}
+                        className="hidden lg:inline-flex"
+                      >
+                        {sidebarOpen ? <PanelRightClose size={12} aria-hidden="true" /> : <PanelRightOpen size={12} aria-hidden="true" />}
+                      </Button>
+                    </div>
+                  </div>
                 )}
-              </p>
-            </>
-          )}
-        </Card>
-      </div>
+                {!editMode && shownDefinition && (
+                  <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] lg:hidden">
+                    {chosenTokens.map((token, index) => (
+                      <span key={`${token}-${index}`} className="flex items-center gap-1">
+                        {index > 0 && <ChevronRight size={10} className="text-text-faint" aria-hidden="true" />}
+                        <span className="rounded border border-border bg-card px-1.5 py-0.5 text-text">{token}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col p-3">
+                <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-border/60 bg-card/60">
+                  <RelationGraph
+                    graph={graph}
+                    positions={positions}
+                    layoutMode={layoutMode}
+                    resetKey={layoutVersion}
+                    editMode={editMode}
+                    selectedNodes={selectedModels}
+                    highlightedNodes={highlightedNodes}
+                    highlightedPairs={highlightedPairs}
+                    focusIDs={focusIDs}
+                    focusKey={focusKey}
+                    onToggleNode={toggleModel}
+                  />
+                </div>
+              </div>
+            </section>
+
+            {sidebarOpen && (
+              <aside className="hidden w-80 shrink-0 flex-col border-s border-border/50 bg-card/30 lg:flex">
+                <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h2 className="truncate text-[11px] font-medium text-text-muted">
+                      {tr('服务树定义', 'Tree definitions')}
+                    </h2>
+                    <span className="rounded-full bg-card px-1.5 py-0.5 text-[10px] leading-none text-text-faint">
+                      {definitions.length}
+                    </span>
+                  </div>
+                  {!editMode && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      onClick={() => setSidebarOpen(false)}
+                      aria-label={tr('收起定义栏', 'Collapse definitions')}
+                      title={tr('收起定义栏', 'Collapse definitions')}
+                    >
+                      <PanelRightClose size={12} aria-hidden="true" />
+                    </Button>
+                  )}
+                </div>
+                <div className="px-3 py-2">
+                  <Input
+                    type="search"
+                    value={definitionQuery}
+                    onChange={(event) => setDefinitionQuery(event.target.value)}
+                    placeholder={tr('搜索定义', 'Search definitions')}
+                    aria-label={tr('搜索服务树定义', 'Search tree definitions')}
+                  />
+                </div>
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-3">
+                  {filteredDefinitions.length === 0 ? (
+                    <div className="px-2 py-8 text-center text-xs text-text-faint">
+                      {definitions.length === 0
+                        ? tr('还没有服务树定义', 'No tree definition yet')
+                        : tr('没有匹配的定义', 'No matching definition')}
+                    </div>
+                  ) : (
+                    filteredDefinitions.map((tree) => (
+                      <DefinitionCard
+                        key={tree.id}
+                        tree={tree}
+                        label={label}
+                        selected={!editMode && selectedID === tree.id}
+                        editing={editMode && editingTree?.id === tree.id}
+                        unresolved={unresolved(tree)}
+                        isAdmin={isAdmin && !editMode}
+                        onSelect={() => selectDefinition(tree.id)}
+                        onEdit={() => startEdit(tree)}
+                        onAdvancedEdit={() => openPairEditor(tree, tree.pairs)}
+                        onDelete={() => void removeDefinition(tree)}
+                      />
+                    ))
+                  )}
+                </div>
+                {!editMode && isAdmin && (
+                  <div className="flex items-center justify-end gap-2 border-t border-border/50 px-3 py-2.5">
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      type="button"
+                      onClick={startNew}
+                      aria-label={tr('新建定义', 'New definition')}
+                      title={tr('新建定义', 'New definition')}
+                      disabled={graph.nodes.length === 0}
+                    >
+                      <Plus size={12} aria-hidden="true" />
+                    </Button>
+                  </div>
+                )}
+              </aside>
+            )}
+          </div>
+        </div>
+      )}
+
+      {saveOpen && (
+        <DefinitionDialog
+          tree={editingTree}
+          pairs={selectionPairs}
+          label={label}
+          saving={saving}
+          error={saveErr}
+          onClose={() => {
+            setSaveOpen(false);
+            setSaveErr(null);
+          }}
+          onSubmit={(name, isPublic) => void saveDefinition(name, isPublic)}
+        />
+      )}
+
+      {pairEditor && (
+        <DefinitionPairsDialog
+          tree={pairEditor.tree}
+          relations={relations}
+          initialPairs={pairEditor.pairs}
+          saving={pairSaving}
+          error={pairErr}
+          onClose={() => {
+            setPairEditor(null);
+            setPairErr(null);
+          }}
+          onSubmit={(name, isPublic, pairs) => void saveExactDefinition(name, isPublic, pairs)}
+        />
+      )}
+
+      {dialog}
     </div>
   );
 }
