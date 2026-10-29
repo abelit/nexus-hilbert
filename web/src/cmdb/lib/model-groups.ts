@@ -62,9 +62,11 @@ export function groupModels(
       rows.push(model);
     }
     if (rows.length === 0) return;
-    rows.sort(compareModels);
+    // THE API ORDER IS THE ARRANGEMENT. A group's `ci_types` comes back in the
+    // membership order a drag stores; re-sorting by the model's global `order`
+    // would discard it and make every drop snap back on the next read.
     sections.push({
-      key: group.id != null ? `g-${group.id}` : `g-anon-${index}`,
+      key: group.id != null ? `g:${group.id}` : `g-anon-${index}`,
       name: group.name?.trim() || labels.unnamed,
       rows,
     });

@@ -192,6 +192,33 @@ func (u *Usecase) UpdateTypeGroup(ctx context.Context, in UpdateTypeGroupInput) 
 	return &ModelGroup{ID: group.ID, Name: group.Name, Types: []View{}}, nil
 }
 
+// SetTypeGroupMembers writes a group's membership as an ordered set.
+//
+// THE ORDER IS THE REQUEST. The console's drag produces a whole arrangement —
+// groups and the models inside them — and this is the write that stores one
+// group's half of it. Validation matches UpdateTypeGroup: the group must exist
+// and every named model must be readable.
+func (u *Usecase) SetTypeGroupMembers(ctx context.Context, id model.ID, typeIDs []model.ID) error {
+	if u.repo == nil {
+		return errs.ErrNotWiredYet
+	}
+	if id <= 0 {
+		return errs.ErrInvalid
+	}
+	existing, err := u.repo.TypeGroupByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return ErrTypeGroupNotFound
+	}
+	ids := dedupeAttrIDs(typeIDs)
+	if err := u.assertTypesExist(ctx, ids); err != nil {
+		return err
+	}
+	return u.repo.SetTypeGroupMembers(ctx, TypeGroupMembersSpec{ID: id, TypeIDs: ids})
+}
+
 // DeleteTypeGroup removes a group, or detaches some of its models.
 //
 // The two behaviours are one endpoint because cantor made them one, and the

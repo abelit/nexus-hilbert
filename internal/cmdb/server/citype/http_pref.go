@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -21,12 +22,14 @@ import (
 //	GET    /v1/cmdb/preferences/model-groups                      (any authed)
 //	GET    /v1/cmdb/preferences/ci-types/{ref}/fields             (any authed)
 //	PUT    /v1/cmdb/preferences/ci-types/{ref}/fields             (any authed)
+//	DELETE /v1/cmdb/preferences/ci-types/{ref}/fields             (any authed)
 //	PUT    /v1/cmdb/preferences/ci-types/order                    (any authed)
 //	GET    /v1/cmdb/preferences/auto-subscription                 (any authed)
 //	PUT    /v1/cmdb/preferences/auto-subscription                 (any authed)
 //	DELETE /v1/cmdb/preferences/auto-subscription                 (any authed)
 //	POST   /v1/cmdb/model-groups                                  (admin)
 //	PUT    /v1/cmdb/model-groups/{id}                             (admin)
+//	PUT    /v1/cmdb/model-groups/{id}/members                     (admin)
 //	DELETE /v1/cmdb/model-groups/{id}                             (admin)
 //	PUT    /v1/cmdb/model-groups/order                            (admin)
 //
@@ -45,6 +48,7 @@ func (h *Handler) registerPreferenceRoutes(r chi.Router) {
 	r.Get("/v1/cmdb/preferences/model-groups", h.listModelGroups)
 	r.Get("/v1/cmdb/preferences/ci-types/{ref}/fields", h.getShowAttributes)
 	r.Put("/v1/cmdb/preferences/ci-types/{ref}/fields", h.setShowAttributes)
+	r.Delete("/v1/cmdb/preferences/ci-types/{ref}/fields", h.clearShowAttributes)
 	r.Put("/v1/cmdb/preferences/ci-types/order", h.setSubscriptionOrder)
 
 	r.Get("/v1/cmdb/preferences/auto-subscription", h.getAutoSubscription)
@@ -54,6 +58,7 @@ func (h *Handler) registerPreferenceRoutes(r chi.Router) {
 	r.With(h.requireAdmin).Post("/v1/cmdb/model-groups", h.createModelGroup)
 	r.With(h.requireAdmin).Put("/v1/cmdb/model-groups/order", h.reorderModelGroups)
 	r.With(h.requireAdmin).Put("/v1/cmdb/model-groups/{id}", h.updateModelGroup)
+	r.With(h.requireAdmin).Put("/v1/cmdb/model-groups/{id}/members", h.setModelGroupMembers)
 	r.With(h.requireAdmin).Delete("/v1/cmdb/model-groups/{id}", h.deleteModelGroup)
 }
 
@@ -178,6 +183,22 @@ func (h *Handler) setShowAttributes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toShowAttributesDTO(*got))
 }
 
+// clearShowAttributes removes the caller's subscription, returning the model to
+// its default view. A DELETE rather than an empty PUT: the two states are
+// different, and SetShowAttributes refuses the ambiguous one.
+func (h *Handler) clearShowAttributes(w http.ResponseWriter, r *http.Request) {
+	uid, err := callerID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := h.uc.ClearShowAttributes(r.Context(), uid, chi.URLParam(r, "ref")); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type setOrderRequest struct {
 	TypeIDs []model.ID `json:"type_ids"`
 	IsTree  bool       `json:"is_tree"`
@@ -215,6 +236,10 @@ type modelGroupDTO struct {
 type subscribedModelsDTO struct {
 	Groups  []modelGroupDTO `json:"groups"`
 	TypeIDs []model.ID      `json:"type_ids"`
+
+	// SubscribedAt maps a model id to the time its manual subscription was
+	// first saved. Models covered by an auto-subscription rule are absent.
+	SubscribedAt map[model.ID]time.Time `json:"subscribed_at,omitempty"`
 }
 
 func toModelGroupDTOs(groups []citypebiz.ModelGroup) []modelGroupDTO {
@@ -246,7 +271,7 @@ func (h *Handler) listSubscribedModels(w http.ResponseWriter, r *http.Request) {
 		ids = []model.ID{}
 	}
 	writeJSON(w, http.StatusOK, subscribedModelsDTO{
-		Groups: toModelGroupDTOs(got.Groups), TypeIDs: ids,
+		Groups: toModelGroupDTOs(got.Groups), TypeIDs: ids, SubscribedAt: got.SubscribedAt,
 	})
 }
 
@@ -424,6 +449,30 @@ func (h *Handler) updateModelGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toModelGroupDTOs([]citypebiz.ModelGroup{*group})[0])
+}
+
+type setModelGroupMembersRequest struct {
+	TypeIDs []model.ID `json:"type_ids"`
+}
+
+// setModelGroupMembers stores one group's ordered membership, which is what a
+// drag writes. The position of every model is its index in the list.
+func (h *Handler) setModelGroupMembers(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var req setModelGroupMembersRequest
+	if err := decodeBody(r, &req); err != nil {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
+	if err := h.uc.SetTypeGroupMembers(r.Context(), id, req.TypeIDs); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type deleteModelGroupRequest struct {

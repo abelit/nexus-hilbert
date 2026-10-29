@@ -20,6 +20,7 @@ DELETE /v1/cmdb/ipam/scopes/{id}
 DELETE /v1/cmdb/ipam/subnets/{id}
 DELETE /v1/cmdb/model-groups/{id}
 DELETE /v1/cmdb/preferences/auto-subscription
+DELETE /v1/cmdb/preferences/ci-types/{ref}/fields
 DELETE /v1/cmdb/preferences/saved-searches/{id}
 DELETE /v1/cmdb/preferences/service-trees/{id}
 DELETE /v1/cmdb/relation-types/{id}
@@ -165,6 +166,7 @@ PUT /v1/cmdb/ipam/subnets/{id}
 PUT /v1/cmdb/ipam/subnets/{id}/move
 PUT /v1/cmdb/model-groups/order
 PUT /v1/cmdb/model-groups/{id}
+PUT /v1/cmdb/model-groups/{id}/members
 PUT /v1/cmdb/preferences/auto-subscription
 PUT /v1/cmdb/preferences/ci-types/order
 PUT /v1/cmdb/preferences/ci-types/{ref}/fields

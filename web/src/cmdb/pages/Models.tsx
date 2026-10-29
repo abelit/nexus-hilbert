@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Boxes,
   ChevronRight,
   Folder,
+  GripVertical,
   LayoutGrid,
   MoreHorizontal,
   Pencil,
@@ -46,14 +47,22 @@ import {
   type CITypeInput,
   type TypeAttribute,
 } from '../api/citype';
-import { listModelGroups, type ModelGroup } from '../api/preferences';
+import {
+  deleteModelGroup,
+  listModelGroups,
+  reorderModelGroups,
+  setModelGroupMembers,
+  type ModelGroup,
+} from '../api/preferences';
 import { CMDBIcon } from '../components/CMDBIcon';
 import { ColumnVisibilityMenu, DataTable, useColumnVisibility, type Column } from '../components/DataTable';
 import { IconPicker } from '../components/IconPicker';
 import { ModelConfigShell } from '../components/ModelConfigShell';
-import { useModelTreeRefresh } from '../components/model-tree-context';
+import { GroupedSortable, type DragSource, type SortableHandle } from '../components/GroupedSortable';
+import { useModelGroupsSync, useModelTreeRefresh } from '../components/model-tree-context';
 import { useToast } from '../components/Toast';
-import { groupModels } from '../lib/model-groups';
+import { groupModels, type ModelGroupSection } from '../lib/model-groups';
+import { groupIDFromSlotKey, mergeGroupMembership, sharedDragPlan } from '../lib/group-drag';
 import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
 
 // 模型配置 — the model list.
@@ -86,6 +95,7 @@ export default function ModelsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const treeRefresh = useModelTreeRefresh();
+  const groupsSync = useModelGroupsSync();
   const { isAdmin } = usePermissions();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
@@ -139,6 +149,12 @@ export default function ModelsPage() {
     void load();
   }, [load]);
 
+  // A drag in the model tree writes shared groups; this page renders its own
+  // grouped snapshot, so it has to reload when the tree says the groups moved.
+  useEffect(() => {
+    if (groupsSync?.version) void load(true);
+  }, [groupsSync?.version, load]);
+
   useEffect(() => {
     if (searchParams.get('new') !== '1') return;
     setEditing({ mode: 'create' });
@@ -175,6 +191,15 @@ export default function ModelsPage() {
     [visible, groups, tr],
   );
   const groupedView = grouped && groups.length > 0 && sections.length > 0;
+
+  // The grouped view's drag edits a copy; a reload (its own, or the tree's)
+  // re-seeds it from the server's arrangement.
+  const [dragSections, setDragSections] = useState<ModelGroupSection[]>(sections);
+  // Only the grouped view renders the drag; re-seeding on every flat-list load
+  // would add a render of every visible row for no benefit.
+  useEffect(() => {
+    if (groupedView) setDragSections(sections);
+  }, [groupedView, sections]);
 
   // GROUPING IS A DISPLAY MODE, NOT A SECOND DATASET. Paging a grouped list
   // would split one group across pages and make its count meaningless, so the
@@ -242,6 +267,54 @@ export default function ModelsPage() {
   const disabledCount = models.length - enabledCount;
   const inheritingCount = models.filter((model) => model.parent_ids.length > 0).length;
   const filtering = query.trim().length > 0 || status !== 'all';
+  // A filtered grouped view is a partial membership list; dropping from it
+  // would write a group that lost every hidden model, so drag is offered only
+  // on the complete arrangement.
+  const canDragGrouped = isAdmin && !filtering;
+
+  const commitGroupedDrag = async (source: DragSource, next: ModelGroupSection[]) => {
+    setDragSections(next);
+    const plan = sharedDragPlan(
+      source,
+      next.map((section) => ({ key: section.key, items: section.rows })),
+      (model) => model.id,
+    );
+    const beforeOrder = sections.map((section) => groupIDFromSlotKey(section.key)).filter((id): id is number => id != null);
+    const orderChanged =
+      plan.groupOrder != null &&
+      (plan.groupOrder.length !== beforeOrder.length || plan.groupOrder.some((id, index) => id !== beforeOrder[index]));
+    if (!orderChanged && plan.setMembers == null && plan.detachFrom == null) {
+      setDragSections(sections);
+      return;
+    }
+    try {
+      // Read the groups at write time: this page's snapshot can be older than
+      // a tree or subscription write, and a stale membership list would drop
+      // members the card view does not show.
+      const fresh = await listModelGroups();
+      if (orderChanged && plan.groupOrder) {
+        // Empty groups are not rendered as card sections, so they are absent
+        // from the plan's order. Append them in their original relative order;
+        // otherwise a partial order write would leave them interleaved.
+        const freshIDs = fresh.map((group) => group.id).filter((id): id is number => id != null);
+        const missing = freshIDs.filter((id) => !plan.groupOrder?.includes(id));
+        await reorderModelGroups([...plan.groupOrder, ...missing]);
+      }
+      if (plan.setMembers) {
+        const full = fresh.find((group) => group.id === plan.setMembers?.groupID)?.ci_types.map((model) => model.id) ?? [];
+        await setModelGroupMembers(plan.setMembers.groupID, mergeGroupMembership(plan.setMembers.typeIDs, full));
+      }
+      if (plan.detachFrom != null && source.type === 'item') {
+        await deleteModelGroup(plan.detachFrom, [source.itemID]);
+      }
+      toast.success(tr('已保存分组顺序', 'Group arrangement saved'));
+      await load(true);
+      treeRefresh?.refresh();
+    } catch (error) {
+      toast.error(describeError(error, tr('保存分组顺序失败', 'Could not save the group arrangement')));
+      setDragSections(sections);
+    }
+  };
   const rangeStart = pagedVisible.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
   const rangeEnd = pagedVisible.length === 0 ? 0 : safePage * PAGE_SIZE + pagedVisible.length;
   const clearFilters = () => {
@@ -330,13 +403,14 @@ export default function ModelsPage() {
   // workbench card, so the table can use the card's full height.
   const columnVisibility = useColumnVisibility(columns, 'models');
 
-  const renderCard = (row: CIType) => (
+  const renderCard = (row: CIType, dragHandle?: ReactNode) => (
     <ModelCard
       key={row.id}
       row={row}
       parentNames={parentNames(row)}
       isAdmin={isAdmin}
       adminTip={adminTip}
+      dragHandle={dragHandle}
       onEdit={() => setEditing({ mode: 'edit', row })}
       onToggle={() => void toggleEnabled(row)}
       onDelete={() => void handleDelete(row)}
@@ -695,38 +769,99 @@ export default function ModelsPage() {
                       }
                     />
                   ) : groupedView ? (
-                    <div className="flex flex-col">
-                      {sections.map((section) => {
-                        const headingID = `cmdb-model-group-${section.key}`;
-                        return (
-                          <section
-                            key={section.key}
-                            aria-labelledby={headingID}
-                            className="border-b border-border/40 last:border-b-0"
-                          >
-                            <div className="cmdb-liquid-group-header flex min-w-0 items-center gap-2 px-4 py-3">
-                              <Folder size={14} className="shrink-0 text-indigo-400" aria-hidden="true" />
-                              <h2
-                                id={headingID}
-                                className="min-w-0 truncate text-sm font-bold text-text"
-                                title={section.name}
-                              >
-                                {section.name}
-                              </h2>
-                              <Chip tone="accent" dense>
-                                {modelCountLabel(section.rows.length)}
-                              </Chip>
+                    canDragGrouped ? (
+                      <GroupedSortable<CIType, ModelGroupSection>
+                        groups={dragSections}
+                        getID={(row) => row.id}
+                        getItems={(section) => section.rows}
+                        withItems={(section, rows) => ({ ...section, rows })}
+                        onGroupsChange={setDragSections}
+                        onCommit={(source, next) => void commitGroupedDrag(source, next)}
+                        canDragGroup={(section) => section.key.startsWith('g:')}
+                        itemsClassName="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3"
+                        renderGroup={(section, handle, children) => {
+                          const headingID = `cmdb-model-group-${section.key}`;
+                          return (
+                            <section
+                              aria-labelledby={headingID}
+                              className="border-b border-border/40 last:border-b-0"
+                            >
+                              <div className="cmdb-liquid-group-header flex min-w-0 items-center gap-2 px-4 py-3">
+                                <CardGrip
+                                  handle={handle}
+                                  label={tr(`拖动分组 ${section.name}`, `Drag the ${section.name} group`)}
+                                />
+                                <Folder size={14} className="shrink-0 text-indigo-400" aria-hidden="true" />
+                                <h2
+                                  id={headingID}
+                                  className="min-w-0 truncate text-sm font-bold text-text"
+                                  title={section.name}
+                                >
+                                  {section.name}
+                                </h2>
+                                <Chip tone="accent" dense>
+                                  {modelCountLabel(section.rows.length)}
+                                </Chip>
+                              </div>
+                              {children}
+                            </section>
+                          );
+                        }}
+                        renderItem={(row, _groupKey, handle) =>
+                          renderCard(
+                            row,
+                            <CardGrip
+                              handle={handle}
+                              label={tr(`拖动模型 ${row.name}`, `Drag ${row.name}`)}
+                              large
+                            />,
+                          )
+                        }
+                        renderOverlay={(_source, item) =>
+                          item ? (
+                            <div className="cmdb-liquid-card rounded-2xl p-4 text-xs text-text shadow-xl">
+                              <div className="flex items-center gap-2">
+                                <CMDBIcon value={item.icon} size={16} label={item.alias || item.name} />
+                                <span className="truncate">{item.alias || item.name}</span>
+                              </div>
                             </div>
-                            <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
-                              {section.rows.map(renderCard)}
-                            </div>
-                          </section>
-                        );
-                      })}
-                    </div>
+                          ) : null
+                        }
+                      />
+                    ) : (
+                      <div className="flex flex-col">
+                        {sections.map((section) => {
+                          const headingID = `cmdb-model-group-${section.key}`;
+                          return (
+                            <section
+                              key={section.key}
+                              aria-labelledby={headingID}
+                              className="border-b border-border/40 last:border-b-0"
+                            >
+                              <div className="cmdb-liquid-group-header flex min-w-0 items-center gap-2 px-4 py-3">
+                                <Folder size={14} className="shrink-0 text-indigo-400" aria-hidden="true" />
+                                <h2
+                                  id={headingID}
+                                  className="min-w-0 truncate text-sm font-bold text-text"
+                                  title={section.name}
+                                >
+                                  {section.name}
+                                </h2>
+                                <Chip tone="accent" dense>
+                                  {modelCountLabel(section.rows.length)}
+                                </Chip>
+                              </div>
+                              <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+                                {section.rows.map((row) => renderCard(row))}
+                              </div>
+                            </section>
+                          );
+                        })}
+                      </div>
+                    )
                   ) : (
                     <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
-                      {pagedVisible.map(renderCard)}
+                      {pagedVisible.map((row) => renderCard(row))}
                     </div>
                   )}
                 </div>
@@ -950,6 +1085,7 @@ function ModelCard({
   parentNames,
   isAdmin,
   adminTip,
+  dragHandle,
   onEdit,
   onToggle,
   onDelete,
@@ -958,6 +1094,7 @@ function ModelCard({
   parentNames: string[];
   isAdmin: boolean;
   adminTip?: string;
+  dragHandle?: ReactNode;
   onEdit(): void;
   onToggle(): void;
   onDelete(): void;
@@ -988,6 +1125,7 @@ function ModelCard({
             </Chip>
           </div>
         </div>
+        {dragHandle && <div className="shrink-0">{dragHandle}</div>}
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2">
@@ -1483,6 +1621,26 @@ export function ModelForm({
         )}
       </form>
     </Modal>
+  );
+}
+
+/** The grip activates the card/group drag; the card's links keep their actions. */
+function CardGrip({ handle, label, large }: { handle: SortableHandle; label: string; large?: boolean }) {
+  if (!handle.draggable) return null;
+  return (
+    <button
+      type="button"
+      {...handle.attributes}
+      {...handle.listeners}
+      aria-label={label}
+      title={label}
+      className={cn(
+        'inline-flex shrink-0 cursor-grab touch-none items-center justify-center rounded text-text-faint hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 active:cursor-grabbing',
+        large ? 'size-7' : 'size-5',
+      )}
+    >
+      <GripVertical size={large ? 14 : 12} aria-hidden="true" />
+    </button>
   );
 }
 

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { useAuth } from '@/store/auth';
 import { ModelTree } from './ModelTree';
 
 const models = [
@@ -16,6 +17,7 @@ const groups = [
 
 beforeEach(() => {
   localStorage.setItem('ongrid-locale', 'zh-CN');
+  useAuth.setState({ token: null, role: 'user' });
 });
 
 function renderTree(selectedID?: number) {
@@ -49,5 +51,18 @@ describe('the model tree', () => {
   it('offers a create link that the list page turns into the model form', () => {
     renderTree();
     expect(screen.getByRole('link', { name: /新建/ })).toHaveAttribute('href', '/cmdb/models?new=1');
+  });
+
+  it('offers drag handles to an administrator when real groups exist', () => {
+    useAuth.setState({ token: null, role: 'admin' });
+    renderTree();
+
+    expect(screen.getByRole('button', { name: '拖动分组 服务器' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '拖动模型 host' })).toBeInTheDocument();
+  });
+
+  it('keeps the tree static for a non-admin', () => {
+    renderTree();
+    expect(screen.queryByRole('button', { name: /^拖动/ })).not.toBeInTheDocument();
   });
 });

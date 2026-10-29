@@ -34,19 +34,21 @@ const database = model(3, 'database', 30);
 const router = model(4, 'router', 5);
 
 describe('groupModels', () => {
-  it('keeps the API group order and sorts each group by order then name', () => {
+  it('keeps the API group order and each group’s membership order', () => {
     const sections = groupModels(
       [host, switchModel, database, router],
       [
         group(10, '网络', [router, switchModel]),
-        group(11, '服务器', [host, database]),
+        // Deliberately the reverse of the models' global order: the group's
+        // own arrangement is what a drag stores, so it must win.
+        group(11, '服务器', [database, host]),
       ],
       labels,
     );
 
     expect(sections.map((section) => section.name)).toEqual(['网络', '服务器']);
     expect(sections[0].rows.map((row) => row.name)).toEqual(['router', 'switch']);
-    expect(sections[1].rows.map((row) => row.name)).toEqual(['host', 'database']);
+    expect(sections[1].rows.map((row) => row.name)).toEqual(['database', 'host']);
   });
 
   it('deduplicates a model that appears in two groups, first group wins', () => {
@@ -139,7 +141,7 @@ describe('groupModels', () => {
     );
 
     expect(sections.map((section) => [section.key, section.name])).toEqual([
-      ['g-99', '其他'],
+      ['g:99', '其他'],
       ['other', '其他'],
     ]);
   });

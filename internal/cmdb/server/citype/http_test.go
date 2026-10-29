@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -16,6 +17,12 @@ import (
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
+
+// SubscribedAt is the empty-preference answer for the doubles that do not
+// exercise subscriptions; attrStub overrides it with its seeded rows.
+func (s *stubRepo) SubscribedAt(context.Context, model.ID) (map[model.ID]time.Time, error) {
+	return map[model.ID]time.Time{}, nil
+}
 
 type stubRepo struct {
 	// The attribute-management half is a separate double; see http_attr_test.go.

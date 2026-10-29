@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -102,6 +103,19 @@ func (a *attrRepo) SubscribedTypeIDs(_ context.Context, uid model.ID) ([]model.I
 		if r.UID == uid && !seen[r.TypeID] {
 			seen[r.TypeID] = true
 			out = append(out, r.TypeID)
+		}
+	}
+	return out, nil
+}
+
+func (a *attrRepo) SubscribedAt(_ context.Context, uid model.ID) (map[model.ID]time.Time, error) {
+	out := map[model.ID]time.Time{}
+	for _, r := range a.showAttrs {
+		if r.UID != uid {
+			continue
+		}
+		if existing, ok := out[r.TypeID]; !ok || r.CreatedAt.Before(existing) {
+			out[r.TypeID] = r.CreatedAt
 		}
 	}
 	return out, nil
@@ -208,6 +222,14 @@ func (a *attrRepo) UpdateTypeGroup(_ context.Context, in TypeGroupUpdateSpec) er
 		return a.groupErr
 	}
 	a.updatedGroup = &in
+	return nil
+}
+
+func (a *attrRepo) SetTypeGroupMembers(_ context.Context, in TypeGroupMembersSpec) error {
+	if a.groupErr != nil {
+		return a.groupErr
+	}
+	a.setGroupMembers = &in
 	return nil
 }
 
@@ -371,6 +393,35 @@ func TestSetShowAttributesRejectsAnUnknownReference(t *testing.T) {
 	}
 }
 
+// Unsubscribing removes only the caller's rows for the named model; another
+// model's subscription, and the same model for another user, stay.
+func TestClearShowAttributesRemovesOnlyTheTargetSubscription(t *testing.T) {
+	repo, _ := prefRepo()
+	repo.showAttrs = []citypemodel.PreferenceShowAttributes{
+		{UID: 7, TypeID: 10, AttrID: idPtr(1)},
+		{UID: 7, TypeID: 20, AttrID: idPtr(1)},
+		{UID: 8, TypeID: 10, AttrID: idPtr(1)},
+	}
+	if err := attrUsecase(repo).ClearShowAttributes(context.Background(), 7, "10"); err != nil {
+		t.Fatalf("ClearShowAttributes() error = %v", err)
+	}
+	if len(repo.showAttrs) != 2 {
+		t.Fatalf("rows = %+v, want the caller's other model and the other user kept", repo.showAttrs)
+	}
+	for _, row := range repo.showAttrs {
+		if row.UID == 7 && row.TypeID == 10 {
+			t.Fatalf("rows = %+v, want the target removed", repo.showAttrs)
+		}
+	}
+}
+
+func TestClearShowAttributesRejectsAnUnknownModel(t *testing.T) {
+	repo, _ := prefRepo()
+	if err := attrUsecase(repo).ClearShowAttributes(context.Background(), 7, "9999"); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+
 // --- the sidebar ---
 
 // A subscription that outlives its model is dropped rather than rendered.
@@ -390,6 +441,26 @@ func TestListSubscribedModelsSkipsADeletedModel(t *testing.T) {
 	}
 	if len(got.TypeIDs) != 1 || got.TypeIDs[0] != 10 {
 		t.Fatalf("type ids = %v, want just the live model", got.TypeIDs)
+	}
+}
+
+// The page says how long a model has been subscribed, so the earliest saved row
+// wins: re-saving the column list keeps the original subscription date.
+func TestListSubscribedModelsReportsTheEarliestSubscriptionTime(t *testing.T) {
+	repo, _ := prefRepo()
+	early := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	late := early.Add(48 * time.Hour)
+	repo.showAttrs = []citypemodel.PreferenceShowAttributes{
+		{Base: model.Base{CreatedAt: late}, UID: 7, TypeID: 10, AttrID: idPtr(1)},
+		{Base: model.Base{CreatedAt: early}, UID: 7, TypeID: 10, AttrID: idPtr(2)},
+	}
+
+	got, err := attrUsecase(repo).ListSubscribedModels(context.Background(), 7, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.SubscribedAt[10].Equal(early) {
+		t.Fatalf("subscribed at = %v, want the earliest row", got.SubscribedAt[10])
 	}
 }
 
@@ -493,6 +564,37 @@ func TestSetAutoSubscriptionValidatesItsReferences(t *testing.T) {
 }
 
 // --- model groups ---
+
+// A drag names the members in their new order, so the write keeps that order
+// rather than appending.
+func TestSetTypeGroupMembersWritesAnOrderedSet(t *testing.T) {
+	repo, _ := prefRepo()
+	repo.typeGroups = []citypemodel.CITypeGroup{{Name: "硬件"}}
+	repo.typeGroups[0].ID = 300
+	second := newCIType(20, "idc", "机房")
+	second.UniqueID = 1
+	repo.types = append(repo.types, second)
+	uc := attrUsecase(repo)
+	ctx := context.Background()
+
+	if err := uc.SetTypeGroupMembers(ctx, 300, []model.ID{20, 10, 20}); err != nil {
+		t.Fatalf("SetTypeGroupMembers() error = %v", err)
+	}
+	if repo.setGroupMembers == nil {
+		t.Fatal("the ordered membership write was not issued")
+	}
+	if repo.setGroupMembers.ID != 300 || len(repo.setGroupMembers.TypeIDs) != 2 ||
+		repo.setGroupMembers.TypeIDs[0] != 20 || repo.setGroupMembers.TypeIDs[1] != 10 {
+		t.Fatalf("spec = %+v, want the order the caller sent", repo.setGroupMembers)
+	}
+
+	if err := uc.SetTypeGroupMembers(ctx, 999, []model.ID{10}); !errors.Is(err, ErrTypeGroupNotFound) {
+		t.Fatalf("missing group error = %v", err)
+	}
+	if err := uc.SetTypeGroupMembers(ctx, 300, []model.ID{999}); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("missing model error = %v", err)
+	}
+}
 
 func TestCreateTypeGroupRejectsADuplicateName(t *testing.T) {
 	repo, _ := prefRepo()

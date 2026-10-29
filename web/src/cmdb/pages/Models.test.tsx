@@ -249,6 +249,20 @@ describe('grouping', () => {
     expect(within(table).getByRole('button', { name: '编辑 host' })).toBeInTheDocument();
   });
 
+  it('offers drag handles in the grouped card view for an administrator', async () => {
+    const user = userEvent.setup();
+    groupedHandlers();
+    renderPage();
+
+    await screen.findByRole('link', { name: '主机' });
+    await user.click(screen.getByRole('checkbox', { name: '按分组显示' }));
+    await user.click(screen.getByRole('button', { name: '网格' }));
+
+    const serverRegion = await screen.findByRole('region', { name: '服务器' });
+    expect(within(serverRegion).getByRole('button', { name: '拖动分组 服务器' })).toBeInTheDocument();
+    expect(within(serverRegion).getByRole('button', { name: '拖动模型 host' })).toBeInTheDocument();
+  });
+
   it('keeps the group sections in the grid view', async () => {
     const user = userEvent.setup();
     groupedHandlers();

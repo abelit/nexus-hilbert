@@ -72,6 +72,7 @@ type attrRepo struct {
 	upsertedOrder   *TypeOrderSpec
 	savedAutoSub    *AutoSubscriptionSpec
 	updatedGroup    *TypeGroupUpdateSpec
+	setGroupMembers *TypeGroupMembersSpec
 	deletedGroup    *TypeGroupDeleteSpec
 	reorderedGroups *TypeGroupReorderSpec
 
@@ -565,6 +566,9 @@ func (noAttrRepo) CreateTypeGroup(context.Context, TypeGroupCreateSpec) (*citype
 	return nil, notImplemented()
 }
 func (noAttrRepo) UpdateTypeGroup(context.Context, TypeGroupUpdateSpec) error {
+	return notImplemented()
+}
+func (noAttrRepo) SetTypeGroupMembers(context.Context, TypeGroupMembersSpec) error {
 	return notImplemented()
 }
 func (noAttrRepo) DeleteTypeGroup(context.Context, TypeGroupDeleteSpec) error {

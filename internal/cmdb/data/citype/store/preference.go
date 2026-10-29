@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -143,6 +144,28 @@ func fieldKey(f citypebiz.SubscribedFieldSpec) (showKey, error) {
 		return showKey{}, fmt.Errorf("%w: a field needs an attribute or a built-in name",
 			citypebiz.ErrSubscriptionAttrNotFound)
 	}
+}
+
+// SubscribedAt returns when each model's subscription was first saved.
+//
+// The rows are loaded and reduced in Go rather than with a MIN() aggregate: the
+// timestamp type differs between MySQL and SQLite, and the group a user holds is
+// small enough that the extra rows cost less than a dialect-specific scan.
+func (r *Repo) SubscribedAt(ctx context.Context, uid model.ID) (map[model.ID]time.Time, error) {
+	var rows []citypemodel.PreferenceShowAttributes
+	if err := r.db.WithContext(ctx).
+		Select("type_id", "created_at").
+		Where("uid = ?", uid).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("cmdb preference: subscription times: %w", err)
+	}
+	out := make(map[model.ID]time.Time, len(rows))
+	for _, row := range rows {
+		if existing, ok := out[row.TypeID]; !ok || row.CreatedAt.Before(existing) {
+			out[row.TypeID] = row.CreatedAt
+		}
+	}
+	return out, nil
 }
 
 // ClearShowAttributes removes a user's subscription for a model.

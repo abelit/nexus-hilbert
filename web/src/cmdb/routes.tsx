@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Boxes, Database, FileUp, GitBranch, History, Inbox, Layers3, ListTree, Network, Radar, Search, Server, Share2, Star, Waypoints } from 'lucide-react';
+import { Boxes, Database, FileUp, GitBranch, History, Inbox, Layers3, ListTree, Network, Radar, Rss, Search, Server, Share2, Waypoints } from 'lucide-react';
 
 import type { IconType } from '@/lib/icon';
 import { useI18n } from '@/i18n/locale';
@@ -279,7 +279,7 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
       { key: 'relations', to: '/cmdb/relations', icon: Share2, label: tr('关系', 'Relations'), group: tr('模型管理', 'Models') },
       { key: 'relation-types', to: '/cmdb/relation-types', icon: GitBranch, label: tr('关系类型', 'Relation types'), group: tr('模型管理', 'Models') },
       { key: 'service-trees', to: '/cmdb/service-trees', icon: Layers3, label: tr('服务树定义', 'Tree definitions'), group: tr('模型管理', 'Models') },
-      { key: 'preferences', to: '/cmdb/preferences', icon: Star, label: tr('偏好设置', 'Preferences'), group: tr('模型管理', 'Models') },
+      { key: 'preferences', to: '/cmdb/preferences', icon: Rss, label: tr('我的订阅', 'My subscriptions'), group: tr('模型管理', 'Models') },
       { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources'), group: tr('资源管理', 'Resources') },
       { key: 'batch', to: '/cmdb/batch', icon: FileUp, label: tr('批量导入', 'Batch import'), group: tr('资源管理', 'Resources') },
       { key: 'search', to: '/cmdb/search', icon: Search, label: tr('资源搜索', 'Resource search'), group: tr('资源管理', 'Resources') },
@@ -333,9 +333,9 @@ export const cmdbPaletteRoutes: Array<{
   },
   {
     path: '/cmdb/preferences',
-    zh: 'CMDB / 偏好设置',
-    en: 'CMDB / Preferences',
-    keywords: ['cmdb', 'preference', 'subscription', 'columns', 'pianhao', 'dingyue'],
+    zh: 'CMDB / 我的订阅',
+    en: 'CMDB / My subscriptions',
+    keywords: ['cmdb', 'preference', 'subscription', 'columns', 'pianhao', 'dingyue', '我的订阅'],
     group: 'CMDB',
   },
   {

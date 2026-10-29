@@ -112,6 +112,6 @@ describe('the tree views page', () => {
     renderPage();
 
     expect(await screen.findByText('还没有可用的层级视图')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '去偏好设置' })).toHaveAttribute('href', '/cmdb/preferences');
+    expect(screen.getByRole('link', { name: '去我的订阅' })).toHaveAttribute('href', '/cmdb/preferences');
   });
 });

@@ -177,6 +177,69 @@ func (r *Repo) UpdateTypeGroup(ctx context.Context, in citypebiz.TypeGroupUpdate
 	})
 }
 
+// SetTypeGroupMembers writes the group's membership as an ORDERED set.
+//
+// THE LIST IS THE ARRANGEMENT, unlike UpdateTypeGroup: a drag names existing
+// members in a new order and expects that order to survive, so every member's
+// position comes from its index. A model named here is detached from any other
+// group first, and a member the list omits is detached from this one. One
+// transaction, because a half-applied arrangement is a group nobody dragged it
+// into.
+func (r *Repo) SetTypeGroupMembers(ctx context.Context, in citypebiz.TypeGroupMembersSpec) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var group citypemodel.CITypeGroup
+		if err := tx.First(&group, in.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return citypebiz.ErrTypeGroupNotFound
+			}
+			return fmt.Errorf("cmdb type group: load %d: %w", in.ID, err)
+		}
+
+		var existing []citypemodel.CITypeGroupItem
+		if err := tx.Where("group_id = ?", in.ID).Find(&existing).Error; err != nil {
+			return fmt.Errorf("cmdb type group: load items: %w", err)
+		}
+		byType := make(map[model.ID]citypemodel.CITypeGroupItem, len(existing))
+		for _, it := range existing {
+			byType[it.TypeID] = it
+		}
+
+		want := make(map[model.ID]bool, len(in.TypeIDs))
+		for index, typeID := range in.TypeIDs {
+			want[typeID] = true
+			if err := tx.Where("type_id = ? AND group_id <> ?", typeID, in.ID).
+				Delete(&citypemodel.CITypeGroupItem{}).Error; err != nil {
+				return fmt.Errorf("cmdb type group: detach from other group: %w", err)
+			}
+			position := model.SmallInt(index)
+			if row, ok := byType[typeID]; ok {
+				if row.Order == position {
+					continue
+				}
+				if err := tx.Model(&citypemodel.CITypeGroupItem{}).Where("id = ?", row.ID).
+					Update("order", position).Error; err != nil {
+					return fmt.Errorf("cmdb type group: reorder member: %w", err)
+				}
+				continue
+			}
+			row := citypemodel.CITypeGroupItem{GroupID: in.ID, TypeID: typeID, Order: position}
+			if err := tx.Create(&row).Error; err != nil {
+				return fmt.Errorf("cmdb type group: attach: %w", err)
+			}
+		}
+
+		for _, it := range existing {
+			if want[it.TypeID] {
+				continue
+			}
+			if err := tx.Delete(&citypemodel.CITypeGroupItem{}, it.ID).Error; err != nil {
+				return fmt.Errorf("cmdb type group: detach: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
 // DeleteTypeGroup removes a grouping, or detaches some of its members.
 //
 // Naming models detaches them and KEEPS the group; naming none removes the

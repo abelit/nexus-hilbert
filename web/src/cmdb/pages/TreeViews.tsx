@@ -135,8 +135,8 @@ export default function TreeViewsPage() {
       <PageHeader
         title={tr('资源层级', 'Resource hierarchy')}
         subtitle={tr(
-          '按偏好设置里的层级顺序逐层筛选，并在右侧查看命中的实例。',
-          'Filter level by level in the order configured in Preferences, and see the matching instances on the right.',
+          '按我的订阅里的层级顺序逐层筛选，并在右侧查看命中的实例。',
+          'Filter level by level in the order configured in My subscriptions, and see the matching instances on the right.',
         )}
         actions={
           <Button
@@ -163,12 +163,12 @@ export default function TreeViewsPage() {
           icon={ListTree}
           title={tr('还没有可用的层级视图', 'No tree view is available yet')}
           hint={tr(
-            '先在偏好设置里为模型选择层级属性。',
-            'Choose hierarchy attributes for a model in Preferences first.',
+            '先在我的订阅里为模型选择层级属性。',
+            'Choose hierarchy attributes for a model in My subscriptions first.',
           )}
           action={
             <Link to="/cmdb/preferences" className="text-xs font-medium text-indigo-400 underline">
-              {tr('去偏好设置', 'Go to Preferences')}
+              {tr('去我的订阅', 'Go to My subscriptions')}
             </Link>
           }
         />

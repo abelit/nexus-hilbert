@@ -198,6 +198,9 @@ func (noAttrStub) CreateTypeGroup(context.Context, citypebiz.TypeGroupCreateSpec
 func (noAttrStub) UpdateTypeGroup(context.Context, citypebiz.TypeGroupUpdateSpec) error {
 	return stubNotImplemented()
 }
+func (noAttrStub) SetTypeGroupMembers(context.Context, citypebiz.TypeGroupMembersSpec) error {
+	return stubNotImplemented()
+}
 func (noAttrStub) DeleteTypeGroup(context.Context, citypebiz.TypeGroupDeleteSpec) error {
 	return stubNotImplemented()
 }
@@ -305,6 +308,7 @@ type attrStub struct {
 	upsertedOrder   *citypebiz.TypeOrderSpec
 	savedAutoSub    *citypebiz.AutoSubscriptionSpec
 	updatedGroup    *citypebiz.TypeGroupUpdateSpec
+	setGroupMembers *citypebiz.TypeGroupMembersSpec
 	deletedGroup    *citypebiz.TypeGroupDeleteSpec
 	reorderedGroups *citypebiz.TypeGroupReorderSpec
 	prefErr         error

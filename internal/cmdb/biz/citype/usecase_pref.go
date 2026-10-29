@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -206,6 +207,26 @@ func (u *Usecase) resolveSubscribedField(ctx context.Context, in ShowAttributeIn
 	return SubscribedField{Attribute: &view, IsFixed: in.IsFixed}, nil
 }
 
+// ClearShowAttributes removes a user's subscription for a model.
+//
+// UNSUBSCRIBING IS A DELETE, not an empty PUT. "Show me the default view" and
+// "show me nothing" are different requests, and SetShowAttributes refuses the
+// empty list precisely because it cannot tell them apart. cantor collapsed
+// both into an empty POST, which silently removed the subscription.
+func (u *Usecase) ClearShowAttributes(ctx context.Context, uid model.ID, ref string) error {
+	if u.repo == nil {
+		return errs.ErrNotWiredYet
+	}
+	view, err := u.GetByRef(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if view == nil {
+		return errs.ErrNotFound
+	}
+	return u.repo.ClearShowAttributes(ctx, uid, view.Type.ID)
+}
+
 // --- the sidebar ---
 
 // SubscribedModels is the console's sidebar: the models a user is subscribed
@@ -219,6 +240,11 @@ type SubscribedModels struct {
 	// render them. cantor returned this as an unordered set; it is ordered here
 	// because it is an ordering.
 	TypeIDs []model.ID
+
+	// SubscribedAt says when each model's manual subscription was first saved.
+	// A model covered by an auto-subscription rule has no row here, because the
+	// rule — not a saved column list — is what subscribes it.
+	SubscribedAt map[model.ID]time.Time
 }
 
 // ListSubscribedModels returns the models a user is subscribed to.
@@ -269,7 +295,14 @@ func (u *Usecase) ListSubscribedModels(ctx context.Context, uid model.ID, includ
 	if err != nil {
 		return nil, err
 	}
-	return &SubscribedModels{Groups: groups, TypeIDs: liveIDs}, nil
+	times, err := u.repo.SubscribedAt(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+	if times == nil {
+		times = map[model.ID]time.Time{}
+	}
+	return &SubscribedModels{Groups: groups, TypeIDs: liveIDs, SubscribedAt: times}, nil
 }
 
 // subscribedTypeIDs resolves which models a user is subscribed to.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -110,6 +111,52 @@ func TestReplaceShowAttributesAssignsPositionsFromTheList(t *testing.T) {
 	}
 	if byAttr[second.ID] != 0 || byAttr[unique.ID] != 1 {
 		t.Fatalf("positions = %v, want the reordered list", byAttr)
+	}
+}
+
+// Re-saving the column list keeps the original subscription date, so the
+// earliest row for a model is the one the console reports.
+func TestSubscribedAtKeepsTheEarliestRowPerModel(t *testing.T) {
+	repo, db := newAttrRepo(t)
+	ct, unique := seedHost(t, repo, db)
+	second := seedAttr(t, db, "cpu")
+	ctx := context.Background()
+
+	if err := repo.ReplaceShowAttributes(ctx, citypebiz.ShowAttributesSpec{
+		UID: 7, TypeID: ct.ID,
+		Fields: []citypebiz.SubscribedFieldSpec{field(unique.ID, false), field(second.ID, false)},
+	}); err != nil {
+		t.Fatalf("ReplaceShowAttributes() error = %v", err)
+	}
+
+	early := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	late := early.Add(72 * time.Hour)
+	if err := db.Model(&citypemodel.PreferenceShowAttributes{}).
+		Where("uid = ? AND type_id = ? AND attr_id = ?", 7, ct.ID, unique.ID).
+		Update("created_at", early).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&citypemodel.PreferenceShowAttributes{}).
+		Where("uid = ? AND type_id = ? AND attr_id = ?", 7, ct.ID, second.ID).
+		Update("created_at", late).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.SubscribedAt(ctx, 7)
+	if err != nil {
+		t.Fatalf("SubscribedAt() error = %v", err)
+	}
+	if !got[ct.ID].Equal(early) {
+		t.Fatalf("subscribed at = %v, want the earliest row", got[ct.ID])
+	}
+
+	// Another user has no subscription, so they get no date.
+	other, err := repo.SubscribedAt(ctx, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := other[ct.ID]; ok {
+		t.Fatalf("other user's times = %v, want empty", other)
 	}
 }
 

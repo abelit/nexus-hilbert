@@ -100,6 +100,12 @@ export type ModelGroup = {
 export type SubscribedModels = {
   groups: ModelGroup[];
   type_ids: number[];
+  /**
+   * When each model's manual subscription was first saved, keyed by model id.
+   * Models covered by an auto-subscription rule have no entry: the rule, not a
+   * saved column list, is what subscribes them.
+   */
+  subscribed_at?: Record<string, string>;
 };
 
 export function listSubscribedModels(): Promise<SubscribedModels> {
@@ -121,6 +127,16 @@ export function setShowFields(
   fields: Array<{ ref: string; is_fixed: boolean }>,
 ): Promise<ShowAttributes> {
   return cmdbPut<ShowAttributes>(`/preferences/ci-types/${encodeURIComponent(String(ref))}/fields`, { fields });
+}
+
+/**
+ * Removes a model's column subscription, returning it to the default view.
+ *
+ * A DELETE rather than an empty save: "show me the defaults" and "show me
+ * nothing" are different requests, and the backend refuses the ambiguous one.
+ */
+export function clearShowFields(ref: string | number): Promise<void> {
+  return cmdbDelete(`/preferences/ci-types/${encodeURIComponent(String(ref))}/fields`);
 }
 
 export function setModelOrder(typeIDs: number[], isTree = false): Promise<unknown> {
@@ -167,6 +183,17 @@ export function updateModelGroup(id: number, input: ModelGroupWrite): Promise<Mo
 }
 
 /**
+ * Replaces a group's membership as an ORDERED list.
+ *
+ * The list is the arrangement: a drag writes existing members in their new
+ * positions, which `updateModelGroup` cannot express — it appends new members
+ * and leaves existing positions alone.
+ */
+export function setModelGroupMembers(id: number, typeIDs: number[]): Promise<void> {
+  return cmdbPut<void>(`/model-groups/${id}/members`, { type_ids: typeIDs });
+}
+
+/**
  * Removes a group, or only detaches the named models when `typeIDs` is not
  * empty. The backend treats a DELETE with no body as "remove the group".
  */
@@ -189,6 +216,8 @@ export type TreeLevel = {
   icon?: string;
   /** The attributes the hierarchy shows, in order. */
   levels: TypeAttribute[];
+  /** When the view was first saved, for the subscription-age label. */
+  created_at?: string;
 };
 
 export function listTreeLevels(): Promise<TreeLevel[]> {

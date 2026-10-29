@@ -2,6 +2,7 @@ package citype
 
 import (
 	"context"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -41,6 +42,13 @@ type PreferenceRepo interface {
 	// SubscribedTypeIDs returns the DISTINCT models a user has subscribed to,
 	// used when they have no auto-subscription rule.
 	SubscribedTypeIDs(ctx context.Context, uid model.ID) ([]model.ID, error)
+
+	// SubscribedAt returns when each model's subscription was first saved.
+	//
+	// It reports the EARLIEST row per model: re-saving a column list keeps the
+	// original subscription date, which is what "subscribed since" means to the
+	// operator. Models with no manual subscription are absent.
+	SubscribedAt(ctx context.Context, uid model.ID) (map[model.ID]time.Time, error)
 
 	// TypeOrder returns a user's saved model ordering, both the resource one
 	// and the tree one.
@@ -129,6 +137,16 @@ type TypeGroupRepo interface {
 	// transaction.
 	UpdateTypeGroup(ctx context.Context, in TypeGroupUpdateSpec) error
 
+	// SetTypeGroupMembers makes the group's membership exactly the supplied
+	// ORDERED list, in one transaction.
+	//
+	// It differs from UpdateTypeGroup in what it does with the order: an update
+	// appends new members and leaves existing positions alone, which is right
+	// for "assign these models to this group". A drag produces a new position
+	// for existing members, so it needs a write that treats the list as the
+	// arrangement itself.
+	SetTypeGroupMembers(ctx context.Context, in TypeGroupMembersSpec) error
+
 	// DeleteTypeGroup removes a group and, when no member list is given, its
 	// membership rows. One transaction.
 	DeleteTypeGroup(ctx context.Context, in TypeGroupDeleteSpec) error
@@ -166,4 +184,14 @@ type TypeGroupDeleteSpec struct {
 // TypeGroupReorderSpec is one wholesale ordering of the groups.
 type TypeGroupReorderSpec struct {
 	GroupIDs []model.ID
+}
+
+// TypeGroupMembersSpec is one ordered membership write.
+type TypeGroupMembersSpec struct {
+	ID model.ID
+
+	// TypeIDs is the group's members, in display order. A model named here is
+	// detached from whichever other group held it; a model this group held and
+	// the list omits is detached.
+	TypeIDs []model.ID
 }

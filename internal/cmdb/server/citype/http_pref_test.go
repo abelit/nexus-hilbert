@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -49,6 +50,19 @@ func (s *attrStub) SubscribedTypeIDs(context.Context, model.ID) ([]model.ID, err
 		if !seen[r.TypeID] {
 			seen[r.TypeID] = true
 			out = append(out, r.TypeID)
+		}
+	}
+	return out, nil
+}
+
+func (s *attrStub) SubscribedAt(_ context.Context, uid model.ID) (map[model.ID]time.Time, error) {
+	out := map[model.ID]time.Time{}
+	for _, r := range s.showAttrs {
+		if r.UID != uid {
+			continue
+		}
+		if existing, ok := out[r.TypeID]; !ok || r.CreatedAt.Before(existing) {
+			out[r.TypeID] = r.CreatedAt
 		}
 	}
 	return out, nil
@@ -154,6 +168,14 @@ func (s *attrStub) UpdateTypeGroup(_ context.Context, in citypebiz.TypeGroupUpda
 	return nil
 }
 
+func (s *attrStub) SetTypeGroupMembers(_ context.Context, in citypebiz.TypeGroupMembersSpec) error {
+	if s.groupErr != nil {
+		return s.groupErr
+	}
+	s.setGroupMembers = &in
+	return nil
+}
+
 func (s *attrStub) DeleteTypeGroup(_ context.Context, in citypebiz.TypeGroupDeleteSpec) error {
 	if s.groupErr != nil {
 		return s.groupErr
@@ -182,6 +204,7 @@ func TestPreferenceWritesDoNotRequireAdmin(t *testing.T) {
 
 	cases := []struct{ method, path, body string }{
 		{http.MethodPut, "/v1/cmdb/preferences/ci-types/10/fields", `{"fields":[{"ref":"hostname"}]}`},
+		{http.MethodDelete, "/v1/cmdb/preferences/ci-types/10/fields", ``},
 		{http.MethodPut, "/v1/cmdb/preferences/ci-types/order", `{"type_ids":[10]}`},
 		{http.MethodPut, "/v1/cmdb/preferences/auto-subscription", `{"base_strategy":"all"}`},
 		{http.MethodDelete, "/v1/cmdb/preferences/auto-subscription", ``},
@@ -203,6 +226,7 @@ func TestModelGroupWritesRequireAdmin(t *testing.T) {
 		{http.MethodPut, "/v1/cmdb/model-groups/300", `{"name":"g"}`},
 		{http.MethodDelete, "/v1/cmdb/model-groups/300", ``},
 		{http.MethodPut, "/v1/cmdb/model-groups/order", `{"group_ids":[300]}`},
+		{http.MethodPut, "/v1/cmdb/model-groups/300/members", `{"type_ids":[10]}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
@@ -269,6 +293,16 @@ func TestSetFieldsRejectsAnEmptyList(t *testing.T) {
 	}
 }
 
+// Unsubscribing is a DELETE, because an empty PUT would be ambiguous: "show me
+// the defaults" and "show me nothing" are different requests.
+func TestClearFieldsReturnsNoContent(t *testing.T) {
+	rec := send(t, attrRouter(t, prefStub(), "user", false, 7), http.MethodDelete,
+		"/v1/cmdb/preferences/ci-types/10/fields", "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (body %s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestGetFieldsShape(t *testing.T) {
 	stub := prefStub()
 	stub.showAttrs = []citypemodel.PreferenceShowAttributes{
@@ -304,7 +338,10 @@ func TestGetFieldsShape(t *testing.T) {
 
 func TestSubscribedModelsShape(t *testing.T) {
 	stub := prefStub()
-	stub.showAttrs = []citypemodel.PreferenceShowAttributes{{UID: 7, TypeID: 10, AttrID: attrIDPtr(1)}}
+	subscribedAt := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	stub.showAttrs = []citypemodel.PreferenceShowAttributes{
+		{Base: model.Base{CreatedAt: subscribedAt}, UID: 7, TypeID: 10, AttrID: attrIDPtr(1)},
+	}
 
 	rec := do(t, attrRouter(t, stub, "user", false, 7), "/v1/cmdb/preferences/ci-types")
 	if rec.Code != http.StatusOK {
@@ -319,6 +356,11 @@ func TestSubscribedModelsShape(t *testing.T) {
 	}
 	if len(got.Groups) != 1 || !got.Groups[0].IsOther {
 		t.Fatalf("groups = %+v, want the ungrouped bucket", got.Groups)
+	}
+	// The console says how long the subscription has existed; the date comes
+	// from the stored row rather than from the request.
+	if !got.SubscribedAt[10].Equal(subscribedAt) {
+		t.Fatalf("subscribed_at = %v, want %v", got.SubscribedAt, subscribedAt)
 	}
 }
 
@@ -478,6 +520,21 @@ func TestPreferenceRepoFailureIsInternalError(t *testing.T) {
 	rec := do(t, attrRouter(t, stub, "user", false, 7), "/v1/cmdb/preferences/ci-types")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 (body %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetModelGroupMembersStoresTheOrderedList(t *testing.T) {
+	stub := prefStub()
+	stub.typeGroups = []citypemodel.CITypeGroup{{Name: "硬件"}}
+	stub.typeGroups[0].ID = 300
+	rec := send(t, attrRouter(t, stub, "admin", false, 7), http.MethodPut,
+		"/v1/cmdb/model-groups/300/members", `{"type_ids":[10]}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (body %s)", rec.Code, rec.Body.String())
+	}
+	if stub.setGroupMembers == nil || stub.setGroupMembers.ID != 300 ||
+		len(stub.setGroupMembers.TypeIDs) != 1 || stub.setGroupMembers.TypeIDs[0] != 10 {
+		t.Fatalf("spec = %+v", stub.setGroupMembers)
 	}
 }
 

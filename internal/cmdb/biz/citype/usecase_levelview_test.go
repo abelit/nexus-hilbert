@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -97,8 +98,9 @@ func levelFixture() *levelRepo {
 // `item.levels`.
 func TestListTreeLevelsRendersTheModelAndItsLevels(t *testing.T) {
 	repo := levelFixture()
+	createdAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	repo.views = []citypemodel.PreferenceTreeView{
-		{UID: 7, TypeID: 10, Levels: citypemodel.IDList{1, 2}},
+		{Base: model.Base{CreatedAt: createdAt}, UID: 7, TypeID: 10, Levels: citypemodel.IDList{1, 2}},
 	}
 	repo.views[0].ID = 99
 
@@ -115,6 +117,11 @@ func TestListTreeLevelsRendersTheModelAndItsLevels(t *testing.T) {
 	}
 	if len(item.Levels) != 2 || item.Levels[0].Name != "hostname" || item.Levels[1].Name != "cpu" {
 		t.Fatalf("levels = %+v, want the saved order", item.Levels)
+	}
+	// The subscription date comes from the stored row, so the page can say how
+	// long the model has been subscribed.
+	if !item.CreatedAt.Equal(createdAt) {
+		t.Fatalf("created at = %v, want %v", item.CreatedAt, createdAt)
 	}
 }
 

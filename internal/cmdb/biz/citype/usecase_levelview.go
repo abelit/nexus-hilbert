@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -41,6 +42,11 @@ type TreeLevelView struct {
 	// that has since been removed from the model is SKIPPED rather than
 	// rendered as a nameless column — see ListTreeLevels.
 	Levels []TypeAttribute `json:"levels"`
+
+	// CreatedAt is when the view was first saved, so the console can say how
+	// long the model has been subscribed. It is zero for a view that was not
+	// read back from storage yet.
+	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 
 // ListTreeLevels returns a user's saved hierarchy levels.
@@ -131,11 +137,12 @@ func (u *Usecase) ListTreeLevels(ctx context.Context, uid model.ID) ([]TreeLevel
 		}
 
 		item := TreeLevelView{
-			ID:     row.ID,
-			TypeID: row.TypeID,
-			Name:   view.Type.Name,
-			Alias:  view.Type.Alias,
-			Levels: levels,
+			ID:        row.ID,
+			TypeID:    row.TypeID,
+			Name:      view.Type.Name,
+			Alias:     view.Type.Alias,
+			Levels:    levels,
+			CreatedAt: row.CreatedAt,
 		}
 		if view.Type.Icon != nil {
 			item.Icon = *view.Type.Icon
@@ -223,6 +230,7 @@ func (u *Usecase) SetTreeLevels(ctx context.Context, uid model.ID, typeRef strin
 	}
 	if saved != nil {
 		item.ID = saved.ID
+		item.CreatedAt = saved.CreatedAt
 		for _, id := range saved.Levels {
 			if attr, ok := findTypeAttribute(eff.Attributes, strconv.FormatInt(int64(id), 10)); ok {
 				item.Levels = append(item.Levels, attr)

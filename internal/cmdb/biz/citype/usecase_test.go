@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -13,6 +14,12 @@ import (
 // countingRepo is an in-memory port that also records how many times each
 // batch method was called, so the "bounded queries regardless of row count"
 // claim is testable rather than asserted in a comment.
+// SubscribedAt is the empty-preference answer for the doubles that do not
+// exercise subscriptions; attrRepo overrides it with its seeded rows.
+func (r *countingRepo) SubscribedAt(context.Context, model.ID) (map[model.ID]time.Time, error) {
+	return map[model.ID]time.Time{}, nil
+}
+
 type countingRepo struct {
 	// The attribute-management half is a separate double; see attrfake_test.go.
 	noAttrRepo

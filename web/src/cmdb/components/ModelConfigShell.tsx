@@ -9,7 +9,7 @@ import { listCITypes, type CIType } from '../api/citype';
 import { listModelGroups, type ModelGroup } from '../api/preferences';
 import { describeError } from '../api/http';
 import { ModelTree } from './ModelTree';
-import { ModelTreeRefreshContext } from './model-tree-context';
+import { ModelGroupsSyncContext, ModelTreeRefreshContext } from './model-tree-context';
 import { WorkspaceBar } from './WorkspaceBar';
 
 // The model configuration workspace.
@@ -46,6 +46,7 @@ export function ModelConfigShell({ header, children }: { header: ModelConfigHead
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [groupsVersion, setGroupsVersion] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,10 +67,15 @@ export function ModelConfigShell({ header, children }: { header: ModelConfigHead
   }, [load]);
 
   const refresh = useMemo(() => ({ refresh: () => void load() }), [load]);
+  const groupsSync = useMemo(
+    () => ({ version: groupsVersion, notify: () => setGroupsVersion((current) => current + 1) }),
+    [groupsVersion],
+  );
   const selected = models.find((model) => model.id === selectedID);
 
   return (
     <ModelTreeRefreshContext.Provider value={refresh}>
+      <ModelGroupsSyncContext.Provider value={groupsSync}>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <WorkspaceBar leading={header.leading} actions={header.actions} />
 
@@ -124,6 +130,7 @@ export function ModelConfigShell({ header, children }: { header: ModelConfigHead
           />
         </div>
       </Modal>
+      </ModelGroupsSyncContext.Provider>
     </ModelTreeRefreshContext.Provider>
   );
 }

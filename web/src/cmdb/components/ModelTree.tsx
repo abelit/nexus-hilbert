@@ -1,16 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Folder, FolderOpen, Plus, Search } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, GripVertical, Plus, Search } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
+import { usePermissions } from '@/store/me';
 
 import type { CIType } from '../api/citype';
-import type { ModelGroup } from '../api/preferences';
+import { describeError } from '../api/http';
+import {
+  deleteModelGroup,
+  listModelGroups,
+  reorderModelGroups,
+  setModelGroupMembers,
+  type ModelGroup,
+} from '../api/preferences';
+import { GroupedSortable, type DragSource, type SortableHandle } from './GroupedSortable';
 import { CMDBIcon } from './CMDBIcon';
+import { useModelGroupsSync, useModelTreeRefresh } from './model-tree-context';
+import { groupIDFromSlotKey, groupSlotKey, mergeGroupMembership, sharedDragPlan } from '../lib/group-drag';
 
 // The model tree is the navigation half of the model configuration workspace.
 //
@@ -53,8 +64,12 @@ export function ModelTree({
   compact?: boolean;
 }) {
   const { tr } = useI18n();
+  const { isAdmin } = usePermissions();
+  const treeRefresh = useModelTreeRefresh();
+  const groupsSync = useModelGroupsSync();
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [dragErr, setDragErr] = useState<string | null>(null);
   const selectedRef = useRef<HTMLAnchorElement | null>(null);
 
   const treeGroups = useMemo<TreeGroup[]>(() => {
@@ -67,7 +82,7 @@ export function ModelTree({
         .filter((item) => byModel.has(item.id));
       groupModels.forEach((item) => assigned.add(item.id));
       return {
-        key: group.id != null ? `g-${group.id}` : 'other',
+        key: groupSlotKey(group),
         name: group.name,
         isOther: group.is_other || group.id == null,
         models: groupModels,
@@ -88,6 +103,10 @@ export function ModelTree({
     return fromAPI;
   }, [groups, models, tr]);
 
+  // Seeded from the server arrangement, then edited by drag. Initialising from
+  // the computed groups avoids an empty first frame for an administrator.
+  const [dragGroups, setDragGroups] = useState<TreeGroup[]>(treeGroups);
+
   const needle = query.trim().toLowerCase();
   const visibleGroups = useMemo(
     () =>
@@ -101,6 +120,63 @@ export function ModelTree({
         .filter((group) => group.models.length > 0),
     [needle, treeGroups],
   );
+
+  // The synthetic "All models" bucket has no group to store an order in, so it
+  // is not a drag surface. Requiring at least one real group also keeps a
+  // group-less deployment on the cheap static path.
+  const canDrag = isAdmin && !needle && treeGroups.some((group) => !group.isOther);
+
+  // The drag edits a copy; a prop change (after a refresh) re-seeds it. Only
+  // when there is a drag surface: a group-less tree stays on the static path
+  // and must not pay for a second render of every row.
+  useEffect(() => {
+    if (canDrag) setDragGroups(treeGroups);
+  }, [canDrag, treeGroups]);
+
+  const commitDrag = async (source: DragSource, next: TreeGroup[]) => {
+    setDragGroups(next);
+    const plan = sharedDragPlan(
+      source,
+      next.map((group) => ({ key: group.key, items: group.models })),
+      (model) => model.id,
+    );
+    const beforeOrder = treeGroups.map((group) => groupIDFromSlotKey(group.key)).filter((id): id is number => id != null);
+    const orderChanged =
+      plan.groupOrder != null &&
+      (plan.groupOrder.length !== beforeOrder.length || plan.groupOrder.some((id, index) => id !== beforeOrder[index]));
+    const hasWrite = orderChanged || plan.setMembers != null || plan.detachFrom != null;
+    if (!hasWrite) {
+      // Dropping inside 其他 has no shared membership to store; put the row back
+      // rather than leaving an arrangement that would vanish on the next read.
+      setDragGroups(treeGroups);
+      return;
+    }
+    try {
+      // Read the groups at write time: the tree's snapshot can be older than a
+      // card-view or subscription write, and a stale membership list would
+      // drop the members this surface cannot see.
+      const fresh = await listModelGroups();
+      if (orderChanged && plan.groupOrder) {
+        const freshIDs = fresh.map((group) => group.id).filter((id): id is number => id != null);
+        const missing = freshIDs.filter((id) => !plan.groupOrder?.includes(id));
+        await reorderModelGroups([...plan.groupOrder, ...missing]);
+      }
+      if (plan.setMembers) {
+        const full = fresh.find((group) => group.id === plan.setMembers?.groupID)?.ci_types.map((model) => model.id) ?? [];
+        await setModelGroupMembers(plan.setMembers.groupID, mergeGroupMembership(plan.setMembers.typeIDs, full));
+      }
+      if (plan.detachFrom != null && source.type === 'item') {
+        await deleteModelGroup(plan.detachFrom, [source.itemID]);
+      }
+      setDragErr(null);
+      treeRefresh?.refresh();
+      groupsSync?.notify();
+    } catch (error) {
+      setDragErr(describeError(error, tr('保存分组拖动失败', 'Could not save the group arrangement')));
+      setDragGroups(treeGroups);
+      treeRefresh?.refresh();
+    }
+  };
 
   useEffect(() => {
     if (!selectedID) return;
@@ -122,6 +198,53 @@ export function ModelTree({
       else next.add(key);
       return next;
     });
+  };
+
+  const isOpen = (group: TreeGroup) => !!needle || !collapsed.has(group.key);
+  const groupTitle = (group: TreeGroup) =>
+    group.isOther ? tr('其他', 'Other') : group.name || tr('未命名分组', 'Untitled group');
+
+  const groupRow = (group: TreeGroup, grip?: ReactNode) => {
+    const open = isOpen(group);
+    return (
+      <div className="flex items-center gap-0.5">
+        {grip}
+        <button
+          type="button"
+          onClick={() => toggle(group.key)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-text-muted hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500"
+        >
+          <ChevronRight size={12} className={cn('shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
+          {open ? <FolderOpen size={13} className="shrink-0 text-indigo-400" aria-hidden="true" /> : <Folder size={13} className="shrink-0 text-indigo-400" aria-hidden="true" />}
+          <span className="min-w-0 truncate">{groupTitle(group)}</span>
+          <span className="ms-auto text-[10px] text-text-faint">{group.models.length}</span>
+        </button>
+      </div>
+    );
+  };
+
+  const modelRow = (model: CIType, grip?: ReactNode) => {
+    const selected = selectedID === model.id;
+    return (
+      <div className="flex items-center gap-0.5">
+        {grip}
+        <Link
+          ref={selected ? selectedRef : undefined}
+          to={`/cmdb/models/${model.id}`}
+          onClick={onSelect}
+          aria-current={selected ? 'page' : undefined}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500',
+            selected ? 'bg-indigo-500/15 text-text' : 'text-text-muted hover:bg-card hover:text-text',
+          )}
+        >
+          <CMDBIcon value={model.icon} size={14} label={model.alias || model.name} />
+          <span className="min-w-0 flex-1 truncate">{model.alias || model.name}</span>
+          {!model.enabled && <Chip className="shrink-0 px-1 py-0 text-[10px]">{tr('停用', 'Off')}</Chip>}
+        </Link>
+      </div>
+    );
   };
 
   return (
@@ -157,6 +280,11 @@ export function ModelTree({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {dragErr && (
+          <div role="alert" className="mb-2 rounded-md border border-red-500/40 bg-red-500/5 px-2 py-1.5 text-[11px] text-red-300">
+            {dragErr}
+          </div>
+        )}
         {loading ? (
           <p className="px-2 py-6 text-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</p>
         ) : error ? (
@@ -168,54 +296,67 @@ export function ModelTree({
               </Button>
             )}
           </div>
-        ) : visibleGroups.length === 0 ? (
-          <p className="px-2 py-6 text-center text-xs text-text-muted">
-            {needle ? tr('没有匹配的模型', 'No model matches that') : tr('还没有模型', 'No models yet')}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {visibleGroups.map((group) => {
-              const open = !!needle || !collapsed.has(group.key);
+        ) : needle && visibleGroups.length === 0 ? (
+          <p className="px-2 py-6 text-center text-xs text-text-muted">{tr('没有匹配的模型', 'No model matches that')}</p>
+        ) : models.length === 0 ? (
+          <p className="px-2 py-6 text-center text-xs text-text-muted">{tr('还没有模型', 'No models yet')}</p>
+        ) : canDrag ? (
+          <GroupedSortable<CIType, TreeGroup>
+            groups={dragGroups}
+            getID={(model) => model.id}
+            getItems={(group) => group.models}
+            withItems={(group, models) => ({ ...group, models })}
+            onGroupsChange={setDragGroups}
+            onCommit={(source, next) => void commitDrag(source, next)}
+            canDragGroup={(group) => !group.isOther}
+            renderGroup={(group, sortable, children) => (
+              <div>
+                {groupRow(
+                  group,
+                  <TreeGrip handle={sortable} label={tr(`拖动分组 ${groupTitle(group)}`, `Drag the ${groupTitle(group)} group`)} />,
+                )}
+                {isOpen(group) && (
+                  <div className="ms-3 flex flex-col gap-0.5 border-s border-border ps-1">{children}</div>
+                )}
+              </div>
+            )}
+            renderItem={(model, _groupKey, sortable) =>
+              modelRow(model, <TreeGrip handle={sortable} label={tr(`拖动模型 ${model.name}`, `Drag ${model.name}`)} />)
+            }
+            renderOverlay={(source, item) => {
+              if (source.type === 'group') {
+                const group = dragGroups.find((candidate) => candidate.key === source.groupKey);
+                return (
+                  <div className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1.5 text-[11px] text-text shadow-xl">
+                    <Folder size={13} className="text-indigo-400" aria-hidden="true" />
+                    <span className="truncate">{group ? groupTitle(group) : tr('分组', 'Group')}</span>
+                    <span className="text-text-faint">{group?.models.length ?? 0}</span>
+                  </div>
+                );
+              }
+              if (!item) return null;
               return (
-                <div key={group.key}>
-                  <button
-                    type="button"
-                    onClick={() => toggle(group.key)}
-                    aria-expanded={open}
-                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-text-muted hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500"
-                  >
-                    <ChevronRight size={12} className={cn('shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
-                    {open ? <FolderOpen size={13} className="shrink-0 text-indigo-400" aria-hidden="true" /> : <Folder size={13} className="shrink-0 text-indigo-400" aria-hidden="true" />}
-                    <span className="min-w-0 truncate">{group.isOther ? tr('其他', 'Other') : group.name || tr('未命名分组', 'Untitled group')}</span>
-                    <span className="ms-auto text-[10px] text-text-faint">{group.models.length}</span>
-                  </button>
-                  {open && (
-                    <div className="ms-3 flex flex-col gap-0.5 border-s border-border ps-1">
-                      {group.models.map((model) => {
-                        const selected = selectedID === model.id;
-                        return (
-                          <Link
-                            key={model.id}
-                            ref={selected ? selectedRef : undefined}
-                            to={`/cmdb/models/${model.id}`}
-                            onClick={onSelect}
-                            aria-current={selected ? 'page' : undefined}
-                            className={cn(
-                              'flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500',
-                              selected ? 'bg-indigo-500/15 text-text' : 'text-text-muted hover:bg-card hover:text-text',
-                            )}
-                          >
-                            <CMDBIcon value={model.icon} size={14} label={model.alias || model.name} />
-                            <span className="min-w-0 flex-1 truncate">{model.alias || model.name}</span>
-                            {!model.enabled && <Chip className="shrink-0 px-1 py-0 text-[10px]">{tr('停用', 'Off')}</Chip>}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  )}
+                <div className="flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5 text-xs text-text shadow-xl">
+                  <CMDBIcon value={item.icon} size={14} label={item.alias || item.name} />
+                  <span className="truncate">{item.alias || item.name}</span>
                 </div>
               );
-            })}
+            }}
+          />
+        ) : (
+          <div className="flex flex-col gap-1">
+            {visibleGroups.map((group) => (
+              <div key={group.key}>
+                {groupRow(group)}
+                {isOpen(group) && (
+                  <div className="ms-3 flex flex-col gap-0.5 border-s border-border ps-1">
+                    {group.models.map((model) => (
+                      <div key={model.id}>{modelRow(model)}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -229,5 +370,22 @@ export function ModelTree({
         </Link>
       </div>
     </aside>
+  );
+}
+
+/** The grip is the only activator; the folder button keeps its collapse action. */
+function TreeGrip({ handle, label }: { handle: SortableHandle; label: string }) {
+  if (!handle.draggable) return null;
+  return (
+    <button
+      type="button"
+      {...handle.attributes}
+      {...handle.listeners}
+      aria-label={label}
+      title={label}
+      className="inline-flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-text-faint hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 active:cursor-grabbing"
+    >
+      <GripVertical size={11} aria-hidden="true" />
+    </button>
   );
 }

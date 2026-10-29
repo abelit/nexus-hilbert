@@ -7,28 +7,35 @@ import { useI18n } from '@/i18n/locale';
 
 import { ModelGroupsPanel } from '../components/preferences/ModelGroupsPanel';
 import { SavedSearchesPanel } from '../components/preferences/SavedSearchesPanel';
-import { TreeLevelsPanel } from '../components/preferences/TreeLevelsPanel';
 import SubscriptionsPage from './Subscriptions';
 
-// 偏好设置 — the one page for "how I see the CMDB".
+// 我的订阅 — the one page for "how I see the CMDB".
 //
 // THE TABS ARE INDEPENDENT PANELS, not one form: a subscription is per user,
-// a model group is shared configuration, a tree level is a per-user view, and
-// a saved search belongs to the person who made it. One save button across
-// them would silently apply the wrong ownership rule to half the page.
+// a model group is shared configuration, and a saved search belongs to the
+// person who made it. One save button across them would silently apply the
+// wrong ownership rule to half the page.
+//
+// THE HIERARCHY LIVES INSIDE THE FIRST TAB now, not in a tab of its own: cantor
+// treated "which columns the list shows" and "which columns the tree expands"
+// as two halves of the same per-model subscription, and a separate tab made the
+// operator pick the same model twice.
 
-type Tab = 'models' | 'groups' | 'tree' | 'searches';
+type Tab = 'subscriptions' | 'groups' | 'searches';
 
-const TABS: Tab[] = ['models', 'groups', 'tree', 'searches'];
+const TABS: Tab[] = ['subscriptions', 'groups', 'searches'];
 
 function tabFrom(value: string | null): Tab | null {
+  // `models` and `tree` are the old tab names; both used to be subscription
+  // views, so a bookmark that names either still lands on the right panel.
+  if (value === 'models' || value === 'tree') return 'subscriptions';
   return value && (TABS as string[]).includes(value) ? (value as Tab) : null;
 }
 
 export default function PreferencesPage() {
   const { tr } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => tabFrom(searchParams.get('tab')) ?? 'models');
+  const [tab, setTab] = useState<Tab>(() => tabFrom(searchParams.get('tab')) ?? 'subscriptions');
 
   // The URL is also the state when the operator uses back/forward or follows a
   // deep link while the page is already mounted.
@@ -49,29 +56,29 @@ export default function PreferencesPage() {
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
       <PageHeader
-        title={tr('偏好设置', 'Preferences')}
+        title={tr('我的订阅', 'My subscriptions')}
         subtitle={tr(
-          '选择模型与列、维护共享分组，以及管理你的树层级和保存搜索。',
-          'Choose models and columns, maintain shared groups, and manage your tree levels and saved searches.',
+          '选择每个模型显示的列与层级，并管理共享分组和你的保存搜索。',
+          'Choose the columns and hierarchy each model shows, and manage shared groups and your saved searches.',
         )}
       />
 
-      <Tabs value={tab} onValueChange={changeTab} className="min-h-0 flex-1">
+      {/* The root is a flex column so a tab panel can fill the remaining height
+          and let its own body scroll. Without it the panel grows to its content,
+          and on a narrow window the catalogue below the fold is clipped by the
+          app shell instead of scrolling. */}
+      <Tabs value={tab} onValueChange={changeTab} className="flex min-h-0 flex-1 flex-col">
         <TabsList className="mx-6 mt-4">
-          <TabsTrigger value="models">{tr('模型与列', 'Models & columns')}</TabsTrigger>
+          <TabsTrigger value="subscriptions">{tr('订阅', 'Subscriptions')}</TabsTrigger>
           <TabsTrigger value="groups">{tr('模型分组', 'Model groups')}</TabsTrigger>
-          <TabsTrigger value="tree">{tr('树层级', 'Tree levels')}</TabsTrigger>
           <TabsTrigger value="searches">{tr('保存搜索', 'Saved searches')}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="models" className="min-h-0 flex-1">
+        <TabsContent value="subscriptions" className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <SubscriptionsPage embedded />
         </TabsContent>
         <TabsContent value="groups" className="min-h-0 flex-1 overflow-y-auto p-6">
           <ModelGroupsPanel />
-        </TabsContent>
-        <TabsContent value="tree" className="min-h-0 flex-1 overflow-y-auto p-6">
-          <TreeLevelsPanel />
         </TabsContent>
         <TabsContent value="searches" className="min-h-0 flex-1 overflow-y-auto p-6">
           <SavedSearchesPanel />
