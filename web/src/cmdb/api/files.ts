@@ -114,7 +114,12 @@ export type FileStorageConfig = {
   max_file_size_mb: number;
 };
 
+/** How online preview is provided. */
+export type PreviewService = 'builtin' | 'custom' | 'off';
+
 export type FilePreviewConfig = {
+  /** builtin uses the same-origin bundled service; custom uses the address. */
+  preview_service: PreviewService;
   preview_server_url: string;
   /** Base kkFileView uses to fetch signed files; empty uses the browser base. */
   file_fetch_base_url: string;

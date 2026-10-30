@@ -23,6 +23,19 @@ const (
 	// Sending it back means "keep the current value".
 	MaskedSecret = "******"
 
+	// PreviewServiceBuiltin uses the bundled kkFileView behind the same
+	// origin. The address is fixed so an operator cannot accidentally point
+	// the built-in mode at another host.
+	PreviewServiceBuiltin = "builtin"
+	// PreviewServiceCustom uses an administrator-provided kkFileView address.
+	PreviewServiceCustom = "custom"
+	// PreviewServiceOff disables online preview; uploads and downloads keep
+	// working.
+	PreviewServiceOff = "off"
+
+	// BuiltinPreviewPath is the nginx-mounted kkFileView entry point.
+	BuiltinPreviewPath = "/file-preview/onlinePreview"
+
 	DefaultMaxFileSizeMB = 50
 	MaxFileSizeMB        = 500
 )
@@ -62,6 +75,10 @@ type StoragePatch struct {
 // PreviewConfig is the kkFileView configuration. It contains no secrets, so
 // the browser may read it to build the iframe URL.
 type PreviewConfig struct {
+	// PreviewService is builtin, custom or off. The mode is authoritative:
+	// builtin forces PreviewServerURL to BuiltinPreviewPath, off empties it,
+	// and custom requires one.
+	PreviewService   string `json:"preview_service"`
 	PreviewServerURL string `json:"preview_server_url"`
 	// FileFetchBaseURL is the absolute base kkFileView uses to fetch the
 	// signed capability URL. It must be reachable from the kkFileView
@@ -74,6 +91,7 @@ type PreviewConfig struct {
 
 // PreviewPatch is the partial preview update.
 type PreviewPatch struct {
+	PreviewService         *string   `json:"preview_service"`
 	PreviewServerURL       *string   `json:"preview_server_url"`
 	FileFetchBaseURL       *string   `json:"file_fetch_base_url"`
 	ForceUpdatedCacheTypes *[]string `json:"force_updated_cache_types"`
@@ -151,7 +169,7 @@ func defaultStorage(opts Options) StorageConfig {
 }
 
 func defaultPreview(opts Options) PreviewConfig {
-	return PreviewConfig{
+	cfg := PreviewConfig{
 		PreviewServerURL: strings.TrimSpace(opts.DefaultPreviewURL),
 		FileFetchBaseURL: normalizeBaseURL(opts.DefaultFileFetchBaseURL),
 		ForceUpdatedCacheTypes: []string{
@@ -159,6 +177,45 @@ func defaultPreview(opts Options) PreviewConfig {
 			"md", "gitignore", "log", "java", "py", "c", "cpp", "sql", "sh",
 			"bat", "m", "bas", "prg", "cmd",
 		},
+	}
+	normalizePreview(&cfg)
+	return cfg
+}
+
+// derivePreviewService infers the mode for a legacy configuration that only
+// stored an address. A root-relative address is the bundled service: the
+// browser resolves it against the console's own origin, which nginx proxies to
+// kkFileView. An absolute address is custom because it names another host.
+func derivePreviewService(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return PreviewServiceOff
+	}
+	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") {
+		return PreviewServiceBuiltin
+	}
+	return PreviewServiceCustom
+}
+
+// normalizePreview applies the mode's rule to the address. It runs after a
+// patch and after a stored document is decoded, so every caller sees the same
+// effective configuration.
+func normalizePreview(cfg *PreviewConfig) {
+	cfg.PreviewService = strings.ToLower(strings.TrimSpace(cfg.PreviewService))
+	cfg.PreviewServerURL = strings.TrimSpace(cfg.PreviewServerURL)
+	switch cfg.PreviewService {
+	case PreviewServiceBuiltin:
+		cfg.PreviewServerURL = BuiltinPreviewPath
+	case PreviewServiceCustom:
+		// The administrator's address is kept as entered; validation below
+		// rejects an empty or malformed one.
+	case PreviewServiceOff:
+		cfg.PreviewServerURL = ""
+	default:
+		cfg.PreviewService = derivePreviewService(cfg.PreviewServerURL)
+		if cfg.PreviewService == PreviewServiceBuiltin {
+			cfg.PreviewServerURL = BuiltinPreviewPath
+		}
 	}
 }
 
@@ -237,8 +294,20 @@ func (c StorageConfig) validate() error {
 }
 
 func validatePreview(c PreviewConfig) error {
-	if err := validatePreviewServerURL(c.PreviewServerURL); err != nil {
-		return err
+	switch c.PreviewService {
+	case PreviewServiceBuiltin:
+		if c.PreviewServerURL != BuiltinPreviewPath {
+			return fmt.Errorf("builtin preview service must use %s", BuiltinPreviewPath)
+		}
+	case PreviewServiceCustom:
+		if err := validatePreviewServerURL(c.PreviewServerURL); err != nil {
+			return err
+		}
+	case PreviewServiceOff:
+		// No online preview; the file access address and cache rules are
+		// retained for when preview is turned back on.
+	default:
+		return fmt.Errorf("unknown preview service %q", c.PreviewService)
 	}
 	return validateFileFetchBaseURL(c.FileFetchBaseURL)
 }

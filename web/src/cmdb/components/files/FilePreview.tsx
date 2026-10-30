@@ -83,7 +83,9 @@ export function FilePreview({ file }: { file: CIFile }) {
     return (
       <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-4 py-12 text-center">
         <p className="text-xs text-text-muted">
-          {tr('还没有配置在线预览服务，请先在「设置 → 文件预览」中填写地址。', 'No preview server is configured. Set one under Settings → File preview.')}
+          {config?.preview_service === 'off'
+            ? tr('在线预览已关闭，可下载原文件查看。', 'Online preview is off. Download the original file to view it.')
+            : tr('还没有配置在线预览服务，请先在「设置 → 文件预览」中填写地址。', 'No preview server is configured. Set one under Settings → File preview.')}
         </p>
         {downloadURL && (
           <a

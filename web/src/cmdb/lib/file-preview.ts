@@ -1,4 +1,10 @@
 /**
+ * The same-origin entry point for the bundled kkFileView. It must match the
+ * nginx `/file-preview/` proxy and kkFileView's `KK_CONTEXT_PATH`.
+ */
+export const BUILTIN_PREVIEW_PATH = '/file-preview/onlinePreview';
+
+/**
  * Absolute base for URLs fetched by kkFileView. Unlike the browser's API
  * base, this URL must be reachable from the kkFileView host: set
  * VITE_FILE_API_BASE_URL when kkFileView runs in another container or on a

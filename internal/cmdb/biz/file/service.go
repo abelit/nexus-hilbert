@@ -164,6 +164,15 @@ func (u *Usecase) UpdatePreview(ctx context.Context, patch PreviewPatch) (Previe
 	if patch.PreviewServerURL != nil {
 		cfg.PreviewServerURL = strings.TrimSpace(*patch.PreviewServerURL)
 	}
+	// The mode is authoritative when the caller supplies it. An older client
+	// that only sends an address still works: the address alone decides
+	// between the bundled and a custom service.
+	if patch.PreviewService != nil {
+		cfg.PreviewService = *patch.PreviewService
+	} else if patch.PreviewServerURL != nil {
+		cfg.PreviewService = derivePreviewService(cfg.PreviewServerURL)
+	}
+	normalizePreview(&cfg)
 	if patch.FileFetchBaseURL != nil {
 		cfg.FileFetchBaseURL = normalizeBaseURL(*patch.FileFetchBaseURL)
 	}
@@ -187,6 +196,9 @@ func (u *Usecase) TestPreview(ctx context.Context, rawURL string) TestResult {
 		cfg, err := u.resolvePreview(ctx)
 		if err != nil {
 			return TestResult{OK: false, Error: err.Error()}
+		}
+		if cfg.PreviewService == PreviewServiceOff {
+			return TestResult{OK: false, Error: "the preview service is disabled"}
 		}
 		target = cfg.PreviewServerURL
 	}
@@ -545,9 +557,24 @@ func (u *Usecase) resolvePreview(ctx context.Context) (PreviewConfig, error) {
 	if err != nil {
 		return PreviewConfig{}, fmt.Errorf("cmdb file: decrypt preview settings: %w", err)
 	}
-	if err := json.Unmarshal([]byte(plain), &cfg); err != nil {
+	// The mode is decoded through a pointer so an old row that has no
+	// `preview_service` key can be told apart from one that explicitly chose
+	// a mode. Without that, unmarshalling onto the defaults would inherit the
+	// process default instead of deriving the mode from the stored address.
+	stored := struct {
+		PreviewConfig
+		PreviewService *string `json:"preview_service"`
+	}{PreviewConfig: cfg}
+	if err := json.Unmarshal([]byte(plain), &stored); err != nil {
 		return PreviewConfig{}, fmt.Errorf("cmdb file: parse preview settings: %w", err)
 	}
+	cfg = stored.PreviewConfig
+	if stored.PreviewService != nil {
+		cfg.PreviewService = *stored.PreviewService
+	} else {
+		cfg.PreviewService = ""
+	}
+	normalizePreview(&cfg)
 	cfg.FileFetchBaseURL = normalizeBaseURL(cfg.FileFetchBaseURL)
 	cfg.ForceUpdatedCacheTypes = normalizeExtensions(cfg.ForceUpdatedCacheTypes)
 	if len(cfg.ForceUpdatedCacheTypes) == 0 {

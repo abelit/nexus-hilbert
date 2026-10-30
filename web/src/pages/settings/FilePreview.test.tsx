@@ -15,6 +15,7 @@ vi.mock('@/cmdb/api/files', () => ({
 }));
 
 const config = {
+  preview_service: 'custom',
   preview_server_url: 'http://kk:8012/onlinePreview',
   file_fetch_base_url: 'http://ongrid-cmdb:8082',
   force_updated_cache_types: ['txt', 'md'],
@@ -48,6 +49,44 @@ describe('file preview settings', () => {
           preview_server_url: 'http://kk.local/onlinePreview',
           file_fetch_base_url: 'http://ongrid-cmdb:8082/',
         }),
+      ),
+    );
+  });
+
+  it('uses the bundled service without an editable address', async () => {
+    const user = userEvent.setup();
+    render(<SettingsFilePreview />);
+    await screen.findByLabelText('预览服务地址');
+
+    await user.click(screen.getByRole('button', { name: /内置服务/ }));
+
+    expect(screen.queryByLabelText('预览服务地址')).not.toBeInTheDocument();
+    expect(screen.getByText('/file-preview/onlinePreview')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          preview_service: 'builtin',
+          preview_server_url: '/file-preview/onlinePreview',
+        }),
+      ),
+    );
+  });
+
+  it('turns preview off and hides the preview-only fields', async () => {
+    const user = userEvent.setup();
+    render(<SettingsFilePreview />);
+    await screen.findByLabelText('预览服务地址');
+
+    await user.click(screen.getByRole('button', { name: /关闭预览/ }));
+
+    expect(screen.queryByLabelText('预览服务地址')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('文件访问地址')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '测试连接' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ preview_service: 'off', preview_server_url: '' }),
       ),
     );
   });

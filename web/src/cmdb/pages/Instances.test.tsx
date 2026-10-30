@@ -804,10 +804,13 @@ describe('the form in the drawer', () => {
     await user.click(within(drawer).getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(posted).toHaveLength(1));
+    // Attribute values are flat next to the control fields; the server reads
+    // them as attribute references, not as a nested `values` object.
     expect(posted[0]).toMatchObject({
       ci_type: 1,
       exist_policy: 'reject',
-      values: { hostname: 'web-02', note: 'rack A' },
+      hostname: 'web-02',
+      note: 'rack A',
     });
   });
 
@@ -848,7 +851,7 @@ describe('the form in the drawer', () => {
     await user.click(within(drawer).getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(posted).toHaveLength(1));
-    expect((posted[0] as { values: Record<string, unknown> }).values.ops_owner).toBe(374);
+    expect((posted[0] as Record<string, unknown>).ops_owner).toBe(374);
   });
 
   it('does not clear a stored secret on a save that did not touch it', async () => {
@@ -875,7 +878,7 @@ describe('the form in the drawer', () => {
     await user.click(within(drawer).getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(put).toHaveLength(1));
-    const values = (put[0] as { values: Record<string, unknown> }).values;
+    const values = put[0] as Record<string, unknown>;
     expect(values.note).toBe('changed');
     // THE PASSWORD BOX IS EMPTY ON EVERY EDIT — a read never returns a secret —
     // so sending that empty value would wipe a credential the operator did not
@@ -917,6 +920,6 @@ describe('the form in the drawer', () => {
     await waitFor(() => expect(put).toHaveLength(1));
     // THE MODEL DERIVES IT; sending a value would be ignored, and sending null
     // would be a write about a field the form cannot edit.
-    expect('asset_no' in (put[0] as { values: Record<string, unknown> }).values).toBe(false);
+    expect('asset_no' in (put[0] as Record<string, unknown>)).toBe(false);
   });
 });

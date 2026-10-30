@@ -127,12 +127,13 @@ function mocks() {
     }),
     http.put('/api/v1/cmdb/instances/:id', async ({ request, params }) => {
       const id = Number(params.id);
-      const body = (await request.json()) as { values?: Record<string, unknown> };
+      // The write body is flat: attribute names sit at the top level.
+      const body = (await request.json()) as Record<string, unknown>;
       writes.push({ id, body });
       if (failWrite) {
         return HttpResponse.json({ message: failWrite }, { status: 400 });
       }
-      instanceValues[id] = { ...(instanceValues[id] ?? {}), ...(body.values ?? {}) };
+      instanceValues[id] = { ...(instanceValues[id] ?? {}), ...body };
       return HttpResponse.json({ ci_id: id, created: false });
     }),
     http.get('/api/v1/cmdb/ci-types/switch/attributes', () =>
@@ -290,7 +291,7 @@ describe('editing a value in the detail view', () => {
     await waitFor(() => expect(writes).toHaveLength(1));
     // A SINGLE-ATTRIBUTE WRITE: the other fields are not resent, so a stale
     // detail view cannot overwrite a change made elsewhere.
-    expect(writes[0]).toEqual({ id: 5, body: { values: { hostname: 'web-09' } } });
+    expect(writes[0]).toEqual({ id: 5, body: { hostname: 'web-09' } });
     expect(await screen.findByText('已保存')).toBeInTheDocument();
     // The list behind the drawer refreshes through this callback.
     expect(onInstanceSaved).toHaveBeenCalledWith(5);
@@ -311,7 +312,7 @@ describe('editing a value in the detail view', () => {
     // A choice writes on selection, not on a second confirmation.
     await waitFor(() => expect(writes).toHaveLength(1));
     // THE CODE IS THE WIRE VALUE; the label was only what the operator read.
-    expect(writes[0]).toEqual({ id: 5, body: { values: { environment: 'prod' } } });
+    expect(writes[0]).toEqual({ id: 5, body: { environment: 'prod' } });
   });
 
   it('refuses malformed JSON before it reaches the API and sends valid JSON as an object', async () => {
@@ -333,7 +334,7 @@ describe('editing a value in the detail view', () => {
     await user.tab();
 
     await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]).toEqual({ id: 5, body: { values: { metadata: { b: 2 } } } });
+    expect(writes[0]).toEqual({ id: 5, body: { metadata: { b: 2 } } });
   });
 
   it('keeps the editor open with the backend message when a save is refused', async () => {

@@ -75,7 +75,7 @@ export function createInstance(input: {
   values: Record<string, unknown>;
   exist_policy?: 'reject' | 'replace' | 'need' | 'ignore';
 }): Promise<WriteResult> {
-  return cmdbPost<WriteResult>('/instances', input);
+  return cmdbPost<WriteResult>('/instances', instanceWriteBody(input));
 }
 
 export function updateInstance(
@@ -86,7 +86,33 @@ export function updateInstance(
     no_attribute_policy?: 'reject' | 'ignore';
   },
 ): Promise<WriteResult> {
-  return cmdbPut<WriteResult>(`/instances/${id}`, input);
+  return cmdbPut<WriteResult>(`/instances/${id}`, instanceWriteBody(input));
+}
+
+/**
+ * The write body is FLAT: attribute values sit at the top level next to the
+ * control fields, which is the shape `decodeWrite` on the server reads. A
+ * `values` wrapper is not an attribute name, so the server would drop it as an
+ * unknown field and still answer 200 — the request would look successful while
+ * nothing was written.
+ *
+ * Control fields win over attributes of the same name. Such an attribute cannot
+ * be addressed through this endpoint anyway, because the server reserves those
+ * keys; letting the attribute shadow the control field would silently change
+ * the request's meaning instead of reporting the conflict.
+ */
+function instanceWriteBody(input: {
+  ci_type?: string | number;
+  values: Record<string, unknown>;
+  exist_policy?: 'reject' | 'replace' | 'need' | 'ignore';
+  no_attribute_policy?: 'reject' | 'ignore';
+}): Record<string, unknown> {
+  const { values, ci_type, exist_policy, no_attribute_policy } = input;
+  const body: Record<string, unknown> = { ...values };
+  if (ci_type !== undefined) body.ci_type = ci_type;
+  if (exist_policy !== undefined) body.exist_policy = exist_policy;
+  if (no_attribute_policy !== undefined) body.no_attribute_policy = no_attribute_policy;
+  return body;
 }
 
 export function deleteInstance(id: number): Promise<void> {

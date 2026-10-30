@@ -313,6 +313,92 @@ func TestPreviewFileFetchBaseURL(t *testing.T) {
 	}
 }
 
+func TestPreviewServiceModes(t *testing.T) {
+	uc, _, _ := newTestUsecase(t)
+
+	builtin := PreviewServiceBuiltin
+	cfg, err := uc.UpdatePreview(context.Background(), PreviewPatch{PreviewService: &builtin})
+	if err != nil {
+		t.Fatalf("builtin: %v", err)
+	}
+	if cfg.PreviewService != PreviewServiceBuiltin || cfg.PreviewServerURL != BuiltinPreviewPath {
+		t.Fatalf("builtin config = %+v", cfg)
+	}
+
+	custom := PreviewServiceCustom
+	address := "https://kk.example.com/onlinePreview"
+	cfg, err = uc.UpdatePreview(context.Background(), PreviewPatch{
+		PreviewService: &custom, PreviewServerURL: &address,
+	})
+	if err != nil {
+		t.Fatalf("custom: %v", err)
+	}
+	if cfg.PreviewService != PreviewServiceCustom || cfg.PreviewServerURL != address {
+		t.Fatalf("custom config = %+v", cfg)
+	}
+
+	// A custom service needs an address; switching modes must not leave the
+	// built-in path behind as if it were an external endpoint.
+	empty := ""
+	if _, err := uc.UpdatePreview(context.Background(), PreviewPatch{
+		PreviewService: &custom, PreviewServerURL: &empty,
+	}); err == nil {
+		t.Fatal("custom service with no address was accepted")
+	}
+
+	off := PreviewServiceOff
+	cfg, err = uc.UpdatePreview(context.Background(), PreviewPatch{PreviewService: &off})
+	if err != nil {
+		t.Fatalf("off: %v", err)
+	}
+	if cfg.PreviewService != PreviewServiceOff || cfg.PreviewServerURL != "" {
+		t.Fatalf("off config = %+v", cfg)
+	}
+	if result := uc.TestPreview(context.Background(), ""); result.OK ||
+		!strings.Contains(result.Error, "disabled") {
+		t.Fatalf("test with preview off = %+v", result)
+	}
+
+	// An address-only patch is the pre-mode API; the mode follows it.
+	relative := BuiltinPreviewPath
+	cfg, err = uc.UpdatePreview(context.Background(), PreviewPatch{PreviewServerURL: &relative})
+	if err != nil {
+		t.Fatalf("address-only patch: %v", err)
+	}
+	if cfg.PreviewService != PreviewServiceBuiltin {
+		t.Fatalf("address-only mode = %q", cfg.PreviewService)
+	}
+}
+
+func TestLegacyPreviewSettingDerivesService(t *testing.T) {
+	uc, repo, _ := newTestUsecase(t)
+	ctx := context.Background()
+
+	if err := repo.SetSetting(ctx, filemodel.KindPreview,
+		`{"preview_server_url":"https://kk.example.com/onlinePreview"}`); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := uc.Preview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PreviewService != PreviewServiceCustom || cfg.PreviewServerURL != "https://kk.example.com/onlinePreview" {
+		t.Fatalf("legacy custom = %+v", cfg)
+	}
+
+	if err := repo.SetSetting(ctx, filemodel.KindPreview,
+		`{"preview_server_url":"/file-preview/onlinePreview"}`); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = uc.Preview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PreviewService != PreviewServiceBuiltin || cfg.PreviewServerURL != BuiltinPreviewPath {
+		t.Fatalf("legacy builtin = %+v", cfg)
+	}
+}
+
 func TestRelativePreviewUsesInternalURL(t *testing.T) {
 	uc, _, _ := newTestUsecase(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

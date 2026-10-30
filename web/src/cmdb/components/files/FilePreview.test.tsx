@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FilePreview } from './FilePreview';
 
+const state = vi.hoisted(() => ({ previewService: 'builtin' as 'builtin' | 'off' }));
+
 vi.mock('../../api/files', () => ({
   fetchFilePreviewConfig: async () => ({
-    preview_server_url: '/file-preview/onlinePreview',
+    preview_service: state.previewService,
+    preview_server_url: state.previewService === 'off' ? '' : '/file-preview/onlinePreview',
     file_fetch_base_url: 'http://ongrid-cmdb:8082',
     force_updated_cache_types: ['txt'],
   }),
@@ -27,6 +30,7 @@ const file = {
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem('ongrid-locale', 'zh-CN');
+  state.previewService = 'builtin';
 });
 
 describe('file preview iframe', () => {
@@ -42,5 +46,13 @@ describe('file preview iframe', () => {
     expect(iframe.getAttribute('src')).toContain('/file-preview/onlinePreview');
 
     await waitFor(() => expect(screen.getByRole('link', { name: '新窗口打开' })).toHaveAttribute('href', '/api/v1/cmdb/ci/files/public/inline-token'));
+  });
+
+  it('explains the download fallback when preview is turned off', async () => {
+    state.previewService = 'off';
+    render(<FilePreview file={file} />);
+
+    expect(await screen.findByText('在线预览已关闭，可下载原文件查看。')).toBeInTheDocument();
+    expect(screen.queryByTitle('a.txt')).not.toBeInTheDocument();
   });
 });

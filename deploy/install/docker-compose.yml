@@ -345,6 +345,10 @@ services:
     environment:
       TZ: Asia/Shanghai
       KK_CONTEXT_PATH: /file-preview
+      # Keep kkFileView's browser-side requests same-origin. The default base
+      # rebuilds them from the proxy request as http://host:80, which the
+      # 80->443 redirect and mixed-content rules block on an HTTPS console.
+      KK_BASE_URL: ${ONGRID_KKFILEVIEW_BASE_URL:-/file-preview}
       KK_WATERMARK_TXT: ${ONGRID_KKFILEVIEW_WATERMARK:-Ongrid}
       TRUST_HOST_ENABLE: "false"
       KK_TRUST_HOST: "*"

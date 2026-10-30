@@ -1333,6 +1333,7 @@ export default function InstancesPage() {
             toast.success(message);
             await load(true);
           }}
+          onFileSaved={() => void load(true)}
         />
       )}
 
@@ -1537,6 +1538,7 @@ function InstanceDrawer({
   instanceID,
   onClose,
   onSaved,
+  onFileSaved,
 }: {
   model: CIType;
   models: CIType[];
@@ -1545,6 +1547,8 @@ function InstanceDrawer({
   instanceID: number | null;
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
+  /** Refresh the list behind the drawer after an immediate file write. */
+  onFileSaved?(): void;
 }) {
   const { tr } = useI18n();
   const creating = instanceID === null;
@@ -1670,9 +1674,27 @@ function InstanceDrawer({
                             attribute={attribute}
                             value={values[attribute.name]}
                             disabled={attribute.is_computed}
-                            onChange={(_files, serialized) =>
-                              setValues((current) => ({ ...current, [attribute.name]: serialized }))
-                            }
+                            onChange={async (_files, serialized) => {
+                              setValues((current) => ({ ...current, [attribute.name]: serialized }));
+                              // An attachment is already an uploaded object, not
+                              // a draft. Save its reference now so a refresh (or
+                              // closing the form) cannot leave it invisible.
+                              if (instanceID === null) return;
+                              try {
+                                await updateInstance(instanceID, {
+                                  values: { [attribute.name]: serialized },
+                                });
+                                onFileSaved?.();
+                              } catch (error) {
+                                setErr(
+                                  describeError(
+                                    error,
+                                    tr('文件已上传，但保存到实例失败', 'The file was uploaded but could not be attached'),
+                                  ),
+                                );
+                                throw error;
+                              }
+                            }}
                           />
                         ) : referenceModel ? (
                           <ReferencePicker
@@ -1699,6 +1721,16 @@ function InstanceDrawer({
                           />
                         )}
                       </div>
+                      {attribute.is_file && (
+                        <p className="mt-1 text-[11px] text-text-faint">
+                          {creating
+                            ? tr(
+                                '文件引用会随新建实例一起保存；请点击底部保存。',
+                                'File references are saved with the new instance; use Save below.',
+                              )
+                            : tr('文件的上传和删除会立即保存。', 'File uploads and deletions are saved immediately.')}
+                        </p>
+                      )}
                       {attribute.is_computed && (
                         <p className="mt-1 text-[11px] text-text-faint">
                           {tr('这个属性由模型计算，不能直接填。', 'The model derives this attribute; it cannot be typed.')}

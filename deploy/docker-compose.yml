@@ -280,6 +280,11 @@ services:
     environment:
       TZ: Asia/Shanghai
       KK_CONTEXT_PATH: /file-preview
+      # A relative base keeps kkFileView's browser-side requests (LuckyExcel's
+      # getCorsFile) on the same origin as the console. With the default
+      # "default" base it rebuilt them from the proxy request as http://host:80,
+      # which the 80->443 redirect and mixed-content rules then blocked.
+      KK_BASE_URL: ${ONGRID_KKFILEVIEW_BASE_URL:-/file-preview}
       KK_WATERMARK_TXT: ${ONGRID_KKFILEVIEW_WATERMARK:-Ongrid}
       TRUST_HOST_ENABLE: "false"
       KK_TRUST_HOST: "*"
