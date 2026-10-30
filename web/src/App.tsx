@@ -33,6 +33,7 @@ const PagesPage = lazy(() => import('@/pages/Pages'));
 const PageViewPage = lazy(() => import('@/pages/PageView'));
 const SkillsPage = lazy(() => import('@/pages/Skills'));
 const ApprovalsPage = lazy(() => import('@/pages/Approvals'));
+const ApprovalConfirmationPage = lazy(() => import('@/pages/ApprovalConfirmation'));
 const SkillRunPage = lazy(() => import('@/pages/SkillRun'));
 const AgentsPage = lazy(() => import('@/pages/Agents'));
 const McpPage = lazy(() => import('@/pages/Mcp'));
@@ -61,6 +62,7 @@ const SettingsFilePreview = lazy(() => import('@/pages/settings/FilePreview'));
 const SettingsPreferences = lazy(() => import('@/pages/settings/Preferences'));
 const SettingsAgent = lazy(() => import('@/pages/settings/Agent'));
 const SettingsAbout = lazy(() => import('@/pages/settings/About'));
+const SettingsExternalAI = lazy(() => import('@/pages/settings/ExternalAI'));
 const SettingsSecrets = lazy(() => import('@/pages/settings/Secrets'));
 const SettingsHealth = lazy(() => import('@/pages/settings/Health'));
 const SettingsUpgrade = lazy(() => import('@/pages/settings/Upgrade'));
@@ -78,14 +80,16 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const token = useAuth((s) => s.token);
   const location = useLocation();
   if (!token) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search + location.hash }} />;
   }
   return <>{children}</>;
 }
 
 function PublicOnly({ children }: { children: ReactNode }) {
   const token = useAuth((s) => s.token);
-  if (token) return <Navigate to="/" replace />;
+  const location = useLocation();
+  const from = location.state?.from;
+  if (token) return <Navigate to={typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/login') ? from : '/'} replace />;
   return <>{children}</>;
 }
 
@@ -150,6 +154,7 @@ export default function App() {
         <Route path="/pages/:id" element={<PagesPage />} />
         <Route path="/skills" element={<SkillsPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
+        <Route path="/approvals/:id" element={<ApprovalConfirmationPage key={location.pathname} />} />
         <Route path="/skills/:key" element={<SkillRunPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/mcp" element={<McpPage />} />
@@ -195,6 +200,7 @@ export default function App() {
           <Route index element={<Navigate to="health" replace />} />
           <Route path="llm" element={<SettingsLLM />} />
           <Route path="secrets" element={<SettingsSecrets />} />
+<Route path="external-ai" element={<SettingsExternalAI />} />
           <Route path="notifications" element={<SettingsNotifications />} />
           <Route path="channels" element={<SettingsChannels />} />
           <Route path="integrations" element={<SettingsIntegrations />} />
