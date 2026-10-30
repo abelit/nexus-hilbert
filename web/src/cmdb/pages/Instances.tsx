@@ -25,6 +25,7 @@ import { Label } from '@/components/ui/Label';
 import { PaginationFooter } from '@/components/ui/PaginationFooter';
 import { Select } from '@/components/ui/Select';
 import { useDialogs } from '@/components/ui/useDialogs';
+import { Modal } from '@/components/Modal';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 
@@ -48,12 +49,14 @@ import {
 } from '../api/instance';
 import { getInstanceFileValues } from '../api/files';
 import {
+  createSavedSearch,
   getShowFields,
   listModelGroups,
   listSubscribedModels,
   type ModelGroup,
 } from '../api/preferences';
 import { AttributeControl, AttributeValue } from '../components/AttributeControl';
+import { AppliedCondition, ConditionFilter } from '../components/ConditionFilter';
 import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { Drawer } from '../components/Drawer';
@@ -129,6 +132,14 @@ export default function InstancesPage() {
   // committed to `/ci/s` on Enter, which is the only trigger.
   const [searchDraft, setSearchDraft] = useState('');
   const [search, setSearch] = useState('');
+  // The condition expression is a server query, like the keyword: it is
+  // combined with `_type` and sent to `/ci/s` so it filters the whole model,
+  // not the twenty rows on screen.
+  const [condition, setCondition] = useState('');
+  const [conditionSaveOpen, setConditionSaveOpen] = useState(false);
+  const [conditionName, setConditionName] = useState('');
+  const [conditionSaving, setConditionSaving] = useState(false);
+  const [conditionSaveErr, setConditionSaveErr] = useState<string | null>(null);
   const [modelQuery, setModelQuery] = useState('');
   const [envFilter, setEnvFilter] = useState('all');
   const [levelFilter, setLevelFilter] = useState('all');
@@ -261,9 +272,10 @@ export default function InstancesPage() {
         // CANTOR'S BOX IS A SERVER SEARCH. The term goes to `/ci/s` as a
         // type-scoped contains query across the indexed values of the WHOLE
         // model; the plain list is the empty-term path.
-        if (search) {
+        if (search || condition) {
+          const base = instanceSearchQuery(modelIDRef.current ?? typeRef, search);
           const got = await searchInstances({
-            q: instanceSearchQuery(modelIDRef.current ?? typeRef, search),
+            q: condition ? `${base},${condition}` : base,
             count: PAGE_SIZE,
             page: page + 1,
           });
@@ -276,7 +288,7 @@ export default function InstancesPage() {
         }
       } catch (error) {
         setErr(
-          search
+          search || condition
             ? describeError(error, tr('搜索实例失败', 'Could not search instances'))
             : describeError(error, tr('无法读取实例', 'Could not load the instances')),
         );
@@ -285,7 +297,7 @@ export default function InstancesPage() {
         setRefreshing(false);
       }
     },
-    [page, search, tr, typeRef],
+    [condition, page, search, tr, typeRef],
   );
 
   useEffect(() => {
@@ -300,6 +312,7 @@ export default function InstancesPage() {
     setPage(0);
     setSearch('');
     setSearchDraft('');
+    setCondition('');
     setEnvFilter('all');
     setLevelFilter('all');
     setSelected(new Set());
@@ -532,6 +545,42 @@ export default function InstancesPage() {
     setPage(0);
     clearSelection();
   };
+  const applyCondition = (next: string) => {
+    const clean = next.trim();
+    if (clean === condition) return;
+    setCondition(clean);
+    setPage(0);
+    clearSelection();
+  };
+  const clearCondition = () => applyCondition('');
+  const openConditionSave = () => {
+    if (!condition) return;
+    setConditionName('');
+    setConditionSaveErr(null);
+    setConditionSaveOpen(true);
+  };
+  const saveCondition = async () => {
+    const name = conditionName.trim();
+    if (!name) {
+      setConditionSaveErr(tr('请填写条件名称。', 'Enter a name for the filter.'));
+      return;
+    }
+    setConditionSaving(true);
+    setConditionSaveErr(null);
+    try {
+      await createSavedSearch({
+        name,
+        option: { q: condition, types: model ? [model.name] : [] },
+        ...(model ? { type_id: model.id } : {}),
+      });
+      setConditionSaveOpen(false);
+      toast.success(tr('条件已保存，可在「资源搜索」中使用。', 'Filter saved; find it under Search.'));
+    } catch (error) {
+      setConditionSaveErr(describeError(error, tr('保存条件失败', 'Could not save the filter')));
+    } finally {
+      setConditionSaving(false);
+    }
+  };
 
   // One rail row, shared by the flat and grouped renders so the two modes
   // cannot drift in height, colour or accessible name.
@@ -627,9 +676,10 @@ export default function InstancesPage() {
     const pages = Math.ceil(target / EXPORT_PAGE_SIZE);
     const collected: Instance[] = [];
     for (let page = 1; page <= pages; page += 1) {
-      if (search) {
+      if (search || condition) {
+        const base = instanceSearchQuery(model?.id ?? typeRef, search);
         const got = await searchInstances({
-          q: instanceSearchQuery(model?.id ?? typeRef, search),
+          q: condition ? `${base},${condition}` : base,
           count: EXPORT_PAGE_SIZE,
           page,
         });
@@ -656,7 +706,7 @@ export default function InstancesPage() {
     // the whole export keeps the file consistent with what the operator asked
     // to see rather than silently widening the scope.
     return collected.slice(0, target).filter(matchesEnvLevel);
-  }, [typeRef, numFound, search, model?.id, matchesEnvLevel, toast, tr]);
+  }, [typeRef, numFound, search, condition, model?.id, matchesEnvLevel, toast, tr]);
 
   // SELECTED ROWS CAN BE ON PAGES THE OPERATOR HAS LEFT. Resolve them by id, in
   // the order they were checked, instead of exporting only what is on screen.
@@ -1029,6 +1079,12 @@ export default function InstancesPage() {
                         </button>
                       )}
                     </div>
+                    <ConditionFilter
+                      attributes={attributes}
+                      models={models}
+                      value={condition}
+                      onApply={applyCondition}
+                    />
                     {model && (
                       <InstanceFieldsDialog
                         model={model}
@@ -1080,8 +1136,16 @@ export default function InstancesPage() {
                     )}
                   </div>
                 </div>
-                {(search || filtering) && (
+                {(search || condition || filtering) && (
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-faint">
+                    {condition && (
+                      <AppliedCondition
+                        value={condition}
+                        matches={numFound}
+                        onClear={clearCondition}
+                        onSave={openConditionSave}
+                      />
+                    )}
                     {search && (
                       <span>
                         {tr(
@@ -1138,6 +1202,31 @@ export default function InstancesPage() {
               <section className="cmdb-liquid-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
                 {view === 'table' ? (
                   <div className="flex min-h-0 flex-1 flex-col p-3">
+                    {!loading && !err && rows.length === 0 && (search || condition) ? (
+                      <EmptyState
+                        className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
+                        title={
+                          condition
+                            ? tr(`未找到符合条件「q=${condition}」的实例`, `No instances match “q=${condition}”`)
+                            : tr(`未找到匹配「${search}」的实例`, `No instances match “${search}”`)
+                        }
+                        hint={tr('调整或清除搜索与条件后再试。', 'Adjust or clear the search and filters and try again.')}
+                        action={
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            type="button"
+                            onClick={() => {
+                              clearSearch();
+                              clearCondition();
+                            }}
+                            className="cmdb-liquid-secondary"
+                          >
+                            {tr('清除搜索和条件', 'Clear search and filters')}
+                          </Button>
+                        }
+                      />
+                    ) : (
                     <DataTable
                       fill
                       columns={tableColumns}
@@ -1206,6 +1295,7 @@ export default function InstancesPage() {
                         </span>
                       )}
                     />
+                    )}
                   </div>
                 ) : (
                   <div className="cmdb-model-table-scroll min-h-0 flex-1 overflow-y-auto p-3">
@@ -1219,14 +1309,27 @@ export default function InstancesPage() {
                     ) : loading && rows.length === 0 ? (
                   <div className="flex h-40 items-center justify-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</div>
                 ) : rows.length === 0 ? (
-                  search ? (
+                  search || condition ? (
                     <EmptyState
                       className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
-                      title={tr(`未找到匹配「${search}」的实例`, `No instances match “${search}”`)}
-                      hint={tr('换一个关键词，或清除搜索。', 'Try another term, or clear the search.')}
+                      title={
+                        condition
+                          ? tr(`未找到符合条件「q=${condition}」的实例`, `No instances match “q=${condition}”`)
+                          : tr(`未找到匹配「${search}」的实例`, `No instances match “${search}”`)
+                      }
+                      hint={tr('调整或清除搜索与条件后再试。', 'Adjust or clear the search and filters and try again.')}
                       action={
-                        <Button variant="ghost" size="sm" type="button" onClick={clearSearch} className="cmdb-liquid-secondary">
-                          {tr('清除搜索', 'Clear search')}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          type="button"
+                          onClick={() => {
+                            clearSearch();
+                            clearCondition();
+                          }}
+                          className="cmdb-liquid-secondary"
+                        >
+                          {tr('清除搜索和条件', 'Clear search and filters')}
                         </Button>
                       }
                     />
@@ -1353,6 +1456,54 @@ export default function InstancesPage() {
           onInstanceSaved={() => void load(true)}
         />
       )}
+
+      <Modal
+        open={conditionSaveOpen}
+        onClose={() => {
+          if (!conditionSaving) setConditionSaveOpen(false);
+        }}
+        title={tr('保存条件', 'Save filter')}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" type="button" onClick={() => setConditionSaveOpen(false)} disabled={conditionSaving}>
+              {tr('取消', 'Cancel')}
+            </Button>
+            <Button variant="primary" type="button" onClick={() => void saveCondition()} disabled={conditionSaving}>
+              {conditionSaving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+            </Button>
+          </div>
+        }
+      >
+        <Label htmlFor="cmdb-condition-name">{tr('条件名称', 'Filter name')}</Label>
+        <Input
+          id="cmdb-condition-name"
+          value={conditionName}
+          onChange={(event) => {
+            setConditionName(event.target.value);
+            setConditionSaveErr(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              void saveCondition();
+            }
+          }}
+          className="mt-1 w-full"
+          autoFocus
+        />
+        <p className="mt-2 break-all rounded bg-card px-2 py-1 font-mono text-[11px] text-text-muted">q={condition}</p>
+        <p className="mt-2 text-[11px] text-text-faint">
+          {tr(
+            '保存后可在「资源搜索」的保存搜索中直接使用。',
+            'Saved filters are available under Search → Saved searches.',
+          )}
+        </p>
+        {conditionSaveErr && (
+          <p role="alert" className="mt-2 rounded-md border border-red-500/40 bg-red-500/5 px-2 py-1.5 text-xs text-red-500 dark:text-red-300">
+            {conditionSaveErr}
+          </p>
+        )}
+      </Modal>
 
       {dialog}
     </div>

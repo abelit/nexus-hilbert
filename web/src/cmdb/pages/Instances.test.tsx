@@ -199,6 +199,45 @@ describe('the list', () => {
     expect(screen.getByText('实例总数')).toBeInTheDocument();
   });
 
+  it('applies the condition builder as a whole-model query', async () => {
+    const user = userEvent.setup();
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
+    const searches: unknown[] = [];
+    server.use(
+      http.post('/api/v1/cmdb/ci/s', async ({ request }) => {
+        searches.push(await request.json());
+        return HttpResponse.json({
+          numfound: 1,
+          total: 1,
+          page: 1,
+          result: [
+            {
+              _id: 7,
+              _type: 1,
+              ci_id: 7,
+              ci_type: 'host',
+              unique: 'hostname',
+              unique_alias: '主机名',
+              hostname: 'web-99',
+              note: 'filtered',
+            },
+          ],
+        });
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText('web-01')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /条件过滤/ }));
+    await user.type(screen.getByLabelText('值'), 'web-01');
+    await user.click(screen.getByRole('button', { name: '确定' }));
+
+    await waitFor(() => expect(searches).toHaveLength(1));
+    expect(searches[0]).toMatchObject({ q: '_type:1,hostname:web-01', count: 20, page: 1 });
+    expect(await screen.findByText('q=hostname:web-01')).toBeInTheDocument();
+    expect(await screen.findByText('web-99')).toBeInTheDocument();
+  });
+
   it('filters by environment and switches to the card grid', async () => {
     const user = userEvent.setup();
     handlers([
