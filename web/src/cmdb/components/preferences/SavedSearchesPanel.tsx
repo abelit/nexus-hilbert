@@ -28,6 +28,12 @@ import { useToast } from '../Toast';
 // textarea is deliberately explicit rather than a second query builder. A
 // malformed object is refused before the request, so the operator keeps the
 // text they typed.
+//
+// The three reserved preference names (__recent__, __favor__,
+// __relation_favor__) are console lists, not user recipes; the resource-search
+// page reads them directly and they must not appear here.
+
+const RESERVED_SEARCH_NAMES = new Set(['__recent__', '__favor__', '__relation_favor__']);
 
 export function SavedSearchesPanel() {
   const { tr } = useI18n();
@@ -49,7 +55,7 @@ export function SavedSearchesPanel() {
     setErr(null);
     try {
       const [gotSearches, gotModels] = await Promise.all([listSavedSearches(), listCITypes()]);
-      setSearches(gotSearches);
+      setSearches(gotSearches.filter((search) => !RESERVED_SEARCH_NAMES.has(search.name)));
       setModels(gotModels);
     } catch (error) {
       setErr(describeError(error, tr('无法读取保存搜索', 'Could not load the saved searches')));
@@ -143,7 +149,10 @@ export function SavedSearchesPanel() {
           <div>
             <h2 className="text-sm font-medium text-text">{tr('保存搜索', 'Saved searches')}</h2>
             <p className="mt-1 text-xs text-text-muted">
-              {tr('保存的查询表达式可以在资源搜索页直接复用。', 'Saved expressions can be reused on the resource search page.')}
+              {tr(
+                '保存的查询表达式可以在资源搜索页直接复用；option 支持 keyword、q 和 types（模型名数组）。',
+                'Saved expressions can be reused on the resource search page; option supports keyword, q, and types (model-name array).',
+              )}
             </p>
           </div>
           <Button variant="primary" type="button" onClick={openNew} className="inline-flex items-center gap-1.5">
