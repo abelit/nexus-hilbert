@@ -2,13 +2,37 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw-server';
 import { selectOption } from '@/test/select-option';
 import { useAuth } from '@/store/auth';
 import ModelDetailPage from './ModelDetail';
 import { ToastProvider } from '../components/Toast';
+
+// THE MODEL GRAPH IS REPLACED BY BUTTONS. React Flow measures nodes in a layout
+// engine jsdom does not run; the test drives the same onSelect callback with
+// the nodes the tab built.
+vi.mock('@/components/topology/Graph', () => ({
+  TopologyGraph: ({
+    nodes,
+    relations,
+    onSelect,
+  }: {
+    nodes: Array<{ id: number; name: string; type: string }>;
+    relations: Array<{ src_id: number; dst_id: number; type: string }>;
+    onSelect?(node: { id: number; name: string; type: string }): void;
+  }) => (
+    <div data-testid="relation-topology-canvas">
+      <span data-testid="relation-topology-edges">{relations.map((relation) => relation.type).join(',')}</span>
+      {nodes.map((node) => (
+        <button key={node.id} type="button" onClick={() => onSelect?.(node)}>
+          {node.name}
+        </button>
+      ))}
+    </div>
+  ),
+}));
 
 const model = {
   id: 1,
@@ -23,6 +47,28 @@ const model = {
 };
 
 const disk = { ...model, id: 2, name: 'disk', alias: '磁盘', unique_key: 'sn' };
+
+const childRelation = {
+  ctr_id: 7,
+  type: { ...model, id: 2, name: 'disk', alias: '磁盘', unique_key: 'sn' },
+  show_key: 'name',
+  attributes: [],
+  relation_type: { id: 1, name: '包含', color: '#6366f1' },
+  constraint: '0',
+  parent_attr_ids: [],
+  child_attr_ids: [],
+};
+
+const parentRelation = {
+  ctr_id: 88,
+  type: { ...model, id: 3, name: 'rack', alias: '机柜', unique_key: 'name' },
+  show_key: 'name',
+  attributes: [],
+  relation_type: { id: 2, name: '属于', color: '#f59e0b' },
+  constraint: '1',
+  parent_attr_ids: [],
+  child_attr_ids: [],
+};
 
 const ownAttribute = {
   id: 10,
@@ -84,6 +130,17 @@ function baseHandlers() {
       }),
     ),
     http.get('/api/v1/cmdb/ci-types/1/attribute-groups', () => HttpResponse.json([])),
+  );
+}
+
+function relationHandlers() {
+  server.use(
+    http.get('/api/v1/cmdb/ci-types/1/relation-children', () =>
+      HttpResponse.json({ items: [childRelation], total: 1 }),
+    ),
+    http.get('/api/v1/cmdb/ci-types/1/relation-parents', () =>
+      HttpResponse.json({ items: [parentRelation], total: 1 }),
+    ),
   );
 }
 
@@ -544,6 +601,70 @@ describe('the other tabs', () => {
     // signal that the rule references something gone. cantor dropped those
     // silently; here the gap is visible.
     expect(await screen.findByText('1 个属性已不存在')).toBeInTheDocument();
+  });
+});
+
+describe('the relation views', () => {
+  it('switches between list, grid and topology', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    relationHandlers();
+    renderPage('/cmdb/models/1?tab=relations');
+
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '列表' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: '网格' }));
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /子模型/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /父模型/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '磁盘' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '机柜' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '拓扑' }));
+    expect(screen.getByTestId('relation-topology-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('relation-topology-edges')).toHaveTextContent('包含');
+    expect(screen.getByTestId('relation-topology-edges')).toHaveTextContent('属于');
+  });
+
+  it('shows the empty state in every view', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+    );
+    renderPage('/cmdb/models/1?tab=relations');
+
+    expect(await screen.findByText('这个模型还没有关系')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '网格' }));
+    expect(screen.getByText('这个模型还没有关系')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '拓扑' }));
+    expect(screen.getByText('这个模型还没有关系')).toBeInTheDocument();
+    expect(screen.queryByTestId('relation-topology-canvas')).not.toBeInTheDocument();
+  });
+
+  it('opens a clicked topology node on its relations tab', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    relationHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/2', () => HttpResponse.json(disk)),
+      http.get('/api/v1/cmdb/ci-types/2/attributes', () =>
+        HttpResponse.json({ type_id: 2, unique_id: 20, unique: 'sn', attributes: [] }),
+      ),
+      http.get('/api/v1/cmdb/ci-types/2/attribute-groups', () => HttpResponse.json([])),
+      http.get('/api/v1/cmdb/ci-types/2/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/2/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+    );
+    renderPage('/cmdb/models/1?tab=relations');
+
+    await screen.findByRole('table');
+    await user.click(screen.getByRole('button', { name: '拓扑' }));
+    await user.click(screen.getByRole('button', { name: '磁盘' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: '磁盘' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '拓扑' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
 

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Plus, Trash2 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { LayoutGrid, Network, Plus, Table2, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { EmptyStateCard } from '@/components/ui/EmptyState';
 import { Hint } from '@/components/ui/Tooltip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
@@ -13,6 +14,9 @@ import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
+import { cn } from '@/lib/cn';
+import { TopologyGraph } from '@/components/topology/Graph';
+import type { TopologyNode, TopologyRelation } from '@/api/topology';
 import { RELATION_CONSTRAINTS, relationConstraintLabel } from '../lib/relation';
 
 import { describeError } from '../api/http';
@@ -37,6 +41,7 @@ import {
   type UniqueConstraint,
 } from '../api/citype';
 import { listRelationTypes, type RelationType } from '../api/relationtype';
+import { CMDBIcon } from './CMDBIcon';
 import { DataTable, type Column } from './DataTable';
 import { RelationAttributePairs, type AttributePair } from './RelationAttributePairs';
 import { useToast } from './Toast';
@@ -52,6 +57,8 @@ import { useToast } from './Toast';
 // --- relations ---
 
 type Direction = 'children' | 'parents';
+type RelationView = 'list' | 'grid' | 'topology';
+type RelationRow = { direction: Direction; relation: RelatedType; other: CIType; show: string };
 
 export function RelationsTab({
   modelRef,
@@ -67,12 +74,19 @@ export function RelationsTab({
   const { tr } = useI18n();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
+  const navigate = useNavigate();
   const [children, setChildren] = useState<RelatedType[]>([]);
   const [parents, setParents] = useState<RelatedType[]>([]);
   const [models, setModels] = useState<CIType[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState<Direction | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // The console's list pages pick grid on narrow windows and remember nothing
+  // across visits; the relations tab follows the same rule so one model's
+  // relations open the same way as its siblings.
+  const [view, setView] = useState<RelationView>(() =>
+    window.matchMedia?.('(max-width: 1279px)')?.matches ? 'grid' : 'list',
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -117,7 +131,7 @@ export function RelationsTab({
 
   // Both reads return the model on the far side of the edge, so the direction
   // is the only difference between the two row sets.
-  const rows: Array<{ direction: Direction; relation: RelatedType; other: CIType; show: string }> = [
+  const rows: RelationRow[] = [
     ...children.map((relation) => ({
       direction: 'children' as const,
       relation,
@@ -131,6 +145,60 @@ export function RelationsTab({
       show: relation.show_key ?? '',
     })),
   ];
+
+  // THE GRAPH IS ONE HOP. This tab configures one model, so the picture is the
+  // model in the middle and the models it can nest under or own; drawing the
+  // whole estate here would answer a question this page does not ask.
+  const center = useMemo(
+    () => models.find((item) => String(item.id) === modelRef || item.name === modelRef || item.alias === modelRef) ?? null,
+    [models, modelRef],
+  );
+
+  const topology = useMemo(() => {
+    const nodes = new Map<number, TopologyNode>();
+    const edges: TopologyRelation[] = [];
+    if (!center) return { nodes: [] as TopologyNode[], edges };
+    const toNode = (item: CIType): TopologyNode => ({
+      id: item.id,
+      type: item.name,
+      name: item.alias || item.name,
+      props: { icon: item.icon ?? '' },
+      created_at: '',
+      updated_at: '',
+    });
+    nodes.set(center.id, toNode(center));
+    const addEdge = (relation: RelatedType, from: number, to: number) => {
+      nodes.set(relation.type.id, toNode(relation.type));
+      edges.push({
+        id: relation.ctr_id,
+        src_id: from,
+        dst_id: to,
+        type: relation.relation_type.name || String(relation.relation_type.id),
+        props: null,
+        created_at: '',
+      });
+    };
+    parents.forEach((relation) => addEdge(relation, relation.type.id, center.id));
+    children.forEach((relation) => addEdge(relation, center.id, relation.type.id));
+    return { nodes: [...nodes.values()], edges };
+  }, [center, parents, children]);
+
+  const emptyHint = tr('这个模型还没有关系', 'This model has no relations yet');
+
+  // List mode keeps the table's own busy/error/empty handling; the two visual
+  // modes share this panel so a failed read never turns into a blank canvas.
+  const visualStatus = loading ? (
+    <div className="flex h-32 items-center justify-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</div>
+  ) : err ? (
+    <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300">
+      <span className="min-w-0 flex-1 break-words">{err}</span>
+      <Button variant="outline" size="sm" type="button" onClick={() => void load()} className="inline-flex items-center gap-1.5">
+        {tr('重试', 'Retry')}
+      </Button>
+    </div>
+  ) : rows.length === 0 ? (
+    <EmptyStateCard title={tr('没有数据', 'Nothing here yet')} hint={emptyHint} />
+  ) : null;
 
   const columns: Column<(typeof rows)[number]>[] = [
     {
@@ -190,6 +258,11 @@ export function RelationsTab({
     },
   ];
 
+  const gridSections = [
+    { key: 'children' as const, label: tr('子模型', 'Child models'), rows: rows.filter((row) => row.direction === 'children') },
+    { key: 'parents' as const, label: tr('父模型', 'Parent models'), rows: rows.filter((row) => row.direction === 'parents') },
+  ];
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -199,46 +272,138 @@ export function RelationsTab({
             'A model relation says one kind of resource may nest under another; the hierarchy tree is built from it.',
           )}
         </p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" type="button" onClick={() => setAdding('children')} disabled={!isAdmin} className="inline-flex items-center gap-1.5">
-            <Plus size={12} aria-hidden="true" />
-            {tr('加子模型', 'Add child')}
-          </Button>
-          <Button variant="outline" size="sm" type="button" onClick={() => setAdding('parents')} disabled={!isAdmin} className="inline-flex items-center gap-1.5">
-            <Plus size={12} aria-hidden="true" />
-            {tr('加父模型', 'Add parent')}
-          </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="cmdb-liquid-segment flex shrink-0 items-center gap-1 p-1" role="group" aria-label={tr('视图', 'View')}>
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-pressed={view === 'list'}
+              aria-label={tr('列表', 'List')}
+              title={tr('列表视图', 'List view')}
+              onClick={() => setView('list')}
+              className={cn('cmdb-liquid-segment-button inline-flex items-center justify-center px-2.5', view === 'list' && 'is-active')}
+            >
+              <Table2 size={13} aria-hidden="true" />
+            </Button>
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-pressed={view === 'grid'}
+              aria-label={tr('网格', 'Grid')}
+              title={tr('网格视图', 'Grid view')}
+              onClick={() => setView('grid')}
+              className={cn('cmdb-liquid-segment-button inline-flex items-center justify-center px-2.5', view === 'grid' && 'is-active')}
+            >
+              <LayoutGrid size={13} aria-hidden="true" />
+            </Button>
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-pressed={view === 'topology'}
+              aria-label={tr('拓扑', 'Topology')}
+              title={tr('拓扑视图', 'Topology view')}
+              onClick={() => setView('topology')}
+              className={cn('cmdb-liquid-segment-button inline-flex items-center justify-center px-2.5', view === 'topology' && 'is-active')}
+            >
+              <Network size={13} aria-hidden="true" />
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" type="button" onClick={() => setAdding('children')} disabled={!isAdmin} className="inline-flex items-center gap-1.5">
+              <Plus size={12} aria-hidden="true" />
+              {tr('加子模型', 'Add child')}
+            </Button>
+            <Button variant="outline" size="sm" type="button" onClick={() => setAdding('parents')} disabled={!isAdmin} className="inline-flex items-center gap-1.5">
+              <Plus size={12} aria-hidden="true" />
+              {tr('加父模型', 'Add parent')}
+            </Button>
+          </div>
         </div>
       </div>
 
-      <Card>
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={(row) => row.relation.ctr_id}
-          loading={loading}
-          error={err}
-          onRetry={() => void load()}
-          storageKey="model-relations"
-          empty={tr('这个模型还没有关系', 'This model has no relations yet')}
-          actions={(row) => (
-            <Hint content={adminTip}>
-              <Button
-                variant="dangerGhost"
-                size="sm"
-                type="button"
-                onClick={() => void remove(row.relation)}
-                disabled={!isAdmin}
-                aria-label={tr(`删除与 ${row.other.name} 的关系`, `Delete the relation to ${row.other.name}`)}
-                className="inline-flex items-center gap-1"
-              >
-                <Trash2 size={12} aria-hidden="true" />
-                {tr('删除', 'Delete')}
-              </Button>
-            </Hint>
-          )}
-        />
-      </Card>
+      {view === 'list' ? (
+        <Card>
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(row) => row.relation.ctr_id}
+            loading={loading}
+            error={err}
+            onRetry={() => void load()}
+            storageKey="model-relations"
+            empty={emptyHint}
+            actions={(row) => (
+              <Hint content={adminTip}>
+                <Button
+                  variant="dangerGhost"
+                  size="sm"
+                  type="button"
+                  onClick={() => void remove(row.relation)}
+                  disabled={!isAdmin}
+                  aria-label={tr(`删除与 ${row.other.name} 的关系`, `Delete the relation to ${row.other.name}`)}
+                  className="inline-flex items-center gap-1"
+                >
+                  <Trash2 size={12} aria-hidden="true" />
+                  {tr('删除', 'Delete')}
+                </Button>
+              </Hint>
+            )}
+          />
+        </Card>
+      ) : view === 'grid' ? (
+        <div className="flex flex-col gap-5">
+          {visualStatus ??
+            gridSections.map((section) =>
+              section.rows.length === 0 ? null : (
+                <section key={section.key} aria-labelledby={`cmdb-relation-${section.key}`}>
+                  <h2
+                    id={`cmdb-relation-${section.key}`}
+                    className="mb-2 flex items-center gap-2 text-xs font-semibold text-text"
+                  >
+                    {section.label}
+                    <Chip dense>{section.rows.length}</Chip>
+                  </h2>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {section.rows.map((row) => (
+                      <RelationCard
+                        key={`${row.direction}-${row.relation.ctr_id}`}
+                        row={row}
+                        isAdmin={isAdmin}
+                        adminTip={adminTip}
+                        onDelete={() => void remove(row.relation)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ),
+            )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="text-[11px] text-text-faint">
+            {tr('点击模型节点打开它的模型关系。', 'Select a model node to open its relations.')}
+          </p>
+          {visualStatus ??
+            (center ? (
+              <div className="cmdb-liquid-panel cmdb-topology-view h-[420px] overflow-hidden rounded-2xl sm:h-[520px]">
+                <TopologyGraph
+                  nodes={topology.nodes}
+                  relations={topology.edges}
+                  relationTypes={[]}
+                  selectedID={center?.id ?? null}
+                  showEdgeLabels
+                  onSelect={(node) => {
+                    if (!center || node.id === center.id) return;
+                    navigate(`/cmdb/models/${node.id}?tab=relations`);
+                  }}
+                />
+              </div>
+            ) : null)}
+        </div>
+      )}
 
       {adding && (
         <RelationModal
@@ -256,6 +421,94 @@ export function RelationsTab({
       )}
       {dialog}
     </div>
+  );
+}
+
+// THE CARD CARRIES THE SAME FACTS AS THE ROW, in the order an operator reads
+// them: which model, which side of the edge, then the relation's shape. It
+// borrows the model list's card so one model looks the same wherever its card
+// appears.
+function RelationCard({
+  row,
+  isAdmin,
+  adminTip,
+  onDelete,
+}: {
+  row: RelationRow;
+  isAdmin: boolean;
+  adminTip?: string;
+  onDelete(): void;
+}) {
+  const { tr } = useI18n();
+  const label = row.other.alias || row.other.name;
+  const directionLabel = row.direction === 'children' ? tr('子模型', 'Child model') : tr('父模型', 'Parent model');
+  return (
+    <article className="cmdb-liquid-card flex min-w-0 flex-col rounded-2xl p-4">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-500 text-white shadow-md shadow-sky-500/20">
+          <CMDBIcon value={row.other.icon} size={18} label={label} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <Link
+            to={`/cmdb/models/${row.other.id}`}
+            aria-label={label}
+            className="block min-w-0 truncate rounded-sm text-text hover:text-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+          >
+            <h3 className="truncate text-sm font-bold text-text" title={label}>
+              {label}
+            </h3>
+          </Link>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <code className="cmdb-liquid-key">{row.other.name}</code>
+            <Chip tone={row.direction === 'children' ? 'info' : 'default'} dense>
+              {directionLabel}
+            </Chip>
+          </div>
+        </div>
+      </div>
+
+      <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2">
+        <div className="min-w-0">
+          <dt className="text-[10px] text-text-faint">{tr('关系类型', 'Relation type')}</dt>
+          <dd className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-text-muted">
+            <span
+              aria-hidden="true"
+              className="h-2 w-2 shrink-0 rounded-full border border-border"
+              style={{ backgroundColor: row.relation.relation_type.color || 'transparent' }}
+            />
+            <span className="truncate">{row.relation.relation_type.name || row.relation.relation_type.id}</span>
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[10px] text-text-faint">{tr('基数', 'Cardinality')}</dt>
+          <dd className="mt-0.5 truncate font-mono text-[11px] text-text-muted">
+            {relationConstraintLabel(row.relation.constraint, tr)}
+          </dd>
+        </div>
+        <div className="col-span-2 min-w-0">
+          <dt className="text-[10px] text-text-faint">{tr('树上显示', 'Shown on the tree')}</dt>
+          <dd className="mt-0.5 truncate font-mono text-[11px] text-text-muted">{row.show || '—'}</dd>
+        </div>
+      </dl>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
+        <span className="font-mono text-[10px] text-text-faint">#{row.other.id}</span>
+        <Hint content={adminTip}>
+          <Button
+            variant="dangerGhost"
+            size="sm"
+            type="button"
+            onClick={onDelete}
+            disabled={!isAdmin}
+            aria-label={tr(`删除与 ${row.other.name} 的关系`, `Delete the relation to ${row.other.name}`)}
+            className="inline-flex items-center gap-1"
+          >
+            <Trash2 size={12} aria-hidden="true" />
+            {tr('删除', 'Delete')}
+          </Button>
+        </Hint>
+      </div>
+    </article>
   );
 }
 
