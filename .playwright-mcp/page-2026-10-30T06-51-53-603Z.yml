@@ -1,0 +1,15 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - img "Ongrid" [ref=e7]
+    - heading "登录到 Ongrid" [level=1] [ref=e12]
+    - paragraph [ref=e13]: AIOps 工作台
+  - generic [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]: 邮箱
+      - textbox "邮箱" [active] [ref=e17]:
+        - /placeholder: you@example.com
+    - generic [ref=e18]:
+      - generic [ref=e19]: 密码
+      - textbox "密码" [ref=e20]:
+        - /placeholder: ••••••••
+    - button "登录" [disabled] [ref=e21]

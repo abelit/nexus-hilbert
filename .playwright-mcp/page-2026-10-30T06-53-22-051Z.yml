@@ -1,0 +1,171 @@
+- generic [ref=f4e3]:
+  - complementary [ref=f4e4]:
+    - link "Ongrid 首页" [ref=f4e6] [cursor=pointer]:
+      - /url: /
+      - img "Ongrid" [ref=f4e7]
+      - generic [ref=f4e12]: Ongrid
+    - generic [ref=f4e13]:
+      - button "用户菜单" [ref=f4e14] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f4e15]: AO
+        - generic [ref=f4e16]:
+          - generic [ref=f4e17]: admin@ongrid.local
+          - generic [ref=f4e18]: AIOps 工作台
+      - button "折叠侧边栏" [ref=f4e19] [cursor=pointer]
+      - button "通知" [ref=f4e23] [cursor=pointer]
+    - button "打开命令面板" [ref=f4e28] [cursor=pointer]:
+      - generic [ref=f4e32]: 搜索路由 / 会话
+      - generic [ref=f4e33]: ⌘P
+    - navigation [ref=f4e34]:
+      - generic [ref=f4e35]:
+        - link "首页" [ref=f4e36] [cursor=pointer]:
+          - /url: /
+        - link "仪表盘" [ref=f4e41] [cursor=pointer]:
+          - /url: /dashboard
+      - generic [ref=f4e48]:
+        - generic [ref=f4e49]:
+          - button "Agent" [expanded] [ref=f4e50] [cursor=pointer]
+          - generic:
+            - button "管理Agent菜单"
+            - button "折叠Agent"
+        - generic [ref=f4e51]:
+          - generic [ref=f4e53]:
+            - link "助理" [ref=f4e54] [cursor=pointer]:
+              - /url: /agents
+            - button "从侧栏取消固定助理"
+          - generic [ref=f4e60]:
+            - link "工作流" [ref=f4e61] [cursor=pointer]:
+              - /url: /workflows
+            - button "从侧栏取消固定工作流"
+          - generic [ref=f4e68]:
+            - link "技能" [ref=f4e69] [cursor=pointer]:
+              - /url: /skills
+            - button "从侧栏取消固定技能"
+          - generic [ref=f4e74]:
+            - link "MCP" [ref=f4e75] [cursor=pointer]:
+              - /url: /mcp
+            - button "从侧栏取消固定MCP"
+      - generic [ref=f4e79]:
+        - generic [ref=f4e80]:
+          - button "知识库" [expanded] [ref=f4e81] [cursor=pointer]
+          - generic:
+            - button "管理知识库菜单"
+            - button "折叠知识库"
+        - generic [ref=f4e82]:
+          - generic [ref=f4e84]:
+            - link "知识库" [ref=f4e85] [cursor=pointer]:
+              - /url: /knowledge
+            - button "从侧栏取消固定知识库"
+          - generic [ref=f4e90]:
+            - link "代码仓库" [ref=f4e91] [cursor=pointer]:
+              - /url: /knowledge/repos
+            - button "从侧栏取消固定代码仓库"
+      - generic [ref=f4e97]:
+        - generic [ref=f4e98]:
+          - button "基础设施" [expanded] [ref=f4e99] [cursor=pointer]
+          - generic:
+            - button "管理基础设施菜单"
+            - button "折叠基础设施"
+        - generic [ref=f4e100]:
+          - generic [ref=f4e102]:
+            - link "设备" [ref=f4e103] [cursor=pointer]:
+              - /url: /devices
+            - button "从侧栏取消固定设备"
+          - generic [ref=f4e108]:
+            - link "集群" [ref=f4e109] [cursor=pointer]:
+              - /url: /clusters
+            - button "从侧栏取消固定集群"
+          - generic [ref=f4e116]:
+            - link "网络设备" [ref=f4e117] [cursor=pointer]:
+              - /url: /devices?roles=network
+            - button "从侧栏取消固定网络设备"
+          - generic [ref=f4e125]:
+            - link "拓扑" [ref=f4e126] [cursor=pointer]:
+              - /url: /topology
+            - button "从侧栏取消固定拓扑"
+      - generic [ref=f4e135]:
+        - button "监控告警" [ref=f4e136] [cursor=pointer]
+        - generic:
+          - button "管理监控告警菜单"
+          - button "展开监控告警"
+      - generic [ref=f4e137]:
+        - generic [ref=f4e138]:
+          - button "CMDB" [expanded] [ref=f4e139] [cursor=pointer]
+          - generic:
+            - button "管理CMDB菜单"
+            - button "折叠CMDB"
+        - generic [ref=f4e140]:
+          - generic [ref=f4e141]:
+            - generic [ref=f4e142]: 模型管理
+            - generic [ref=f4e143]:
+              - link "模型配置" [ref=f4e144] [cursor=pointer]:
+                - /url: /cmdb/models
+              - button "从侧栏取消固定模型配置"
+          - generic [ref=f4e157]:
+            - link "关系" [ref=f4e158] [cursor=pointer]:
+              - /url: /cmdb/relations
+            - button "从侧栏取消固定关系"
+          - generic [ref=f4e167]:
+            - link "关系类型" [ref=f4e168] [cursor=pointer]:
+              - /url: /cmdb/relation-types
+            - button "从侧栏取消固定关系类型"
+          - generic [ref=f4e175]:
+            - link "我的订阅" [ref=f4e176] [cursor=pointer]:
+              - /url: /cmdb/preferences
+            - button "从侧栏取消固定我的订阅"
+          - generic [ref=f4e182]:
+            - generic [ref=f4e183]: 资源管理
+            - generic [ref=f4e184]:
+              - link "资源数据" [ref=f4e185] [cursor=pointer]:
+                - /url: /cmdb/instances
+              - button "从侧栏取消固定资源数据"
+          - generic [ref=f4e192]:
+            - link "批量导入" [ref=f4e193] [cursor=pointer]:
+              - /url: /cmdb/batch
+            - button "从侧栏取消固定批量导入"
+          - generic [ref=f4e200]:
+            - link "资源搜索" [ref=f4e201] [cursor=pointer]:
+              - /url: /cmdb/search
+            - button "从侧栏取消固定资源搜索"
+          - generic [ref=f4e207]:
+            - link "资源层级" [ref=f4e208] [cursor=pointer]:
+              - /url: /cmdb/tree-views
+            - button "从侧栏取消固定资源层级"
+          - generic [ref=f4e214]:
+            - link "关系视图" [ref=f4e215] [cursor=pointer]:
+              - /url: /cmdb/service-tree
+            - button "从侧栏取消固定关系视图"
+          - generic [ref=f4e223]:
+            - link "自动发现" [ref=f4e224] [cursor=pointer]:
+              - /url: /cmdb/discovery
+            - button "从侧栏取消固定自动发现"
+          - generic [ref=f4e234]:
+            - link "自动发现池" [ref=f4e235] [cursor=pointer]:
+              - /url: /cmdb/adc
+            - button "从侧栏取消固定自动发现池"
+          - generic [ref=f4e241]:
+            - link "操作历史" [ref=f4e242] [cursor=pointer]:
+              - /url: /cmdb/operation-history
+            - button "从侧栏取消固定操作历史"
+          - generic [ref=f4e249]:
+            - link "拓扑视图" [ref=f4e250] [cursor=pointer]:
+              - /url: /cmdb/topology-views
+            - button "从侧栏取消固定拓扑视图"
+          - generic [ref=f4e260]:
+            - link "数据中心" [ref=f4e261] [cursor=pointer]:
+              - /url: /cmdb/dcim
+            - button "从侧栏取消固定数据中心"
+          - generic [ref=f4e267]:
+            - link "IPAM" [ref=f4e268] [cursor=pointer]:
+              - /url: /cmdb/ipam
+            - button "从侧栏取消固定IPAM"
+      - generic [ref=f4e276]:
+        - button "日常" [ref=f4e277] [cursor=pointer]
+        - generic:
+          - button "管理日常菜单"
+          - button "展开日常"
+    - generic [ref=f4e278]:
+      - link "用户管理" [ref=f4e279] [cursor=pointer]:
+        - /url: /admin/users
+      - link "设置" [ref=f4e285] [cursor=pointer]:
+        - /url: /settings/health
+  - generic [ref=f4e290]: 加载中…
