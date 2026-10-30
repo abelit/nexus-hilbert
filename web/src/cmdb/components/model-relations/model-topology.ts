@@ -286,6 +286,32 @@ export function badgeForNode(
 
 export type ModelNodePosition = { x: number; y: number; width: number; height: number };
 
+/** Facing handles for an edge. A right-to-left edge must leave the left side. */
+export function edgeHandles(
+  sourceX: number,
+  targetX: number,
+): { sourceHandle: string; targetHandle: string } {
+  return targetX >= sourceX
+    ? { sourceHandle: 'source-right', targetHandle: 'target-left' }
+    : { sourceHandle: 'source-left', targetHandle: 'target-right' };
+}
+
+/**
+ * Only the edges that point away from the center define the hierarchy. A
+ * reverse or cross edge is still drawn, but letting dagre rank it would put a
+ * parent on the child side and break the left/right contract.
+ */
+function isHierarchyEdge(edge: ModelEdge, nodes: Map<number, ModelNode>): boolean {
+  const source = nodes.get(edge.source);
+  const target = nodes.get(edge.target);
+  if (!source || !target) return false;
+  if (source.side === 'center') return target.side === 'right';
+  if (target.side === 'center') return source.side === 'left';
+  if (source.side === 'left' && target.side === 'left') return source.depth > target.depth;
+  if (source.side === 'right' && target.side === 'right') return source.depth < target.depth;
+  return false;
+}
+
 export function layoutModelGraph(
   nodes: ModelNode[],
   edges: ModelEdge[],
@@ -296,12 +322,14 @@ export function layoutModelGraph(
   graph.setGraph({ rankdir: 'LR', nodesep: 44, ranksep: 120, marginx: 40, marginy: 40 });
 
   const known = new Set(nodes.map((node) => node.id));
+  const byID = new Map(nodes.map((node) => [node.id, node]));
   for (const node of nodes) {
     const size = node.side === 'center' ? CENTER_SIZE : NODE_SIZE;
     graph.setNode(String(node.id), { width: size.width, height: size.height });
   }
   for (const edge of edges) {
     if (!known.has(edge.source) || !known.has(edge.target)) continue;
+    if (!isHierarchyEdge(edge, byID)) continue;
     graph.setEdge(String(edge.source), String(edge.target));
   }
   dagre.layout(graph);

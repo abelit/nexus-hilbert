@@ -36,7 +36,12 @@ vi.mock('@xyflow/react', async () => {
       onPaneClick,
     }: {
       nodes: Array<{ id: string; type: string; data: { node?: { alias?: string } } }>;
-      edges: Array<{ id: string; data?: { label?: string; dimmed?: boolean } }>;
+      edges: Array<{
+        id: string;
+        sourceHandle?: string;
+        targetHandle?: string;
+        data?: { label?: string; dimmed?: boolean; showLabel?: boolean; connected?: boolean; offset?: number };
+      }>;
       nodeTypes?: Record<string, React.ComponentType<{ id: string; data: unknown; selected: boolean }>>;
       children?: React.ReactNode;
       onNodeMouseEnter?(event: unknown, node: unknown): void;
@@ -68,6 +73,11 @@ vi.mock('@xyflow/react', async () => {
             data-testid={`flow-edge-${edge.id}`}
             data-label={edge.data?.label}
             data-dimmed={edge.data?.dimmed ? 'true' : 'false'}
+            data-show-label={edge.data?.showLabel ? 'true' : 'false'}
+            data-connected={edge.data?.connected ? 'true' : 'false'}
+            data-offset={edge.data?.offset}
+            data-source-handle={edge.sourceHandle}
+            data-target-handle={edge.targetHandle}
           />
         ))}
         {children}
@@ -273,13 +283,7 @@ describe('ModelRelationsTopology', () => {
     const { rerender } = render(view());
     expect(await screen.findByText('业务应用')).toBeInTheDocument();
 
-    rerender(
-      <MemoryRouter>
-        <ToastProvider>
-          <ModelRelationsTopology center={child} parents={[]} children={[]} groups={[]} />
-        </ToastProvider>
-      </MemoryRouter>,
-    );
+    rerender(view({ center: child, parents: [], children: [] }));
 
     expect(await screen.findByText('证书')).toBeInTheDocument();
     expect(screen.queryByText('业务应用')).not.toBeInTheDocument();
@@ -308,13 +312,7 @@ describe('ModelRelationsTopology', () => {
     await user.hover(screen.getByTestId('flow-node-20'));
     await waitFor(() => expect(started).toBe(1));
 
-    rerender(
-      <MemoryRouter>
-        <ToastProvider>
-          <ModelRelationsTopology center={child} parents={[]} children={[]} groups={[]} />
-        </ToastProvider>
-      </MemoryRouter>,
-    );
+    rerender(view({ center: child, parents: [], children: [] }));
     release();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -528,5 +526,87 @@ describe('ModelRelationsTopology', () => {
 
     await user.click(screen.getByRole('button', { name: '迷你地图' }));
     expect(screen.getByTestId('minimap')).toBeInTheDocument();
+  });
+
+  it('does not commit an expansion that started before the center changed', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/20/relation-parents', async () => {
+        calls += 1;
+        if (calls === 1) return new HttpResponse(null, { status: 500 });
+        await gate;
+        return HttpResponse.json({
+          items: [relation(700, model(70, 'old', '旧展开'))],
+          total: 1,
+        });
+      }),
+    );
+    const otherCenter = model(90, 'other_application', '其他模型');
+    const { rerender } = render(view());
+    const user = userEvent.setup();
+
+    await user.hover(screen.getByTestId('flow-node-20'));
+    const retry = await screen.findByRole('button', { name: '展开下级' }, { timeout: 2000 });
+    await user.click(retry);
+    await waitFor(() => expect(calls).toBe(2));
+
+    rerender(view({ center: otherCenter, parents: [], children: [], groups: [] }));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(screen.getByText('其他模型')).toBeInTheDocument();
+    expect(screen.queryByText('旧展开')).not.toBeInTheDocument();
+  });
+
+  it('keeps a bidirectional relation on the inbound side with facing handles', () => {
+    render(
+      view({
+        parents: [relation(1, parent, 'depend', '#f59e0b')],
+        children: [relation(2, parent, 'contain', '#0ea5e9')],
+      }),
+    );
+
+    expect(screen.getAllByRole('button', { name: '服务' })).toHaveLength(1);
+    expect(screen.getByTestId('flow-edge-20-10-1')).toHaveAttribute('data-source-handle', 'source-right');
+    expect(screen.getByTestId('flow-edge-20-10-1')).toHaveAttribute('data-target-handle', 'target-left');
+    expect(screen.getByTestId('flow-edge-10-20-2')).toHaveAttribute('data-source-handle', 'source-left');
+    expect(screen.getByTestId('flow-edge-10-20-2')).toHaveAttribute('data-target-handle', 'target-right');
+  });
+
+  it('offsets parallel relations in ctr_id order and caps labels at three', () => {
+    const parallel = [5, 2, 9, 1].map((id) => relation(id, child, `relation_${id}`, '#0ea5e9'));
+    render(view({ children: parallel }));
+    const ordered = ['1', '2', '5', '9'];
+
+    expect(
+      ordered.map((id) =>
+        screen.getByTestId(`flow-edge-10-30-${id}`).getAttribute('data-offset'),
+      ),
+    ).toEqual(['-1.5', '-0.5', '0.5', '1.5']);
+    expect(
+      ordered.map((id) =>
+        screen.getByTestId(`flow-edge-10-30-${id}`).getAttribute('data-show-label'),
+      ),
+    ).toEqual(['true', 'true', 'true', 'false']);
+  });
+
+  it('reveals only the focused path labels after the first coarse tap', () => {
+    stubCoarsePointer();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/20/relation-parents', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+    );
+    render(view());
+
+    fireEvent.click(screen.getByRole('button', { name: '服务' }));
+
+    expect(screen.getByTestId('flow-edge-20-10-1')).toHaveAttribute('data-show-label', 'true');
+    expect(screen.getByTestId('flow-edge-20-10-1')).toHaveAttribute('data-connected', 'true');
+    expect(screen.getByTestId('flow-edge-10-30-2')).toHaveAttribute('data-show-label', 'false');
   });
 });

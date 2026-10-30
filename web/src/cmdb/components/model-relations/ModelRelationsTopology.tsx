@@ -33,6 +33,7 @@ import {
   NEUTRAL_COLOR,
   badgeForNode,
   createInitialGraph,
+  edgeHandles,
   groupColorMap,
   layoutModelGraph,
   mergeExpansion,
@@ -85,6 +86,15 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
   const [probeVersion, bumpProbes] = useReducer((version: number) => version + 1, 0);
   const probes = useRef<Map<string, ProbeEntry>>(new Map());
   const inFlight = useRef<Map<string, Promise<RelatedType[]>>>(new Map());
+  // Latest committed graph, so an expansion that started before another
+  // expansion or collapse lands on the current state instead of a stale
+  // closure.
+  const graphRef = useRef(graph);
+  graphRef.current = graph;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  const centerRef = useRef(center);
+  centerRef.current = center;
   const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const generation = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -250,6 +260,9 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
     async (nodeId: number) => {
       const node = graph.nodes.get(nodeId);
       if (!node || node.side === 'center') return;
+      // A center change resets the graph while this request is in flight; its
+      // result belongs to the old picture and must not be committed.
+      const startGeneration = generation.current;
 
       let items: RelatedType[];
       try {
@@ -259,10 +272,13 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         return;
       }
       if (items.length === 0) return;
+      if (generation.current !== startGeneration) return;
 
-      const candidate = mergeExpansion(graph, nodeId, items, colors);
-      const nextExpanded = new Set(expanded).add(nodeId);
-      const nextVisible = visibleGraph(candidate, nextExpanded, center.id);
+      const latestGraph = graphRef.current;
+      const latestExpanded = expandedRef.current;
+      const candidate = mergeExpansion(latestGraph, nodeId, items, colors);
+      const nextExpanded = new Set(latestExpanded).add(nodeId);
+      const nextVisible = visibleGraph(candidate, nextExpanded, centerRef.current.id);
       if (nextVisible.nodes.size > MAX_VISIBLE_NODES) {
         toast.error(tr('节点过多，请先折叠部分分支', 'Too many nodes; collapse a branch first'));
         return;
@@ -272,7 +288,7 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
       setExpanded(nextExpanded);
       fitSoon();
     },
-    [graph, expanded, colors, center.id, probeNode, toast, tr, fitSoon],
+    [graph, colors, probeNode, toast, tr, fitSoon],
   );
 
   const collapse = useCallback(
@@ -401,15 +417,26 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
       byPair.set(pair, list);
     }
     return visible.edges.map((edge) => {
-      const pair = byPair.get(`${edge.source}-${edge.target}`) ?? [];
+      const pair = [...(byPair.get(`${edge.source}-${edge.target}`) ?? [])].sort(
+        (left, right) => left.relationId - right.relationId,
+      );
       const index = pair.findIndex((item) => item.key === edge.key);
       const offset = index - (pair.length - 1) / 2;
+      // Three parallel labels is the readable ceiling; the rest still draw
+      // their own line so the relation count is visible.
+      const labelAllowed = pair.length <= 3 || index < 3;
+      const sourcePosition = positions.get(edge.source);
+      const targetPosition = positions.get(edge.target);
+      const handles = edgeHandles(
+        sourcePosition ? sourcePosition.x + sourcePosition.width / 2 : 0,
+        targetPosition ? targetPosition.x + targetPosition.width / 2 : 0,
+      );
       const isConnected = Boolean(connected?.edgeKeys.has(edge.key));
       const data: ModelEdgePaintData = {
         label: edge.relationName,
         color: edge.relationColor,
         dimmed: Boolean(connected && !isConnected),
-        showLabel: !connected || isConnected,
+        showLabel: labelAllowed && (!connected || isConnected),
         connected: isConnected,
         offset,
       };
@@ -417,14 +444,14 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         id: edge.key,
         source: String(edge.source),
         target: String(edge.target),
-        sourceHandle: 'source-right',
-        targetHandle: 'target-left',
+        sourceHandle: handles.sourceHandle,
+        targetHandle: handles.targetHandle,
         type: 'model',
         data,
         markerEnd: { type: MarkerType.ArrowClosed, color: edge.relationColor },
       };
     });
-  }, [visible.edges, connected]);
+  }, [visible.edges, connected, positions]);
 
   return (
     <div

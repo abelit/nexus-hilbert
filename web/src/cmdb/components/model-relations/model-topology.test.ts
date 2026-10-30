@@ -8,6 +8,7 @@ import {
   NEUTRAL_COLOR,
   badgeForNode,
   createInitialGraph,
+  edgeHandles,
   groupColorMap,
   hasLoadedChildren,
   hiddenDescendantCount,
@@ -277,6 +278,16 @@ describe('badgeForNode', () => {
   });
 });
 
+describe('edgeHandles', () => {
+  it('connects facing sides when the target is to the right', () => {
+    expect(edgeHandles(0, 100)).toEqual({ sourceHandle: 'source-right', targetHandle: 'target-left' });
+  });
+
+  it('connects facing sides when the edge points left', () => {
+    expect(edgeHandles(100, 0)).toEqual({ sourceHandle: 'source-left', targetHandle: 'target-right' });
+  });
+});
+
 describe('layoutModelGraph', () => {
   it('puts the center at the origin with parents left and children right', () => {
     const graph = initial([relation(1, parent)], [relation(2, child)]);
@@ -292,6 +303,47 @@ describe('layoutModelGraph', () => {
     expect(positions.get(parent.id)!.x).toBeLessThan(0);
     expect(positions.get(child.id)!.x).toBeGreaterThan(0);
     expect(positions.get(grandchild.id)!.x).toBeGreaterThan(positions.get(child.id)!.x);
+  });
+
+  it('keeps a bidirectional model on the inbound side', () => {
+    const graph = initial([relation(1, parent)], [relation(2, parent)]);
+
+    const positions = layoutModelGraph([...graph.nodes.values()], graph.edges, center.id);
+
+    expect(positions.get(parent.id)!.x).toBeLessThan(0);
+  });
+
+  it('keeps a cycle inside the left branch instead of reversing the rank', () => {
+    const graph = mergeExpansion(
+      initial([relation(1, parent)]),
+      parent.id,
+      [relation(2, grandparent)],
+      new Map(),
+    );
+    const withCycle: ModelGraph = {
+      nodes: graph.nodes,
+      edges: [
+        ...graph.edges,
+        {
+          key: `${parent.id}-${grandparent.id}-99`,
+          source: parent.id,
+          target: grandparent.id,
+          relationId: 99,
+          relationName: 'cycles',
+          relationColor: '#94a3b8',
+          direction: 'in',
+        },
+      ],
+    };
+
+    const positions = layoutModelGraph(
+      [...withCycle.nodes.values()],
+      withCycle.edges,
+      center.id,
+    );
+
+    expect(positions.get(grandparent.id)!.x).toBeLessThan(positions.get(parent.id)!.x);
+    expect(positions.get(parent.id)!.x).toBeLessThan(positions.get(center.id)!.x);
   });
 
   it('is deterministic for the same input', () => {

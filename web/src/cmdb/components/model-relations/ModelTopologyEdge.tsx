@@ -37,7 +37,7 @@ export function ModelTopologyEdge(props: EdgeProps) {
 
   return (
     <>
-      <g transform={`translate(0, ${offset * 10})`}>
+      <g transform={`translate(0, ${offset * 12})`}>
         <BaseEdge
           id={props.id}
           path={path}
@@ -52,7 +52,7 @@ export function ModelTopologyEdge(props: EdgeProps) {
             className={`cmdb-model-topology-edge-label nodrag nopan${data.connected ? ' is-connected' : ''}`}
             style={{
               position: 'absolute',
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) translate(0px, ${offset * 10}px)`,
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) translate(0px, ${offset * 12}px)`,
               pointerEvents: 'none',
               whiteSpace: 'nowrap',
               border: `1px solid ${color}`,
@@ -61,7 +61,7 @@ export function ModelTopologyEdge(props: EdgeProps) {
               fontSize: 9.5,
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
               color,
-              background: 'var(--bg-primary)',
+              background: 'rgb(var(--bg))',
               opacity,
             }}
           >

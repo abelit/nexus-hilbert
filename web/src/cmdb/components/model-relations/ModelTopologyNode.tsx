@@ -154,23 +154,24 @@ export function ModelNodeCard({
   );
 }
 
+const hiddenHandle = {
+  opacity: 0,
+  width: 1,
+  height: 1,
+  border: 'none',
+  background: 'transparent',
+} as const;
+
 export function ModelTopologyNodeView({ data }: NodeProps<Node<ModelTopologyNodePayload>>) {
   return (
     <>
       {/* React Flow only draws an edge when both endpoints expose a handle.
-          They stay invisible: the line starts at the card edge. */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="target-left"
-        style={{ opacity: 0, width: 1, height: 1, border: 'none', background: 'transparent' }}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="source-right"
-        style={{ opacity: 0, width: 1, height: 1, border: 'none', background: 'transparent' }}
-      />
+          All four sides exist so a reverse edge can leave and enter the
+          facing sides instead of wrapping around the card. */}
+      <Handle type="target" position={Position.Left} id="target-left" style={hiddenHandle} />
+      <Handle type="target" position={Position.Right} id="target-right" style={hiddenHandle} />
+      <Handle type="source" position={Position.Left} id="source-left" style={hiddenHandle} />
+      <Handle type="source" position={Position.Right} id="source-right" style={hiddenHandle} />
       <ModelNodeCard
         data={data}
         onOpen={() => data.onOpen(data.node.id)}

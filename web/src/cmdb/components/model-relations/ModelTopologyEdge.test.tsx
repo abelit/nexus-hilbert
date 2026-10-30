@@ -40,7 +40,7 @@ describe('ModelTopologyEdge', () => {
     const label = screen.getByText('contain');
     expect(label).toHaveAttribute('data-edge-label');
     expect(label).toHaveStyle({ color: '#0ea5e9', borderColor: '#0ea5e9' });
-    expect(label.style.background).toBe('var(--bg-primary)');
+    expect(label.style.background).toBe('rgb(var(--bg))');
   });
 
   it('hides the label when the layout asks it to', () => {
@@ -63,9 +63,9 @@ describe('ModelTopologyEdge', () => {
     expect(screen.getByTestId('edge-path')).toHaveStyle({ opacity: '1' });
   });
 
-  it('offsets a parallel edge and its label by ten pixels per index', () => {
+  it('offsets a parallel edge and its label by twelve pixels per index', () => {
     render(<ModelTopologyEdge {...edgeProps({ offset: 2 })} />);
 
-    expect(screen.getByText('contain').style.transform).toContain('translate(0px, 20px)');
+    expect(screen.getByText('contain').style.transform).toContain('translate(0px, 24px)');
   });
 });
