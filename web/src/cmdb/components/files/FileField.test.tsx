@@ -85,6 +85,28 @@ describe('the CMDB file field', () => {
     expect(onChange).toHaveBeenCalledWith([files[1]], JSON.stringify([files[1]]));
   });
 
+
+  it('keeps the same manager for viewing files in read-only mode', async () => {
+    const user = userEvent.setup();
+    render(
+      <ToastProvider>
+        <FileField attribute={{ id: 7, name: 'attachment', alias: '附件' }} value={JSON.stringify(files)} readOnly />
+      </ToastProvider>,
+    );
+
+    const trigger = screen.getByRole('button', { name: '查看文件：附件' });
+    expect(within(trigger).getByText('2 个文件')).toBeInTheDocument();
+    await user.click(trigger);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('a.txt')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: '预览 a.txt' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: '下载 a.txt' })).toBeInTheDocument();
+    // Viewing must not offer the write controls.
+    expect(within(dialog).queryByText('点击选择或拖入文件')).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '删除 a.txt' })).not.toBeInTheDocument();
+  });
+
   it('loads the current files before opening a compact trigger', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

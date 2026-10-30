@@ -23,6 +23,7 @@ import { cn } from '@/lib/cn';
 import { useThemeMode } from '@/store/mode';
 
 import type { CIType, TypeAttribute } from '../../api/citype';
+import { getInstanceFileValues } from '../../api/files';
 import { relationChildren, relationParents } from '../../api/citype';
 import { describeError } from '../../api/http';
 import { searchHierarchy, type Instance } from '../../api/instance';
@@ -36,6 +37,7 @@ import {
   type TopoTree,
 } from '../../lib/instance-topology';
 import { displayValue } from '../../lib/valuetype';
+import { FileField } from '../files/FileField';
 import { CMDBIcon } from '../CMDBIcon';
 import { useToast } from '../Toast';
 
@@ -117,23 +119,37 @@ function TopoNodeView({ id, data, selected }: NodeProps<Node<TopoNodeData>>) {
 
 const nodeTypes = { ci: TopoNodeView };
 
+type DetailRow =
+  | { key: string; label: string; value: string; attribute?: undefined }
+  | { key: string; label: string; value: unknown; attribute: TypeAttribute };
+
 function DetailCard({ data, onClose, onOpen }: { data: TopoNodeData; onClose(): void; onOpen?(): void }) {
   const { tr } = useI18n();
   const rows = data.attrs
-    .map((attribute) => {
+    .map((attribute): DetailRow | null => {
       const raw = data.values?.[attribute.name];
       if (raw === undefined || raw === null || raw === '') return null;
-      const value = attribute.is_password ? '••••••' : displayValue(raw);
-      return {
-        key: `${attribute.id}-${attribute.name}`,
-        label: attribute.alias || attribute.name,
-        value: value || '—',
-      };
+      // A file attribute stores metadata JSON, not a value an operator reads.
+      // Printing it wrapped the raw array across the card and buried the file
+      // names; show the attachments themselves instead.
+      if (attribute.is_file) {
+        return {
+          key: `${attribute.id}-${attribute.name}`,
+          label: attribute.alias || attribute.name,
+          attribute,
+          value: raw,
+        };
+      }
+      if (attribute.is_password) {
+        return { key: `${attribute.id}-${attribute.name}`, label: attribute.alias || attribute.name, value: '••••••' };
+      }
+      const value = displayValue(raw);
+      return { key: `${attribute.id}-${attribute.name}`, label: attribute.alias || attribute.name, value: value || '—' };
     })
-    .filter((row): row is { key: string; label: string; value: string } => Boolean(row));
+    .filter((row): row is DetailRow => Boolean(row));
 
   return (
-    <aside className="absolute bottom-3 right-3 z-20 flex max-h-[calc(100%-1.5rem)] w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl">
+    <aside className="absolute bottom-3 right-3 z-20 flex max-h-[calc(100%-1.5rem)] w-[min(22rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl">
       <header className="flex items-center justify-between gap-2 border-b border-border bg-bg/40 px-3 py-2">
         <div className="min-w-0">
           <h4 className="truncate text-xs font-semibold text-text">{data.title}</h4>
@@ -152,8 +168,33 @@ function DetailCard({ data, onClose, onOpen }: { data: TopoNodeData; onClose(): 
         {rows.length ? (
           rows.map((row) => (
             <div key={row.key} className="flex items-start gap-2 border-b border-border/50 py-1.5 last:border-0">
-              <span className="w-24 shrink-0 truncate text-[11px] text-text-faint">{row.label}</span>
-              <span className="min-w-0 flex-1 break-words text-[11px] text-text">{row.value}</span>
+              <span className="w-24 shrink-0 truncate text-[11px] text-text-faint" title={row.label}>
+                {row.label}
+              </span>
+              {row.attribute ? (
+                <div className="min-w-0 flex-1">
+                  <FileField
+                    attribute={row.attribute}
+                    value={row.value}
+                    readOnly
+                    loadValue={
+                      // The root's values already came from the detail read,
+                      // which merges file metadata. A related node's search row
+                      // may not carry it, so fetch the file value when opened.
+                      !data.isRoot && data.ciID
+                        ? async () => (await getInstanceFileValues(data.ciID!))[row.attribute!.name]
+                        : undefined
+                    }
+                  />
+                </div>
+              ) : (
+                <span
+                  title={row.value}
+                  className="line-clamp-4 min-w-0 flex-1 whitespace-pre-wrap break-words text-[11px] text-text"
+                >
+                  {row.value}
+                </span>
+              )}
             </div>
           ))
         ) : (

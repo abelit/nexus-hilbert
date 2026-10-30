@@ -166,6 +166,50 @@ describe('the instance topology switch', () => {
     expect(onNavigate).toHaveBeenCalledWith({ ciID: 20, typeID: 3 });
   });
 
+
+  it('shows attachment names instead of the raw file metadata JSON', async () => {
+    const user = userEvent.setup();
+    mocks();
+    const fileAttribute = {
+      ...nameAttribute(11),
+      name: 'attach',
+      alias: '附件',
+      is_file: true,
+      storage_table: 'c_value_texts',
+    } as TypeAttribute;
+    const fileValue = JSON.stringify([
+      {
+        stored_path: '2026/08/03/9e83aca6_alert.txt',
+        size: 576,
+        original_name: '航司修改告警数据内容.txt',
+        mime_type: 'text/plain',
+        storage_backend: 's3',
+      },
+    ]);
+    render(
+      <ToastProvider>
+        <InstanceTopology
+          model={host}
+          attributes={[...hostAttributes, fileAttribute]}
+          instance={{ ci_id: 5, type_id: 1, values: { name: 'web-01', attach: fileValue } }}
+          instanceID={5}
+          instanceLabel="web-01"
+        />
+      </ToastProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: '单击 web-01' }));
+    const trigger = await screen.findByRole('button', { name: '查看文件：附件' });
+    expect(trigger).toHaveTextContent('1 个文件');
+    expect(screen.queryByText(/"stored_path"/)).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    expect(await screen.findByText('航司修改告警数据内容.txt')).toBeInTheDocument();
+    expect(screen.getByText(/576 B/)).toBeInTheDocument();
+    expect(screen.queryByText('点击选择或拖入文件')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '删除 航司修改告警数据内容.txt' })).not.toBeInTheDocument();
+  });
+
   it('does not offer a switch on the current resource card', async () => {
     const user = userEvent.setup();
     mocks();

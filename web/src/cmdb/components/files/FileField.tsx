@@ -37,8 +37,11 @@ type FileFieldProps = {
   /** Attribute metadata; the id lets the server apply attribute-level limits. */
   attribute: { id: number; name: string; alias?: string };
   value: unknown;
-  onChange(files: CIFile[], serialized: string): void | Promise<void>;
+  /** Omitted in read-only mode: the manager then only previews and downloads. */
+  onChange?(files: CIFile[], serialized: string): void | Promise<void>;
   disabled?: boolean;
+  /** Keep the field and its manager to viewing and downloading. */
+  readOnly?: boolean;
   /**
    * Compact trigger for table cells and grid cards. The default trigger keeps
    * its dashed attachment-button shape for forms and detail fields.
@@ -90,6 +93,7 @@ export function FileField({
   value,
   onChange,
   disabled = false,
+  readOnly = false,
   compact = false,
   loadValue,
 }: FileFieldProps) {
@@ -136,6 +140,7 @@ export function FileField({
   }, [fileIDs, open]);
 
   const apply = async (next: CIFile[]) => {
+    if (!onChange) return;
     try {
       const serialized = serializeCIFiles(next);
       await onChange(next, serialized);
@@ -164,7 +169,7 @@ export function FileField({
   };
 
   const upload = async (selected: File[]) => {
-    if (disabled || selected.length === 0 || uploading) return;
+    if (disabled || readOnly || selected.length === 0 || uploading) return;
     try {
       let next = parseCIFiles(effectiveValue);
       for (const file of selected) {
@@ -189,11 +194,12 @@ export function FileField({
 
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
-    if (disabled || uploading) return;
+    if (disabled || readOnly || uploading) return;
     void upload(Array.from(event.dataTransfer.files ?? []));
   };
 
   const remove = async (file: CIFile) => {
+    if (readOnly) return;
     const ok = await confirmAction(tr(`删除文件「${file.original_name}」？`, `Delete “${file.original_name}”?`));
     if (!ok) return;
     try {
@@ -227,8 +233,16 @@ export function FileField({
           compact && !files.length && 'text-indigo-500 hover:bg-indigo-500/5',
           (disabled || resolving) && 'cursor-not-allowed opacity-50',
         )}
-        title={tr(`管理文件：${label}`, `Manage files: ${label}`)}
-        aria-label={tr(`管理文件：${label}`, `Manage files: ${label}`)}
+        title={
+          readOnly
+            ? tr(`查看文件：${label}`, `View files: ${label}`)
+            : tr(`管理文件：${label}`, `Manage files: ${label}`)
+        }
+        aria-label={
+          readOnly
+            ? tr(`查看文件：${label}`, `View files: ${label}`)
+            : tr(`管理文件：${label}`, `Manage files: ${label}`)
+        }
       >
         {resolving ? (
           <Loader2 size={compact ? 11 : 13} className="animate-spin" aria-hidden="true" />
@@ -243,6 +257,8 @@ export function FileField({
           )
         ) : files.length ? (
           tr(`${files.length} 个文件`, `${files.length} ${files.length === 1 ? 'file' : 'files'}`)
+        ) : readOnly ? (
+          tr('没有文件', 'No files')
         ) : (
           tr('未上传文件', 'No files')
         )}
@@ -251,7 +267,7 @@ export function FileField({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title={tr(`文件管理 · ${label}`, `Files · ${label}`)}
+        title={readOnly ? tr(`文件 · ${label}`, `Files · ${label}`) : tr(`文件管理 · ${label}`, `Files · ${label}`)}
         size="xl"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
@@ -265,6 +281,7 @@ export function FileField({
         }
       >
         <div className="flex flex-col gap-3">
+          {!readOnly && (
           <label
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}
@@ -287,6 +304,7 @@ export function FileField({
               aria-label={tr('上传文件', 'Upload files')}
             />
           </label>
+          )}
 
           {uploading && (
             <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
@@ -360,17 +378,19 @@ export function FileField({
                       >
                         <Download size={13} aria-hidden="true" />
                       </a>
-                      <Button
-                        variant="dangerGhost"
-                        size="sm"
-                        type="button"
-                        onClick={() => void remove(file)}
-                        disabled={disabled}
-                        aria-label={tr(`删除 ${file.original_name}`, `Delete ${file.original_name}`)}
-                        title={tr('删除', 'Delete')}
-                      >
-                        <Trash2 size={13} aria-hidden="true" />
-                      </Button>
+                      {!readOnly && (
+                        <Button
+                          variant="dangerGhost"
+                          size="sm"
+                          type="button"
+                          onClick={() => void remove(file)}
+                          disabled={disabled}
+                          aria-label={tr(`删除 ${file.original_name}`, `Delete ${file.original_name}`)}
+                          title={tr('删除', 'Delete')}
+                        >
+                          <Trash2 size={13} aria-hidden="true" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
