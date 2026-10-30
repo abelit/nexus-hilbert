@@ -214,7 +214,10 @@ func (u *Usecase) walkHierarchy(ctx context.Context, roots []*cimodel.CI, levels
 	}
 
 	if reverse {
-		return u.walkUpwards(ctx, roots, depth, collect)
+		// walkUpwards reports into `collect`; its own return is only an error.
+		// Returning its value directly used to discard every parent the walk
+		// found, so an upstream hierarchy always came back empty.
+		return merged, u.walkUpwards(ctx, roots, depth, collect)
 	}
 
 	frontier := make([]WalkKey, 0, len(roots))
@@ -263,7 +266,7 @@ func (u *Usecase) walkHierarchy(ctx context.Context, roots []*cimodel.CI, levels
 // whose edges carry paths only walks up through the ones that agree. An
 // intersection with an empty or absent set is skipped, which is why a plain
 // hierarchy walks up normally.
-func (u *Usecase) walkUpwards(ctx context.Context, roots []*cimodel.CI, depth int, collect func([]WalkKey, int)) ([]model.ID, error) {
+func (u *Usecase) walkUpwards(ctx context.Context, roots []*cimodel.CI, depth int, collect func([]WalkKey, int)) error {
 	nodes := make([]model.ID, 0, len(roots))
 	for _, root := range roots {
 		nodes = append(nodes, root.ID)
@@ -274,7 +277,7 @@ func (u *Usecase) walkUpwards(ctx context.Context, roots []*cimodel.CI, depth in
 	for level := 1; level <= depth; level++ {
 		parents, ancestors, err := u.repo.WalkParents(ctx, nodes)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if havePrevious && len(previousAncestors) > 0 {
@@ -302,7 +305,7 @@ func (u *Usecase) walkUpwards(ctx context.Context, roots []*cimodel.CI, depth in
 			break
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 // normalizeLevels validates the requested levels and returns them sorted, with
