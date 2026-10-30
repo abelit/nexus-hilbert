@@ -11,6 +11,8 @@ export type ModelEdgePaintData = {
   dimmed: boolean;
   showLabel: boolean;
   offset: number;
+  /** True when this edge belongs to the focused node's direct path. */
+  connected?: boolean;
 };
 
 const FALLBACK_COLOR = '#94a3b8';
@@ -47,7 +49,7 @@ export function ModelTopologyEdge(props: EdgeProps) {
         <EdgeLabelRenderer>
           <div
             data-edge-label=""
-            className="cmdb-model-topology-edge-label nodrag nopan"
+            className={`cmdb-model-topology-edge-label nodrag nopan${data.connected ? ' is-connected' : ''}`}
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) translate(0px, ${offset * 10}px)`,

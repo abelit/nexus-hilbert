@@ -22,16 +22,22 @@ export type ModelNodeCardData = {
 export type ModelTopologyNodePayload = ModelNodeCardData & {
   onOpen(id: number): void;
   onToggle(id: number): void;
+  onFocusNode(id: number): void;
+  onBlurNode(id: number): void;
 };
 
 export function ModelNodeCard({
   data,
   onOpen,
   onToggle,
+  onFocus,
+  onBlur,
 }: {
   data: ModelNodeCardData;
   onOpen(): void;
   onToggle(): void;
+  onFocus?(): void;
+  onBlur?(): void;
 }) {
   const { tr } = useI18n();
   const { node, isCenter, badge, dimmed, focused } = data;
@@ -72,6 +78,8 @@ export function ModelNodeCard({
         backgroundColor: 'var(--bg-secondary)',
       }}
       onClick={onOpen}
+      onFocus={onFocus}
+      onBlur={onBlur}
       onKeyDown={(event) => {
         // The badge is a real button and handles its own activation; a key
         // pressed there must not bubble into "open the model".
@@ -153,6 +161,8 @@ export function ModelTopologyNodeView({ data }: NodeProps<Node<ModelTopologyNode
       data={data}
       onOpen={() => data.onOpen(data.node.id)}
       onToggle={() => data.onToggle(data.node.id)}
+      onFocus={() => data.onFocusNode(data.node.id)}
+      onBlur={() => data.onBlurNode(data.node.id)}
     />
   );
 }

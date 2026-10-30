@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Background,
   MarkerType,
@@ -63,16 +64,19 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
   const { tr } = useI18n();
   const toast = useToast();
   const { fitView } = useReactFlow();
+  const navigate = useNavigate();
   const [graph, setGraph] = useState<ModelGraph>(() =>
     createInitialGraph(center, parents, children, groupColorMap(groups)),
   );
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set([center.id]));
+  const [focusedId, setFocusedId] = useState<number | null>(null);
   const [probeVersion, bumpProbes] = useReducer((version: number) => version + 1, 0);
   const probes = useRef<Map<string, ProbeEntry>>(new Map());
   const inFlight = useRef<Map<string, Promise<RelatedType[]>>>(new Map());
   const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const generation = useRef(0);
   const colors = useMemo(() => groupColorMap(groups), [groups]);
+  const coarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches === true;
 
   useEffect(() => {
     generation.current += 1;
@@ -82,6 +86,7 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
     timers.current.clear();
     setGraph(createInitialGraph(center, parents, children, groupColorMap(groups)));
     setExpanded(new Set([center.id]));
+    setFocusedId(null);
     bumpProbes();
   }, [center, parents, children, groups]);
 
@@ -155,6 +160,22 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
     }
   }, []);
 
+  const handleEnter = useCallback(
+    (nodeId: number) => {
+      setFocusedId(nodeId);
+      scheduleProbe(nodeId);
+    },
+    [scheduleProbe],
+  );
+
+  const handleLeave = useCallback(
+    (nodeId: number) => {
+      cancelProbe(nodeId);
+      setFocusedId((current) => (current === nodeId ? null : current));
+    },
+    [cancelProbe],
+  );
+
   const fitSoon = useCallback(() => {
     requestAnimationFrame(() => {
       void fitView({ padding: 0.18, duration: 300 });
@@ -210,10 +231,38 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
     [expanded, collapse, expand],
   );
 
-  const openNode = useCallback((_nodeId: number) => {}, []);
+  // A mouse opens the model in one click. On a coarse pointer the first tap
+  // only focuses, so the labels on that path are reachable on a phone; the
+  // second tap opens. The center never navigates to itself.
+  const openNode = useCallback(
+    (nodeId: number) => {
+      if (nodeId === center.id) return;
+      if (!coarsePointer || focusedId === nodeId) {
+        navigate(`/cmdb/models/${nodeId}?tab=relations`);
+        return;
+      }
+      setFocusedId(nodeId);
+      scheduleProbe(nodeId);
+    },
+    [center.id, coarsePointer, focusedId, navigate, scheduleProbe],
+  );
 
   const visible = useMemo(() => visibleGraph(graph, expanded, center.id), [graph, expanded, center.id]);
   const visibleIds = useMemo(() => new Set(visible.nodes.keys()), [visible]);
+  const effectiveFocus = focusedId !== null && visible.nodes.has(focusedId) ? focusedId : null;
+  const connected = useMemo(() => {
+    if (effectiveFocus === null) return null;
+    const nodeIDs = new Set<number>([effectiveFocus]);
+    const edgeKeys = new Set<string>();
+    for (const edge of visible.edges) {
+      if (edge.source === effectiveFocus || edge.target === effectiveFocus) {
+        edgeKeys.add(edge.key);
+        nodeIDs.add(edge.source);
+        nodeIDs.add(edge.target);
+      }
+    }
+    return { nodeIDs, edgeKeys };
+  }, [effectiveFocus, visible.edges]);
   const positions = useMemo(
     () => layoutModelGraph([...visible.nodes.values()], visible.edges, center.id),
     [visible, center.id],
@@ -243,15 +292,30 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
               graph,
               visibleIds,
             ),
-            dimmed: false,
-            focused: false,
+            dimmed: connected ? !connected.nodeIDs.has(node.id) : false,
+            focused: effectiveFocus === node.id,
             onOpen: openNode,
             onToggle: toggle,
+            onFocusNode: handleEnter,
+            onBlurNode: handleLeave,
           },
         };
       });
     },
-    [visible, positions, expanded, graph, visibleIds, probeVersion, openNode, toggle],
+    [
+      visible,
+      positions,
+      expanded,
+      graph,
+      visibleIds,
+      probeVersion,
+      connected,
+      effectiveFocus,
+      openNode,
+      toggle,
+      handleEnter,
+      handleLeave,
+    ],
   );
 
   const rfEdges = useMemo<Edge[]>(() => {
@@ -266,11 +330,13 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
       const pair = byPair.get(`${edge.source}-${edge.target}`) ?? [];
       const index = pair.findIndex((item) => item.key === edge.key);
       const offset = index - (pair.length - 1) / 2;
+      const isConnected = Boolean(connected?.edgeKeys.has(edge.key));
       const data: ModelEdgePaintData = {
         label: edge.relationName,
         color: edge.relationColor,
-        dimmed: false,
-        showLabel: true,
+        dimmed: Boolean(connected && !isConnected),
+        showLabel: !connected || isConnected,
+        connected: isConnected,
         offset,
       };
       return {
@@ -282,7 +348,7 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         markerEnd: { type: MarkerType.ArrowClosed, color: edge.relationColor },
       };
     });
-  }, [visible.edges]);
+  }, [visible.edges, connected]);
 
   return (
     <div className="cmdb-model-topology relative h-[480px] w-full overflow-hidden sm:h-[560px]">
@@ -296,9 +362,10 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         maxZoom={2}
         nodesDraggable={false}
         elementsSelectable={false}
-        onNodeMouseEnter={(_event, node) => scheduleProbe(Number(node.id))}
-        onNodeMouseLeave={(_event, node) => cancelProbe(Number(node.id))}
+        onNodeMouseEnter={(_event, node) => handleEnter(Number(node.id))}
+        onNodeMouseLeave={(_event, node) => handleLeave(Number(node.id))}
         onPaneClick={() => {
+          setFocusedId(null);
           for (const timer of timers.current.values()) clearTimeout(timer);
           timers.current.clear();
         }}

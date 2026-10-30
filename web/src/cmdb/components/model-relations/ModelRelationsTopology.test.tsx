@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw-server';
@@ -32,7 +32,7 @@ vi.mock('@xyflow/react', async () => {
       onPaneClick,
     }: {
       nodes: Array<{ id: string; type: string; data: { node?: { alias?: string } } }>;
-      edges: Array<{ id: string; data?: { label?: string } }>;
+      edges: Array<{ id: string; data?: { label?: string; dimmed?: boolean } }>;
       nodeTypes?: Record<string, React.ComponentType<{ id: string; data: unknown; selected: boolean }>>;
       onNodeMouseEnter?(event: unknown, node: unknown): void;
       onNodeMouseLeave?(event: unknown, node: unknown): void;
@@ -48,14 +48,22 @@ vi.mock('@xyflow/react', async () => {
               data-testid={`flow-node-${node.id}`}
               onMouseEnter={() => onNodeMouseEnter?.({}, node)}
               onMouseLeave={() => onNodeMouseLeave?.({}, node)}
-              onClick={() => onNodeClick?.({}, node)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onNodeClick?.({}, node);
+              }}
             >
               {Component ? React.createElement(Component, { id: node.id, data: node.data, selected: false }) : node.data?.node?.alias}
             </div>
           );
         })}
         {edges.map((edge) => (
-          <span key={edge.id} data-testid={`flow-edge-${edge.id}`} data-label={edge.data?.label} />
+          <span
+            key={edge.id}
+            data-testid={`flow-edge-${edge.id}`}
+            data-label={edge.data?.label}
+            data-dimmed={edge.data?.dimmed ? 'true' : 'false'}
+          />
         ))}
       </div>
     ),
@@ -110,24 +118,58 @@ const probeItems = Array.from({ length: 5 }, (_, index) => {
   return relation(100 + index, model(id, `up_${id}`, `上级${id}`));
 });
 
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <div data-testid="location">
+      {location.pathname}
+      {location.search}
+    </div>
+  );
+}
+
 function view(props: Partial<ModelRelationsTopologyProps> = {}) {
   return (
-    <MemoryRouter>
-      <ToastProvider>
-        <ModelRelationsTopology
-          center={props.center ?? center}
-          parents={props.parents ?? [parentRelation]}
-          children={props.children ?? [childRelation]}
-          groups={props.groups ?? []}
+    <MemoryRouter initialEntries={['/cmdb/models/10']}>
+      <Routes>
+        <Route
+          path="*"
+          element={
+            <>
+              <ToastProvider>
+                <ModelRelationsTopology
+                  center={props.center ?? center}
+                  parents={props.parents ?? [parentRelation]}
+                  children={props.children ?? [childRelation]}
+                  groups={props.groups ?? []}
+                />
+              </ToastProvider>
+              <LocationProbe />
+            </>
+          }
         />
-      </ToastProvider>
+      </Routes>
     </MemoryRouter>
   );
+}
+
+function stubCoarsePointer() {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('pointer: coarse'),
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })) as unknown as typeof window.matchMedia;
 }
 
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem('ongrid-locale', 'zh-CN');
+  window.matchMedia = undefined as unknown as typeof window.matchMedia;
   flow.fitView.mockClear();
   flow.zoomIn.mockClear();
   flow.zoomOut.mockClear();
@@ -314,5 +356,90 @@ describe('ModelRelationsTopology', () => {
 
     expect(await screen.findByText('甲模型')).toBeInTheDocument();
     expect(calls).toBe(2);
+  });
+
+  it('dims everything except the hovered node and its direct path', () => {
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/20/relation-parents', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+    );
+    render(view());
+
+    fireEvent.mouseEnter(screen.getByTestId('flow-node-20'));
+
+    expect(screen.getByRole('button', { name: '业务应用' })).toHaveAttribute('data-dimmed', 'false');
+    expect(screen.getByRole('button', { name: '服务' })).toHaveAttribute('data-dimmed', 'false');
+    expect(screen.getByRole('button', { name: '证书' })).toHaveAttribute('data-dimmed', 'true');
+    expect(screen.getByTestId('flow-edge-20-10-1')).toHaveAttribute('data-dimmed', 'false');
+    expect(screen.getByTestId('flow-edge-10-30-2')).toHaveAttribute('data-dimmed', 'true');
+
+    fireEvent.mouseLeave(screen.getByTestId('flow-node-20'));
+
+    expect(screen.getByRole('button', { name: '证书' })).toHaveAttribute('data-dimmed', 'false');
+    expect(screen.getByTestId('flow-edge-10-30-2')).toHaveAttribute('data-dimmed', 'false');
+  });
+
+  it('opens the model on a mouse click', async () => {
+    const user = userEvent.setup();
+    render(view());
+
+    await user.click(screen.getByRole('button', { name: '服务' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent('/cmdb/models/20?tab=relations'),
+    );
+  });
+
+  it('focuses on the first tap and opens on the second for a coarse pointer', async () => {
+    stubCoarsePointer();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/20/relation-parents', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+    );
+    render(view());
+    const card = screen.getByRole('button', { name: '服务' });
+
+    fireEvent.click(card);
+    expect(screen.getByRole('button', { name: '服务' })).toHaveAttribute('data-focused', 'true');
+    expect(screen.getByTestId('location')).toHaveTextContent('/cmdb/models/10');
+
+    fireEvent.click(screen.getByRole('button', { name: '服务' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent('/cmdb/models/20?tab=relations'),
+    );
+  });
+
+  it('clears focus when the pane is clicked', () => {
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/20/relation-parents', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+    );
+    render(view());
+
+    fireEvent.mouseEnter(screen.getByTestId('flow-node-20'));
+    expect(screen.getByRole('button', { name: '证书' })).toHaveAttribute('data-dimmed', 'true');
+
+    fireEvent.click(screen.getByTestId('flow-canvas'));
+
+    expect(screen.getByRole('button', { name: '证书' })).toHaveAttribute('data-dimmed', 'false');
+  });
+
+  it('focuses and probes when the card receives keyboard focus', async () => {
+    let requests = 0;
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/20/relation-parents', () => {
+        requests += 1;
+        return HttpResponse.json({ items: [], total: 0 });
+      }),
+    );
+    render(view());
+
+    fireEvent.focus(screen.getByRole('button', { name: '服务' }));
+
+    expect(screen.getByRole('button', { name: '证书' })).toHaveAttribute('data-dimmed', 'true');
+    await waitFor(() => expect(requests).toBe(1));
   });
 });
