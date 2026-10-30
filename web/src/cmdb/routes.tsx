@@ -272,7 +272,7 @@ export function cmdbNavSection(tr: (zh: string, en: string) => string): {
     defaultOpen: false,
     items: [
       { key: 'models', to: '/cmdb/models', icon: Boxes, label: tr('模型配置', 'Model configuration'), group: tr('模型管理', 'Models') },
-      { key: 'relations', to: '/cmdb/relations', icon: Share2, label: tr('关系', 'Relations'), group: tr('模型管理', 'Models') },
+      { key: 'relations', to: '/cmdb/relations', icon: Share2, label: tr('模型关系', 'Model relations'), group: tr('模型管理', 'Models') },
       { key: 'relation-types', to: '/cmdb/relation-types', icon: GitBranch, label: tr('关系类型', 'Relation types'), group: tr('模型管理', 'Models') },
       { key: 'preferences', to: '/cmdb/preferences', icon: Rss, label: tr('我的订阅', 'My subscriptions'), group: tr('模型管理', 'Models') },
       { key: 'instances', to: '/cmdb/instances', icon: Database, label: tr('资源数据', 'Resources'), group: tr('资源管理', 'Resources') },
