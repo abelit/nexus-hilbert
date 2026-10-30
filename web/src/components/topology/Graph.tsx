@@ -11,7 +11,6 @@ import {
   BaseEdge,
   Controls,
   Edge,
-  EdgeLabelRenderer,
   EdgeProps,
   getSmoothStepPath,
   Handle,
@@ -166,7 +165,7 @@ function CustomTopologyNode(props: NodeProps) {
 
 const nodeTypes = { topo: CustomTopologyNode };
 
-export function AvoidingEdge(props: EdgeProps) {
+function AvoidingEdge(props: EdgeProps) {
   const nodes = useNodes();
   const start = { x: props.sourceX, y: props.sourceY };
   const end = { x: props.targetX, y: props.targetY };
@@ -188,36 +187,10 @@ export function AvoidingEdge(props: EdgeProps) {
     labelX = (longest.a.x + longest.b.x) / 2;
     labelY = (longest.a.y + longest.b.y) / 2;
   }
-  // BaseEdge draws no label. The layout computes one when the caller asked for
-  // edge labels (and dedupes repeated pairs), so render it here — otherwise the
-  // label never reaches the canvas.
-  const labelBg = props.labelBgStyle as { fill?: string } | undefined;
-  return (
-    <>
-      <BaseEdge id={props.id} path={path} style={props.style} markerEnd={props.markerEnd} markerStart={props.markerStart} />
-      {props.label != null && props.label !== '' && (
-        <EdgeLabelRenderer>
-          <div
-            className="nodrag nopan"
-            style={{
-              position: 'absolute',
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              pointerEvents: 'none',
-              color: props.labelStyle?.fill,
-              fontSize: props.labelStyle?.fontSize,
-              fontFamily: props.labelStyle?.fontFamily,
-              background: labelBg?.fill,
-              padding: '1px 4px',
-              borderRadius: props.labelBgBorderRadius ?? 3,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {props.label}
-          </div>
-        </EdgeLabelRenderer>
-      )}
-    </>
-  );
+  return <BaseEdge id={props.id} path={path} style={props.style} markerEnd={props.markerEnd} markerStart={props.markerStart}
+    label={props.label} labelX={labelX} labelY={labelY} labelStyle={props.labelStyle}
+    labelShowBg={props.labelShowBg} labelBgStyle={props.labelBgStyle}
+    labelBgPadding={props.labelBgPadding} labelBgBorderRadius={props.labelBgBorderRadius} />;
 }
 
 const edgeTypes = { avoiding: AvoidingEdge };
@@ -237,10 +210,6 @@ type Props = {
    *  can hide "noise" types (annotation / observation) and focus on
    *  the failure-propagation set (depends_on / routes_to). */
   visibleRelationTypes?: Set<string>;
-  /** Render each edge's relation name. Off by default: dense estate graphs
-   *  read better as shape alone, and the callers that opt in are the ones
-   *  whose edges carry one short, meaningful label. */
-  showEdgeLabels?: boolean;
   onSelect(node: TopologyNode): void;
 };
 
@@ -251,7 +220,6 @@ export function TopologyGraph({
   selectedID,
   hideOrphans,
   visibleRelationTypes,
-  showEdgeLabels,
   onSelect,
 }: Props) {
   const { resolved } = useThemeMode();
@@ -266,9 +234,8 @@ export function TopologyGraph({
         hideOrphans ?? false,
         visibleRelationTypes,
         isLight,
-        showEdgeLabels ?? false,
       ),
-    [nodes, relations, relationTypes, selectedID, hideOrphans, visibleRelationTypes, isLight, showEdgeLabels],
+    [nodes, relations, relationTypes, selectedID, hideOrphans, visibleRelationTypes, isLight],
   );
   // React Flow is controlled here because the graph is rebuilt from the
   // server-side topology data. Keep drag positions separately so a node does
@@ -368,7 +335,6 @@ function layoutGraph(
   hideOrphans: boolean,
   visibleRelationTypes?: Set<string>,
   isLight: boolean = false,
-  showEdgeLabels: boolean = false,
 ): { rfNodes: Node[]; rfEdges: Edge[] } {
   const colorTable = isLight ? NODE_COLORS_LIGHT : NODE_COLORS_DARK;
   const colorFallback = isLight ? NODE_COLORS_FALLBACK_LIGHT : NODE_COLORS_FALLBACK_DARK;
@@ -467,7 +433,7 @@ function layoutGraph(
         target: String(r.dst_id),
         type: 'avoiding',
         animated: false,
-        label: showEdgeLabels && showLabel ? r.type : undefined,
+        label: showLabel ? r.type : undefined,
         labelStyle: { fill: stroke, fontSize: 10, fontFamily: 'monospace' },
         labelBgStyle: { fill: isLight ? '#fafafa' : '#09090b', fillOpacity: 0.9 },
         labelBgPadding: [4, 2] as [number, number],

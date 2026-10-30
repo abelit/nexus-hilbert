@@ -15,7 +15,7 @@ describe('downloadTopologyPng', () => {
     await downloadTopologyPng(element, 'cmdb-host-relations.png');
 
     expect(toPng).toHaveBeenCalledWith(element, expect.objectContaining({ pixelRatio: 2 }));
-    const anchor = click.mock.instances[0] as HTMLAnchorElement;
+    const anchor = click.mock.instances[0] as unknown as HTMLAnchorElement;
     expect(anchor).toBeDefined();
     expect(anchor.download).toBe('cmdb-host-relations.png');
     expect(anchor.getAttribute('href')).toBe('data:image/png;base64,abc');

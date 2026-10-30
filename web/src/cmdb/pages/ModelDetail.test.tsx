@@ -10,26 +10,27 @@ import { useAuth } from '@/store/auth';
 import ModelDetailPage from './ModelDetail';
 import { ToastProvider } from '../components/Toast';
 
-// THE MODEL GRAPH IS REPLACED BY BUTTONS. React Flow measures nodes in a layout
-// engine jsdom does not run; the test drives the same onSelect callback with
-// the nodes the tab built.
-vi.mock('@/components/topology/Graph', () => ({
-  TopologyGraph: ({
-    nodes,
-    relations,
-    onSelect,
+// THE CANVAS IS REPLACED BY ITS INPUTS. React Flow measures nodes in a layout
+// engine jsdom does not run, so the page test checks that the tab hands the
+// graph the right center, relations and groups; the canvas itself has its own
+// tests.
+vi.mock('../components/model-relations/ModelRelationsTopology', () => ({
+  ModelRelationsTopology: ({
+    center,
+    parents,
+    children,
+    groups,
   }: {
-    nodes: Array<{ id: number; name: string; type: string }>;
-    relations: Array<{ src_id: number; dst_id: number; type: string }>;
-    onSelect?(node: { id: number; name: string; type: string }): void;
+    center: { alias: string };
+    parents: Array<{ type: { alias: string } }>;
+    children: Array<{ type: { alias: string } }>;
+    groups: unknown[];
   }) => (
-    <div data-testid="relation-topology-canvas">
-      <span data-testid="relation-topology-edges">{relations.map((relation) => relation.type).join(',')}</span>
-      {nodes.map((node) => (
-        <button key={node.id} type="button" onClick={() => onSelect?.(node)}>
-          {node.name}
-        </button>
-      ))}
+    <div data-testid="model-topology">
+      <span data-testid="topology-center">{center.alias}</span>
+      <span data-testid="topology-parents">{parents.map((row) => row.type.alias).join(',')}</span>
+      <span data-testid="topology-children">{children.map((row) => row.type.alias).join(',')}</span>
+      <span data-testid="topology-groups">{groups.length}</span>
     </div>
   ),
 }));
@@ -622,9 +623,11 @@ describe('the relation views', () => {
     expect(screen.getByRole('link', { name: '机柜' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '拓扑' }));
-    expect(screen.getByTestId('relation-topology-canvas')).toBeInTheDocument();
-    expect(screen.getByTestId('relation-topology-edges')).toHaveTextContent('包含');
-    expect(screen.getByTestId('relation-topology-edges')).toHaveTextContent('属于');
+    expect(screen.getByTestId('model-topology')).toBeInTheDocument();
+    expect(screen.getByTestId('topology-center')).toHaveTextContent('主机');
+    expect(screen.getByTestId('topology-parents')).toHaveTextContent('机柜');
+    expect(screen.getByTestId('topology-children')).toHaveTextContent('磁盘');
+    expect(screen.getByTestId('topology-groups')).toHaveTextContent('1');
   });
 
   it('shows the empty state in every view', async () => {
@@ -641,30 +644,23 @@ describe('the relation views', () => {
     expect(screen.getByText('这个模型还没有关系')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '拓扑' }));
     expect(screen.getByText('这个模型还没有关系')).toBeInTheDocument();
-    expect(screen.queryByTestId('relation-topology-canvas')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-topology')).not.toBeInTheDocument();
   });
 
-  it('opens a clicked topology node on its relations tab', async () => {
+  it('still renders the topology when the group lookup fails', async () => {
     const user = userEvent.setup();
     baseHandlers();
     relationHandlers();
     server.use(
-      http.get('/api/v1/cmdb/ci-types/2', () => HttpResponse.json(disk)),
-      http.get('/api/v1/cmdb/ci-types/2/attributes', () =>
-        HttpResponse.json({ type_id: 2, unique_id: 20, unique: 'sn', attributes: [] }),
-      ),
-      http.get('/api/v1/cmdb/ci-types/2/attribute-groups', () => HttpResponse.json([])),
-      http.get('/api/v1/cmdb/ci-types/2/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
-      http.get('/api/v1/cmdb/ci-types/2/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/preferences/model-groups', () => new HttpResponse(null, { status: 500 })),
     );
     renderPage('/cmdb/models/1?tab=relations');
 
     await screen.findByRole('table');
     await user.click(screen.getByRole('button', { name: '拓扑' }));
-    await user.click(screen.getByRole('button', { name: '磁盘' }));
 
-    expect(await screen.findByRole('heading', { level: 1, name: '磁盘' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '拓扑' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('model-topology')).toBeInTheDocument();
+    expect(screen.getByTestId('topology-groups')).toHaveTextContent('0');
   });
 });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { LayoutGrid, Network, Plus, Table2, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -15,8 +15,6 @@ import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
-import { TopologyGraph } from '@/components/topology/Graph';
-import type { TopologyNode, TopologyRelation } from '@/api/topology';
 import { RELATION_CONSTRAINTS, relationConstraintLabel } from '../lib/relation';
 
 import { describeError } from '../api/http';
@@ -40,8 +38,10 @@ import {
   type TypeAttribute,
   type UniqueConstraint,
 } from '../api/citype';
+import { listModelGroups, type ModelGroup } from '../api/preferences';
 import { listRelationTypes, type RelationType } from '../api/relationtype';
 import { CMDBIcon } from './CMDBIcon';
+import { ModelRelationsTopology } from './model-relations/ModelRelationsTopology';
 import { DataTable, type Column } from './DataTable';
 import { RelationAttributePairs, type AttributePair } from './RelationAttributePairs';
 import { useToast } from './Toast';
@@ -74,10 +74,10 @@ export function RelationsTab({
   const { tr } = useI18n();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
-  const navigate = useNavigate();
   const [children, setChildren] = useState<RelatedType[]>([]);
   const [parents, setParents] = useState<RelatedType[]>([]);
   const [models, setModels] = useState<CIType[]>([]);
+  const [groups, setGroups] = useState<ModelGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState<Direction | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -92,14 +92,16 @@ export function RelationsTab({
     setLoading(true);
     setErr(null);
     try {
-      const [gotChildren, gotParents, gotModels] = await Promise.all([
+      const [gotChildren, gotParents, gotModels, gotGroups] = await Promise.all([
         relationChildren(modelRef),
         relationParents(modelRef),
         listCITypes(),
+        listModelGroups().catch(() => [] as ModelGroup[]),
       ]);
       setChildren(gotChildren);
       setParents(gotParents);
       setModels(gotModels);
+      setGroups(gotGroups);
     } catch (error) {
       setErr(describeError(error, tr('无法读取模型关系', 'Could not load the relations')));
     } finally {
@@ -154,34 +156,6 @@ export function RelationsTab({
     [models, modelRef],
   );
 
-  const topology = useMemo(() => {
-    const nodes = new Map<number, TopologyNode>();
-    const edges: TopologyRelation[] = [];
-    if (!center) return { nodes: [] as TopologyNode[], edges };
-    const toNode = (item: CIType): TopologyNode => ({
-      id: item.id,
-      type: item.name,
-      name: item.alias || item.name,
-      props: { icon: item.icon ?? '' },
-      created_at: '',
-      updated_at: '',
-    });
-    nodes.set(center.id, toNode(center));
-    const addEdge = (relation: RelatedType, from: number, to: number) => {
-      nodes.set(relation.type.id, toNode(relation.type));
-      edges.push({
-        id: relation.ctr_id,
-        src_id: from,
-        dst_id: to,
-        type: relation.relation_type.name || String(relation.relation_type.id),
-        props: null,
-        created_at: '',
-      });
-    };
-    parents.forEach((relation) => addEdge(relation, relation.type.id, center.id));
-    children.forEach((relation) => addEdge(relation, center.id, relation.type.id));
-    return { nodes: [...nodes.values()], edges };
-  }, [center, parents, children]);
 
   const emptyHint = tr('这个模型还没有关系', 'This model has no relations yet');
 
@@ -388,19 +362,12 @@ export function RelationsTab({
           </p>
           {visualStatus ??
             (center ? (
-              <div className="cmdb-liquid-panel cmdb-topology-view h-[420px] overflow-hidden rounded-2xl sm:h-[520px]">
-                <TopologyGraph
-                  nodes={topology.nodes}
-                  relations={topology.edges}
-                  relationTypes={[]}
-                  selectedID={center?.id ?? null}
-                  showEdgeLabels
-                  onSelect={(node) => {
-                    if (!center || node.id === center.id) return;
-                    navigate(`/cmdb/models/${node.id}?tab=relations`);
-                  }}
-                />
-              </div>
+              <ModelRelationsTopology
+                center={center}
+                parents={parents}
+                children={children}
+                groups={groups}
+              />
             ) : null)}
         </div>
       )}
