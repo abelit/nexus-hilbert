@@ -16,6 +16,9 @@ const flow = vi.hoisted(() => ({
   zoomOut: vi.fn(),
   setCenter: vi.fn(),
 }));
+const exportPng = vi.hoisted(() => vi.fn());
+
+vi.mock('./model-topology-export', () => ({ downloadTopologyPng: exportPng }));
 
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
@@ -26,6 +29,7 @@ vi.mock('@xyflow/react', async () => {
       nodes,
       edges,
       nodeTypes,
+      children,
       onNodeMouseEnter,
       onNodeMouseLeave,
       onNodeClick,
@@ -34,6 +38,7 @@ vi.mock('@xyflow/react', async () => {
       nodes: Array<{ id: string; type: string; data: { node?: { alias?: string } } }>;
       edges: Array<{ id: string; data?: { label?: string; dimmed?: boolean } }>;
       nodeTypes?: Record<string, React.ComponentType<{ id: string; data: unknown; selected: boolean }>>;
+      children?: React.ReactNode;
       onNodeMouseEnter?(event: unknown, node: unknown): void;
       onNodeMouseLeave?(event: unknown, node: unknown): void;
       onNodeClick?(event: unknown, node: unknown): void;
@@ -65,6 +70,7 @@ vi.mock('@xyflow/react', async () => {
             data-dimmed={edge.data?.dimmed ? 'true' : 'false'}
           />
         ))}
+        {children}
       </div>
     ),
     Background: () => null,
@@ -72,7 +78,7 @@ vi.mock('@xyflow/react', async () => {
     BaseEdge: () => null,
     EdgeLabelRenderer: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     Handle: () => null,
-    MiniMap: () => null,
+    MiniMap: () => <div data-testid="minimap" />,
     Controls: () => null,
     Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
@@ -173,6 +179,7 @@ beforeEach(() => {
   flow.fitView.mockClear();
   flow.zoomIn.mockClear();
   flow.zoomOut.mockClear();
+  exportPng.mockReset();
 });
 
 describe('ModelRelationsTopology', () => {
@@ -441,5 +448,82 @@ describe('ModelRelationsTopology', () => {
 
     expect(screen.getByRole('button', { name: '证书' })).toHaveAttribute('data-dimmed', 'true');
     await waitFor(() => expect(requests).toBe(1));
+  });
+
+  it('wires the toolbar to fit and zoom', async () => {
+    const user = userEvent.setup();
+    render(view());
+
+    await user.click(screen.getByRole('button', { name: '居中' }));
+    expect(flow.fitView).toHaveBeenCalledWith({ padding: 0.18, duration: 300 });
+
+    await user.click(screen.getByRole('button', { name: '放大' }));
+    expect(flow.zoomIn).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: '缩小' }));
+    expect(flow.zoomOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('enters and leaves fullscreen with Esc', async () => {
+    const user = userEvent.setup();
+    render(view());
+    const container = screen.getByTestId('topology-container');
+    const toggle = screen.getByRole('button', { name: '全屏' });
+    expect(container).toHaveAttribute('data-fullscreen', 'false');
+
+    await user.click(toggle);
+
+    expect(container).toHaveAttribute('data-fullscreen', 'true');
+    expect(screen.getByRole('button', { name: '关闭全屏' })).toBe(toggle);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(container).toHaveAttribute('data-fullscreen', 'false');
+    expect(screen.getByRole('button', { name: '全屏' })).toBe(toggle);
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  });
+
+  it('exports the canvas and shows the busy class while capturing', async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    exportPng.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    render(view());
+    const container = screen.getByTestId('topology-container');
+
+    await user.click(screen.getByRole('button', { name: '导出图片' }));
+
+    await waitFor(() => expect(container).toHaveClass('is-exporting'));
+    await waitFor(() =>
+      expect(exportPng).toHaveBeenCalledWith(container, 'cmdb-business_application-relations.png'),
+    );
+
+    release();
+    await waitFor(() => expect(container).not.toHaveClass('is-exporting'));
+  });
+
+  it('toasts when the export fails', async () => {
+    const user = userEvent.setup();
+    exportPng.mockRejectedValueOnce(new Error('capture failed'));
+    render(view());
+
+    await user.click(screen.getByRole('button', { name: '导出图片' }));
+
+    expect(await screen.findByText('capture failed')).toBeInTheDocument();
+  });
+
+  it('toggles the minimap', async () => {
+    const user = userEvent.setup();
+    render(view());
+    expect(screen.getByTestId('minimap')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '迷你地图' }));
+    expect(screen.queryByTestId('minimap')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '迷你地图' }));
+    expect(screen.getByTestId('minimap')).toBeInTheDocument();
   });
 });

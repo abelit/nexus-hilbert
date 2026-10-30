@@ -4,6 +4,7 @@ import {
   Background,
   MarkerType,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -14,12 +15,19 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import { Crosshair, Download, Loader2, Map as MapIcon, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-react';
+
+import { Button } from '@/components/ui';
 import { useI18n } from '@/i18n/locale';
+import { cn } from '@/lib/cn';
+
+import { describeError } from '../../api/http';
 
 import { relationChildren, relationParents, type CIType, type RelatedType } from '../../api/citype';
 import type { ModelGroup } from '../../api/preferences';
 import { useToast } from '../Toast';
 import { ModelTopologyEdge, type ModelEdgePaintData } from './ModelTopologyEdge';
+import { downloadTopologyPng } from './model-topology-export';
 import { ModelTopologyNodeView, type ModelTopologyNodePayload } from './ModelTopologyNode';
 import {
   MAX_VISIBLE_NODES,
@@ -63,18 +71,23 @@ export function ModelRelationsTopology(props: ModelRelationsTopologyProps) {
 function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTopologyProps) {
   const { tr } = useI18n();
   const toast = useToast();
-  const { fitView } = useReactFlow();
+  const { fitView, zoomIn, zoomOut } = useReactFlow();
   const navigate = useNavigate();
   const [graph, setGraph] = useState<ModelGraph>(() =>
     createInitialGraph(center, parents, children, groupColorMap(groups)),
   );
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set([center.id]));
   const [focusedId, setFocusedId] = useState<number | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [probeVersion, bumpProbes] = useReducer((version: number) => version + 1, 0);
   const probes = useRef<Map<string, ProbeEntry>>(new Map());
   const inFlight = useRef<Map<string, Promise<RelatedType[]>>>(new Map());
   const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const generation = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
   const colors = useMemo(() => groupColorMap(groups), [groups]);
   const coarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches === true;
 
@@ -181,6 +194,37 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
       void fitView({ padding: 0.18, duration: 300 });
     });
   }, [fitView]);
+
+  const closeFullscreen = useCallback(() => {
+    setFullscreen(false);
+    requestAnimationFrame(() => fullscreenButtonRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeFullscreen();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fullscreen, closeFullscreen]);
+
+  const handleExport = useCallback(async () => {
+    const element = containerRef.current;
+    if (!element) return;
+    setExporting(true);
+    try {
+      await fitView({ padding: 0.18, duration: 300 });
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+      await downloadTopologyPng(element, `cmdb-${center.name}-relations.png`);
+    } catch (error) {
+      toast.error(describeError(error, tr('导出失败', 'Export failed')));
+    } finally {
+      setExporting(false);
+    }
+  }, [center.name, fitView, toast, tr]);
 
   const expand = useCallback(
     async (nodeId: number) => {
@@ -351,7 +395,16 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
   }, [visible.edges, connected]);
 
   return (
-    <div className="cmdb-model-topology relative h-[480px] w-full overflow-hidden sm:h-[560px]">
+    <div
+      ref={containerRef}
+      data-testid="topology-container"
+      data-fullscreen={fullscreen ? 'true' : 'false'}
+      className={cn(
+        'cmdb-model-topology relative h-[480px] w-full overflow-hidden sm:h-[560px]',
+        fullscreen && 'is-fullscreen',
+        exporting && 'is-exporting',
+      )}
+    >
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
@@ -370,10 +423,91 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
           timers.current.clear();
         }}
       >
+        <Panel position="top-right" className="cmdb-model-topology-toolbar">
+          <div className="flex items-center gap-0.5 rounded-full border border-border bg-card p-1 shadow-sm">
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-label={tr('居中', 'Fit view')}
+              title={tr('居中', 'Fit view')}
+              onClick={() => void fitView({ padding: 0.18, duration: 300 })}
+              className="inline-flex size-7 items-center justify-center p-0"
+            >
+              <Crosshair size={13} aria-hidden="true" />
+            </Button>
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-label={tr('放大', 'Zoom in')}
+              title={tr('放大', 'Zoom in')}
+              onClick={() => void zoomIn()}
+              className="inline-flex size-7 items-center justify-center p-0"
+            >
+              <ZoomIn size={13} aria-hidden="true" />
+            </Button>
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-label={tr('缩小', 'Zoom out')}
+              title={tr('缩小', 'Zoom out')}
+              onClick={() => void zoomOut()}
+              className="inline-flex size-7 items-center justify-center p-0"
+            >
+              <ZoomOut size={13} aria-hidden="true" />
+            </Button>
+            <Button
+              ref={fullscreenButtonRef}
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-label={fullscreen ? tr('关闭全屏', 'Close fullscreen') : tr('全屏', 'Fullscreen')}
+              title={fullscreen ? tr('关闭全屏', 'Close fullscreen') : tr('全屏', 'Fullscreen')}
+              onClick={() => setFullscreen((current) => !current)}
+              className="inline-flex size-7 items-center justify-center p-0"
+            >
+              {fullscreen ? <X size={13} aria-hidden="true" /> : <Maximize2 size={13} aria-hidden="true" />}
+            </Button>
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-label={tr('导出图片', 'Export image')}
+              title={tr('导出图片', 'Export image')}
+              disabled={exporting}
+              onClick={() => void handleExport()}
+              className="inline-flex size-7 items-center justify-center p-0"
+            >
+              {exporting ? (
+                <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Download size={13} aria-hidden="true" />
+              )}
+            </Button>
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-label={tr('迷你地图', 'Minimap')}
+              title={tr('迷你地图', 'Minimap')}
+              aria-pressed={showMinimap}
+              onClick={() => setShowMinimap((current) => !current)}
+              className="inline-flex size-7 items-center justify-center p-0"
+            >
+              <MapIcon size={13} aria-hidden="true" />
+            </Button>
+          </div>
+        </Panel>
         <Background />
-        <MiniMap
-          nodeColor={(node) => (node.data as ModelTopologyNodePayload)?.node?.groupColor ?? NEUTRAL_COLOR}
-        />
+        {showMinimap && (
+          <MiniMap
+            nodeColor={(node) =>
+              (node.data as ModelTopologyNodePayload)?.node?.groupColor ?? NEUTRAL_COLOR
+            }
+          />
+        )}
       </ReactFlow>
     </div>
   );
