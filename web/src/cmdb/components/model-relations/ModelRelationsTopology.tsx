@@ -4,7 +4,6 @@ import {
   Background,
   MarkerType,
   MiniMap,
-  Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -79,7 +78,9 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set([center.id]));
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const [showMinimap, setShowMinimap] = useState(true);
+  const [showMinimap, setShowMinimap] = useState(
+    () => window.matchMedia?.('(min-width: 1024px)')?.matches !== false,
+  );
   const [exporting, setExporting] = useState(false);
   const [probeVersion, bumpProbes] = useReducer((version: number) => version + 1, 0);
   const probes = useRef<Map<string, ProbeEntry>>(new Map());
@@ -90,6 +91,15 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
   const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
   const colors = useMemo(() => groupColorMap(groups), [groups]);
   const coarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches === true;
+  const fitOptions = useMemo(
+    () => ({
+      // Leave the minimap's corner free; a fit that tucks nodes under it hides
+      // the very part of the graph the operator is looking for.
+      padding: showMinimap ? { top: 0.1, right: 0.04, bottom: 1, left: 0.04 } : 0.18,
+      duration: 300,
+    }),
+    [showMinimap],
+  );
 
   useEffect(() => {
     generation.current += 1;
@@ -191,9 +201,9 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
 
   const fitSoon = useCallback(() => {
     requestAnimationFrame(() => {
-      void fitView({ padding: 0.18, duration: 300 });
+      void fitView(fitOptions);
     });
-  }, [fitView]);
+  }, [fitView, fitOptions]);
 
   const closeFullscreen = useCallback(() => {
     setFullscreen(false);
@@ -208,6 +218,16 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [fullscreen, closeFullscreen]);
+
+  // The viewport changed size; refit after layout so fullscreen is not the
+  // inline viewport stretched over a larger canvas.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const frame = requestAnimationFrame(() => {
+      void fitView(fitOptions);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fullscreen, fitView, fitOptions]);
 
   const handleExport = useCallback(async () => {
     const element = containerRef.current;
@@ -293,6 +313,16 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
 
   const visible = useMemo(() => visibleGraph(graph, expanded, center.id), [graph, expanded, center.id]);
   const visibleIds = useMemo(() => new Set(visible.nodes.keys()), [visible]);
+
+  // The ReactFlow `fitView` prop uses its own default padding, which lets nodes
+  // sit under the toolbar and minimap. Refit with the reserved corner padding
+  // whenever the visible graph changes size.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      void fitView(fitOptions);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [center.id, visible.nodes.size, fitView, fitOptions]);
   const effectiveFocus = focusedId !== null && visible.nodes.has(focusedId) ? focusedId : null;
   const connected = useMemo(() => {
     if (effectiveFocus === null) return null;
@@ -387,6 +417,8 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         id: edge.key,
         source: String(edge.source),
         target: String(edge.target),
+        sourceHandle: 'source-right',
+        targetHandle: 'target-left',
         type: 'model',
         data,
         markerEnd: { type: MarkerType.ArrowClosed, color: edge.relationColor },
@@ -405,12 +437,89 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         exporting && 'is-exporting',
       )}
     >
+      <div className="cmdb-model-topology-toolbar absolute right-3 top-3 z-20">
+        <div className="flex items-center gap-0.5 rounded-full border border-border bg-card p-1 shadow-sm">
+          <Button
+            variant="plain"
+            size="sm"
+            type="button"
+            aria-label={tr('居中', 'Fit view')}
+            title={tr('居中', 'Fit view')}
+            onClick={() => void fitView(fitOptions)}
+            className="inline-flex size-7 items-center justify-center p-0"
+          >
+            <Crosshair size={13} aria-hidden="true" />
+          </Button>
+          <Button
+            variant="plain"
+            size="sm"
+            type="button"
+            aria-label={tr('放大', 'Zoom in')}
+            title={tr('放大', 'Zoom in')}
+            onClick={() => void zoomIn()}
+            className="inline-flex size-7 items-center justify-center p-0"
+          >
+            <ZoomIn size={13} aria-hidden="true" />
+          </Button>
+          <Button
+            variant="plain"
+            size="sm"
+            type="button"
+            aria-label={tr('缩小', 'Zoom out')}
+            title={tr('缩小', 'Zoom out')}
+            onClick={() => void zoomOut()}
+            className="inline-flex size-7 items-center justify-center p-0"
+          >
+            <ZoomOut size={13} aria-hidden="true" />
+          </Button>
+          <Button
+            ref={fullscreenButtonRef}
+            variant="plain"
+            size="sm"
+            type="button"
+            aria-label={fullscreen ? tr('关闭全屏', 'Close fullscreen') : tr('全屏', 'Fullscreen')}
+            title={fullscreen ? tr('关闭全屏', 'Close fullscreen') : tr('全屏', 'Fullscreen')}
+            onClick={() => setFullscreen((current) => !current)}
+            className="inline-flex size-7 items-center justify-center p-0"
+          >
+            {fullscreen ? <X size={13} aria-hidden="true" /> : <Maximize2 size={13} aria-hidden="true" />}
+          </Button>
+          <Button
+            variant="plain"
+            size="sm"
+            type="button"
+            aria-label={tr('导出图片', 'Export image')}
+            title={tr('导出图片', 'Export image')}
+            disabled={exporting}
+            onClick={() => void handleExport()}
+            className="inline-flex size-7 items-center justify-center p-0"
+          >
+            {exporting ? (
+              <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Download size={13} aria-hidden="true" />
+            )}
+          </Button>
+          <Button
+            variant="plain"
+            size="sm"
+            type="button"
+            aria-label={tr('迷你地图', 'Minimap')}
+            title={tr('迷你地图', 'Minimap')}
+            aria-pressed={showMinimap}
+            onClick={() => setShowMinimap((current) => !current)}
+            className="inline-flex size-7 items-center justify-center p-0"
+          >
+            <MapIcon size={13} aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+      <div className="h-full pt-12">
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
         minZoom={0.25}
         maxZoom={2}
         nodesDraggable={false}
@@ -423,92 +532,17 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
           timers.current.clear();
         }}
       >
-        <Panel position="top-right" className="cmdb-model-topology-toolbar">
-          <div className="flex items-center gap-0.5 rounded-full border border-border bg-card p-1 shadow-sm">
-            <Button
-              variant="plain"
-              size="sm"
-              type="button"
-              aria-label={tr('居中', 'Fit view')}
-              title={tr('居中', 'Fit view')}
-              onClick={() => void fitView({ padding: 0.18, duration: 300 })}
-              className="inline-flex size-7 items-center justify-center p-0"
-            >
-              <Crosshair size={13} aria-hidden="true" />
-            </Button>
-            <Button
-              variant="plain"
-              size="sm"
-              type="button"
-              aria-label={tr('放大', 'Zoom in')}
-              title={tr('放大', 'Zoom in')}
-              onClick={() => void zoomIn()}
-              className="inline-flex size-7 items-center justify-center p-0"
-            >
-              <ZoomIn size={13} aria-hidden="true" />
-            </Button>
-            <Button
-              variant="plain"
-              size="sm"
-              type="button"
-              aria-label={tr('缩小', 'Zoom out')}
-              title={tr('缩小', 'Zoom out')}
-              onClick={() => void zoomOut()}
-              className="inline-flex size-7 items-center justify-center p-0"
-            >
-              <ZoomOut size={13} aria-hidden="true" />
-            </Button>
-            <Button
-              ref={fullscreenButtonRef}
-              variant="plain"
-              size="sm"
-              type="button"
-              aria-label={fullscreen ? tr('关闭全屏', 'Close fullscreen') : tr('全屏', 'Fullscreen')}
-              title={fullscreen ? tr('关闭全屏', 'Close fullscreen') : tr('全屏', 'Fullscreen')}
-              onClick={() => setFullscreen((current) => !current)}
-              className="inline-flex size-7 items-center justify-center p-0"
-            >
-              {fullscreen ? <X size={13} aria-hidden="true" /> : <Maximize2 size={13} aria-hidden="true" />}
-            </Button>
-            <Button
-              variant="plain"
-              size="sm"
-              type="button"
-              aria-label={tr('导出图片', 'Export image')}
-              title={tr('导出图片', 'Export image')}
-              disabled={exporting}
-              onClick={() => void handleExport()}
-              className="inline-flex size-7 items-center justify-center p-0"
-            >
-              {exporting ? (
-                <Loader2 size={13} className="animate-spin" aria-hidden="true" />
-              ) : (
-                <Download size={13} aria-hidden="true" />
-              )}
-            </Button>
-            <Button
-              variant="plain"
-              size="sm"
-              type="button"
-              aria-label={tr('迷你地图', 'Minimap')}
-              title={tr('迷你地图', 'Minimap')}
-              aria-pressed={showMinimap}
-              onClick={() => setShowMinimap((current) => !current)}
-              className="inline-flex size-7 items-center justify-center p-0"
-            >
-              <MapIcon size={13} aria-hidden="true" />
-            </Button>
-          </div>
-        </Panel>
         <Background />
         {showMinimap && (
           <MiniMap
+            style={{ width: 130, height: 80 }}
             nodeColor={(node) =>
               (node.data as ModelTopologyNodePayload)?.node?.groupColor ?? NEUTRAL_COLOR
             }
           />
         )}
       </ReactFlow>
+      </div>
     </div>
   );
 }

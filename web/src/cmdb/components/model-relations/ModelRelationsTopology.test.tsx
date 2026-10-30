@@ -455,7 +455,10 @@ describe('ModelRelationsTopology', () => {
     render(view());
 
     await user.click(screen.getByRole('button', { name: '居中' }));
-    expect(flow.fitView).toHaveBeenCalledWith({ padding: 0.18, duration: 300 });
+    expect(flow.fitView).toHaveBeenCalledWith({
+      padding: { top: 0.1, right: 0.04, bottom: 1, left: 0.04 },
+      duration: 300,
+    });
 
     await user.click(screen.getByRole('button', { name: '放大' }));
     expect(flow.zoomIn).toHaveBeenCalledTimes(1);

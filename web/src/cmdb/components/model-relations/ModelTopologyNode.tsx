@@ -1,4 +1,4 @@
-import type { Node, NodeProps } from '@xyflow/react';
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { Loader2 } from 'lucide-react';
 
 import { useI18n } from '@/i18n/locale';
@@ -75,7 +75,6 @@ export function ModelNodeCard({
         height,
         opacity: dimmed ? 0.18 : 1,
         borderColor: color,
-        backgroundColor: 'var(--bg-secondary)',
       }}
       onClick={onOpen}
       onFocus={onFocus}
@@ -157,12 +156,28 @@ export function ModelNodeCard({
 
 export function ModelTopologyNodeView({ data }: NodeProps<Node<ModelTopologyNodePayload>>) {
   return (
-    <ModelNodeCard
-      data={data}
-      onOpen={() => data.onOpen(data.node.id)}
-      onToggle={() => data.onToggle(data.node.id)}
-      onFocus={() => data.onFocusNode(data.node.id)}
-      onBlur={() => data.onBlurNode(data.node.id)}
-    />
+    <>
+      {/* React Flow only draws an edge when both endpoints expose a handle.
+          They stay invisible: the line starts at the card edge. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="target-left"
+        style={{ opacity: 0, width: 1, height: 1, border: 'none', background: 'transparent' }}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="source-right"
+        style={{ opacity: 0, width: 1, height: 1, border: 'none', background: 'transparent' }}
+      />
+      <ModelNodeCard
+        data={data}
+        onOpen={() => data.onOpen(data.node.id)}
+        onToggle={() => data.onToggle(data.node.id)}
+        onFocus={() => data.onFocusNode(data.node.id)}
+        onBlur={() => data.onBlurNode(data.node.id)}
+      />
+    </>
   );
 }
