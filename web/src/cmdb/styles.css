@@ -738,3 +738,102 @@ html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabl
     display: none;
   }
 }
+
+/* --- Model relations topology -------------------------------------------- */
+
+/* The canvas sits inside the model-config liquid workspace. The variables are
+   inherited from `.cmdb-liquid`; the fallbacks keep the component usable if it
+   is ever mounted outside that surface. */
+.cmdb-model-topology {
+  position: relative;
+  background: rgb(var(--bg));
+}
+
+.cmdb-model-topology-node {
+  background: var(--liquid-panel, rgb(var(--card) / 0.92));
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: var(--liquid-shadow, 0 10px 26px rgb(15 23 42 / 0.08));
+  cursor: pointer;
+  transition: opacity 120ms ease, box-shadow 120ms ease;
+}
+
+.cmdb-model-topology-node:hover {
+  box-shadow: 0 14px 34px rgb(15 23 42 / 0.16);
+}
+
+.cmdb-model-topology-node.is-center {
+  border-width: 2px;
+  box-shadow:
+    0 0 0 4px rgb(99 102 241 / 0.12),
+    var(--liquid-shadow, 0 10px 26px rgb(15 23 42 / 0.12));
+}
+
+.cmdb-model-topology-node > button:hover {
+  filter: brightness(1.08);
+}
+
+.cmdb-model-topology-toolbar > div {
+  background: rgb(var(--card) / 0.9);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+}
+
+.cmdb-model-topology-toolbar button:hover {
+  background: rgb(var(--border) / 0.35);
+}
+
+.cmdb-model-topology-edge-label {
+  transition: opacity 120ms ease;
+}
+
+/* Fullscreen is the same canvas, not a second React Flow instance: the fixed
+   container keeps the graph, zoom and drag state intact. */
+.cmdb-model-topology.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  width: auto !important;
+  height: auto !important;
+  border-radius: 0;
+}
+
+/* The fixed canvas is still inside the workspace's isolated stacking context.
+   Lift that context while fullscreen so the app's z-10 header cannot paint
+   over the graph. */
+.cmdb-liquid:has(.cmdb-model-topology.is-fullscreen) {
+  z-index: 100;
+}
+
+/* The toolbar, minimap, labels and any hover dimming stay out of the PNG. */
+.cmdb-model-topology.is-exporting .cmdb-model-topology-toolbar,
+.cmdb-model-topology.is-exporting .react-flow__minimap,
+.cmdb-model-topology.is-exporting .cmdb-model-topology-edge-label {
+  display: none !important;
+}
+
+.cmdb-model-topology.is-exporting .cmdb-model-topology-node {
+  opacity: 1 !important;
+}
+
+.cmdb-model-topology.is-exporting .react-flow__edge path {
+  opacity: 1 !important;
+}
+
+@media (max-width: 1023.98px) {
+  .cmdb-model-topology .react-flow__minimap {
+    display: none;
+  }
+}
+
+/* A phone cannot hover; the first tap focuses a node and reveals its path's
+   labels. Without focus the labels would only overlap on this width. */
+@media (max-width: 639.98px) {
+  .cmdb-model-topology-edge-label {
+    display: none;
+  }
+
+  .cmdb-model-topology-edge-label.is-connected {
+    display: inline-block;
+  }
+}
