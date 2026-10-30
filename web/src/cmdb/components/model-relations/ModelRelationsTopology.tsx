@@ -459,7 +459,7 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
       data-testid="topology-container"
       data-fullscreen={fullscreen ? 'true' : 'false'}
       className={cn(
-        'cmdb-model-topology relative h-[480px] w-full overflow-hidden sm:h-[560px]',
+        'cmdb-model-topology relative h-full min-h-[360px] w-full overflow-hidden',
         fullscreen && 'is-fullscreen',
         exporting && 'is-exporting',
       )}

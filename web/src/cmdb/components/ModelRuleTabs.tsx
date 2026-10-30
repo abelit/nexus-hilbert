@@ -238,7 +238,7 @@ export function RelationsTab({
   ];
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-text-muted">
           {tr(
@@ -356,7 +356,7 @@ export function RelationsTab({
             )}
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           <p className="text-[11px] text-text-faint">
             {tr('点击模型节点打开它的模型关系。', 'Select a model node to open its relations.')}
           </p>

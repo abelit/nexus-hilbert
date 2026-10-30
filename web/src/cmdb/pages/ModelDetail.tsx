@@ -321,7 +321,7 @@ export default function ModelDetailPage() {
             <GroupsTab ref_={ref} groups={groups} loading={loading} isAdmin={isAdmin} adminTip={adminTip} onChanged={() => void load(true)} />
           </TabsContent>
 
-          <TabsContent value="relations">
+          <TabsContent value="relations" className="h-full min-h-0">
             <RelationsTab modelRef={ref} attributes={attributes} isAdmin={isAdmin} adminTip={adminTip} />
           </TabsContent>
 
