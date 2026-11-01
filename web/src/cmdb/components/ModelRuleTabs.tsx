@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LayoutGrid, Network, Plus, Table2, Trash2 } from 'lucide-react';
+import { Info, LayoutGrid, Network, Pencil, Plus, Table2, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -11,6 +11,8 @@ import { Hint } from '@/components/ui/Tooltip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Select } from '@/components/ui/Select';
+import { Switch } from '@/components/ui/Switch';
+import { Textarea } from '@/components/ui/Textarea';
 import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
@@ -38,11 +40,23 @@ import {
   type TypeAttribute,
   type UniqueConstraint,
 } from '../api/citype';
+import { listUsers, type User } from '@/api/users';
+
 import { listModelGroups, type ModelGroup } from '../api/preferences';
 import { listRelationTypes, type RelationType } from '../api/relationtype';
 import { CMDBIcon } from './CMDBIcon';
+import { ConditionFilter } from './ConditionFilter';
 import { ModelRelationsTopology } from './model-relations/ModelRelationsTopology';
 import { DataTable, type Column } from './DataTable';
+import { Drawer } from './Drawer';
+import { TriggerNotifyEditor } from './trigger/TriggerNotifyEditor';
+import { TriggerWebhookEditor } from './trigger/TriggerWebhookEditor';
+import {
+  authorizationValues,
+  recordOf,
+  webhookConfigOf,
+  type WebhookConfig,
+} from './trigger/types';
 import { RelationAttributePairs, type AttributePair } from './RelationAttributePairs';
 import { useToast } from './Toast';
 
@@ -176,40 +190,47 @@ export function RelationsTab({
 
   const columns: Column<(typeof rows)[number]>[] = [
     {
-      key: 'direction',
-      header: tr('方向', 'Direction'),
-      cell: (row) => (
-        <Chip tone={row.direction === 'children' ? 'info' : 'default'}>
-          {row.direction === 'children' ? tr('子模型', 'Child') : tr('父模型', 'Parent')}
-        </Chip>
-      ),
-    },
-    {
       key: 'other',
       header: tr('对端模型', 'Other model'),
       width: 'w-full',
-      cell: (row) => (
-        <Link
-          to={`/cmdb/models/${row.other.id}`}
-          className="truncate font-medium text-text hover:text-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
-        >
-          {row.other.alias || row.other.name}
-        </Link>
-      ),
+      cell: (row) => {
+        const label = row.other.alias || row.other.name;
+        return (
+          <span className="flex min-w-0 items-center gap-2.5">
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-tr from-sky-500 to-indigo-500 text-white shadow-sm shadow-sky-500/20">
+              <CMDBIcon value={row.other.icon} size={13} label={label} />
+            </span>
+            <Link
+              to={`/cmdb/models/${row.other.id}`}
+              title={label}
+              className="min-w-0 truncate font-semibold text-text hover:text-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+            >
+              {label}
+            </Link>
+            <Chip tone={row.direction === 'children' ? 'info' : 'default'} dense className="shrink-0">
+              {row.direction === 'children' ? tr('子模型', 'Child') : tr('父模型', 'Parent')}
+            </Chip>
+          </span>
+        );
+      },
     },
     {
       key: 'type',
       header: tr('关系类型', 'Relation type'),
+      width: 'w-[11rem]',
       cell: (row) => {
         const type = row.relation.relation_type;
+        const label = type.name || String(type.id);
         return (
-          <span className="flex items-center gap-1.5">
+          <span className="flex min-w-0 items-center gap-1.5">
             <span
               aria-hidden="true"
-              className="h-2 w-2 rounded-full border border-border"
+              className="h-2 w-2 shrink-0 rounded-full border border-border"
               style={{ backgroundColor: type.color || 'transparent' }}
             />
-            <span className="text-xs text-text-muted">{type.name || type.id}</span>
+            <span className="min-w-0 truncate text-xs text-text-muted" title={label}>
+              {label}
+            </span>
           </span>
         );
       },
@@ -217,8 +238,9 @@ export function RelationsTab({
     {
       key: 'constraint',
       header: tr('基数', 'Cardinality'),
+      width: 'w-[7rem]',
       cell: (row) => (
-        <code className="font-mono text-[11px] text-text-muted">
+        <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">
           {relationConstraintLabel(row.relation.constraint, tr)}
         </code>
       ),
@@ -226,9 +248,16 @@ export function RelationsTab({
     {
       key: 'show',
       header: tr('树上显示', 'Shown on the tree'),
+      width: 'w-[9rem]',
       hideable: true,
       cell: (row) =>
-        row.show ? <code className="font-mono text-[11px] text-text-muted">{row.show}</code> : <span className="text-text-faint">—</span>,
+        row.show ? (
+          <code className="whitespace-nowrap font-mono text-[11px] text-text-muted" title={row.show}>
+            {row.show}
+          </code>
+        ) : (
+          <span className="text-text-faint">—</span>
+        ),
     },
   ];
 
@@ -299,8 +328,10 @@ export function RelationsTab({
       </div>
 
       {view === 'list' ? (
-        <Card>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* The same card, density and quiet row actions as the resource list. */}
           <DataTable
+            fill
             columns={columns}
             rows={rows}
             rowKey={(row) => row.relation.ctr_id}
@@ -309,24 +340,26 @@ export function RelationsTab({
             onRetry={() => void load()}
             storageKey="model-relations"
             empty={emptyHint}
+            tableClassName="cmdb-instance-table"
+            scrollerClassName="cmdb-instance-table-scroll"
             actions={(row) => (
               <Hint content={adminTip}>
                 <Button
-                  variant="dangerGhost"
+                  variant="plain"
                   size="sm"
                   type="button"
                   onClick={() => void remove(row.relation)}
                   disabled={!isAdmin}
                   aria-label={tr(`删除与 ${row.other.name} 的关系`, `Delete the relation to ${row.other.name}`)}
-                  className="inline-flex items-center gap-1"
+                  title={tr(`删除与 ${row.other.name} 的关系`, `Delete the relation to ${row.other.name}`)}
+                  className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
                 >
-                  <Trash2 size={12} aria-hidden="true" />
-                  {tr('删除', 'Delete')}
+                  <Trash2 size={13} aria-hidden="true" />
                 </Button>
               </Hint>
             )}
           />
-        </Card>
+        </div>
       ) : view === 'grid' ? (
         <div className="flex flex-col gap-5">
           {visualStatus ??
@@ -889,6 +922,73 @@ function ConstraintModal({
 
 // --- triggers ---
 
+// --- triggers ---
+
+type TriggerEventCode = '0' | '1' | '2';
+
+const TRIGGER_EVENTS: ReadonlyArray<{
+  code: TriggerEventCode;
+  zh: string;
+  en: string;
+  tone: 'success' | 'danger' | 'warning';
+}> = [
+  { code: '0', zh: '新增', en: 'Added', tone: 'success' },
+  { code: '1', zh: '删除', en: 'Deleted', tone: 'danger' },
+  { code: '2', zh: '修改', en: 'Updated', tone: 'warning' },
+];
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function triggerOption(row: Trigger): Record<string, unknown> {
+  return asRecord(row.option);
+}
+
+function triggerName(row: Trigger): string {
+  const name = triggerOption(row).name;
+  return typeof name === 'string' && name.trim() ? name : `#${row.id}`;
+}
+
+function triggerDescription(row: Trigger): string {
+  const description = triggerOption(row).description;
+  return typeof description === 'string' ? description : '';
+}
+
+function triggerEvent(row: Trigger): TriggerEventCode | null {
+  const action = triggerOption(row).action;
+  return action === '0' || action === '1' || action === '2' ? action : null;
+}
+
+function triggerEventLabel(
+  code: TriggerEventCode,
+  tr: (zh: string, en: string) => string,
+): string {
+  const found = TRIGGER_EVENTS.find((event) => event.code === code);
+  return found ? tr(found.zh, found.en) : code;
+}
+
+function triggerEventTone(code: TriggerEventCode): 'success' | 'danger' | 'warning' {
+  return TRIGGER_EVENTS.find((event) => event.code === code)?.tone ?? 'warning';
+}
+
+function triggerIsDate(row: Trigger): boolean {
+  return row.attr_id != null;
+}
+
+function triggerEnabled(row: Trigger): boolean {
+  return triggerOption(row).enable !== false;
+}
+
+function triggerTypeLabel(
+  row: Trigger,
+  tr: (zh: string, en: string) => string,
+): string {
+  return triggerIsDate(row) ? tr('日期提醒', 'Date reminder') : tr('数据变更', 'Data change');
+}
+
 export function TriggersTab({
   modelRef,
   attributes,
@@ -904,15 +1004,24 @@ export function TriggersTab({
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
   const [rows, setRows] = useState<Trigger[]>([]);
+  // The filter editor resolves reference attributes against the model
+  // catalogue, so the trigger tab loads it alongside the list.
+  const [models, setModels] = useState<CIType[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<Trigger | 'new' | null>(null);
+  const [toggling, setToggling] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      setRows(await listTriggers(modelRef));
+      const [triggers, catalogue] = await Promise.all([
+        listTriggers(modelRef),
+        listCITypes().catch(() => [] as CIType[]),
+      ]);
+      setRows(triggers);
+      setModels(catalogue);
     } catch (error) {
       setErr(describeError(error, tr('无法读取触发器', 'Could not load the triggers')));
     } finally {
@@ -924,16 +1033,37 @@ export function TriggersTab({
     void load();
   }, [load]);
 
-  const remove = async (row: Trigger) => {
-    const name = typeof row.option.name === 'string' ? row.option.name : `#${row.id}`;
+  const remove = async (row: Trigger): Promise<boolean> => {
+    const name = triggerName(row);
     const ok = await confirmAction(tr(`删除触发器「${name}」？`, `Delete the trigger “${name}”?`));
-    if (!ok) return;
+    if (!ok) return false;
     try {
       await deleteTrigger(modelRef, row.id);
       toast.success(tr('已删除', 'Deleted'));
       await load();
+      return true;
     } catch (error) {
       toast.error(describeError(error, tr('删除失败', 'Delete failed')));
+      return false;
+    }
+  };
+
+  // The switch is a one-field edit: everything else in the option document is
+  // carried through untouched, including cantor's notify/date keys this build
+  // does not dispatch.
+  const toggleEnable = async (row: Trigger) => {
+    if (!isAdmin || toggling === row.id) return;
+    setToggling(row.id);
+    try {
+      await updateTrigger(modelRef, row.id, {
+        attr_id: row.attr_id,
+        option: { ...row.option, enable: !triggerEnabled(row) },
+      });
+      await load();
+    } catch (error) {
+      toast.error(describeError(error, tr('无法更新触发器', 'Could not update the trigger')));
+    } finally {
+      setToggling(null);
     }
   };
 
@@ -941,68 +1071,101 @@ export function TriggersTab({
     {
       key: 'name',
       header: tr('名称', 'Name'),
-      width: 'w-full',
+      width: 'w-[16rem]',
       cell: (row) => (
-        <span className="truncate font-medium text-text">
-          {typeof row.option.name === 'string' && row.option.name ? row.option.name : `#${row.id}`}
+        <span className="block truncate font-semibold text-text" title={triggerName(row)}>
+          {triggerName(row)}
         </span>
       ),
     },
     {
-      key: 'action',
-      header: tr('动作', 'Action'),
-      cell: (row) => <Chip>{String(row.option.action ?? '—')}</Chip>,
-    },
-    {
-      key: 'enable',
-      header: tr('状态', 'Status'),
-      cell: (row) =>
-        row.option.enable === false ? (
-          <Chip>{tr('停用', 'Disabled')}</Chip>
-        ) : (
-          <Chip tone="success">{tr('启用', 'Enabled')}</Chip>
-        ),
-    },
-    {
-      key: 'webhook',
-      header: tr('Webhook', 'Webhook'),
-      hideable: true,
+      key: 'description',
+      header: tr('描述', 'Description'),
+      width: 'w-full',
       cell: (row) => {
-        const webhooks = row.option.webhooks;
-        const url = webhooks && typeof webhooks === 'object' ? (webhooks as Record<string, unknown>).url : undefined;
-        return typeof url === 'string' && url ? (
-          <code className="block max-w-[22rem] truncate font-mono text-[11px] text-text-muted">{url}</code>
+        const description = triggerDescription(row);
+        return description ? (
+          <span className="block truncate text-xs text-text-muted" title={description}>
+            {description}
+          </span>
         ) : (
           <span className="text-text-faint">—</span>
         );
       },
     },
     {
-      key: 'auth',
-      header: tr('凭据', 'Credential'),
-      hideable: true,
-      defaultHidden: true,
-      cell: (row) => (row.has_webhook_authorization ? <Chip tone="info">{tr('已设置', 'Set')}</Chip> : <span className="text-text-faint">—</span>),
+      key: 'type',
+      header: tr('类型', 'Type'),
+      width: 'w-[10rem]',
+      cell: (row) => {
+        const event = triggerEvent(row);
+        return (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Chip tone={triggerIsDate(row) ? 'info' : 'default'} dense>
+              {triggerTypeLabel(row, tr)}
+            </Chip>
+            {!triggerIsDate(row) && event && (
+              <Chip tone={triggerEventTone(event)} dense>
+                {triggerEventLabel(event, tr)}
+              </Chip>
+            )}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'enable',
+      header: tr('启用', 'Enabled'),
+      width: 'w-[6rem]',
+      cell: (row) => (
+        <Switch
+          checked={triggerEnabled(row)}
+          disabled={!isAdmin || toggling === row.id}
+          onCheckedChange={() => void toggleEnable(row)}
+          aria-label={tr(`启用 ${triggerName(row)}`, `Enable ${triggerName(row)}`)}
+        />
+      ),
     },
   ];
 
+  const editingTrigger = editing === 'new' ? null : editing;
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-text-muted">
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="min-w-0 flex-1 text-xs text-text-muted">
           {tr(
-            '触发器在实例新增、修改或删除后调用一个 webhook。凭据存下来但不会回显。',
-            'A trigger calls a webhook after an instance is added, changed or deleted. Its credential is stored and never echoed back.',
-          )}
+            '触发器在实例新增、删除或修改后执行。',
+            'Triggers run after an instance is added, deleted or changed.',
+          )}{' '}
+          <span className="text-amber-600 dark:text-amber-300">
+            {tr(
+              '当前版本只保存配置，触发派发尚未接入。',
+              'This build stores the configuration only; dispatch is not wired yet.',
+            )}
+          </span>
         </p>
-        <Button variant="primary" size="sm" type="button" onClick={() => setEditing('new')} disabled={!isAdmin} className="inline-flex items-center gap-1.5">
-          <Plus size={12} aria-hidden="true" />
-          {tr('新建触发器', 'New trigger')}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-[11px] text-text-faint">
+            {tr(`共 ${rows.length} 个触发器`, `${rows.length} triggers`)}
+          </span>
+          <Button
+            variant="primary"
+            size="sm"
+            type="button"
+            onClick={() => setEditing('new')}
+            disabled={!isAdmin}
+            className="inline-flex items-center gap-1.5"
+          >
+            <Plus size={12} aria-hidden="true" />
+            {tr('新建触发器', 'New trigger')}
+          </Button>
+        </div>
       </div>
 
-      <Card>
+      <div className="flex min-h-0 flex-1 flex-col">
         <DataTable
+          fill
           columns={columns}
           rows={rows}
           rowKey={(row) => row.id}
@@ -1011,43 +1174,62 @@ export function TriggersTab({
           onRetry={() => void load()}
           storageKey="model-triggers"
           empty={tr('还没有触发器', 'No triggers yet')}
+          tableClassName="cmdb-instance-table"
+          scrollerClassName="cmdb-instance-table-scroll"
           actions={(row) => (
             <>
               <Hint content={adminTip}>
-                <Button variant="subtle" size="sm" type="button" onClick={() => setEditing(row)} disabled={!isAdmin} aria-label={tr('编辑触发器', 'Edit the trigger')}>
-                  {tr('编辑', 'Edit')}
+                <Button
+                  variant="plain"
+                  size="sm"
+                  type="button"
+                  onClick={() => setEditing(row)}
+                  disabled={!isAdmin}
+                  aria-label={tr(`编辑触发器 ${triggerName(row)}`, `Edit the trigger ${triggerName(row)}`)}
+                  title={tr('编辑', 'Edit')}
+                  className="cmdb-liquid-action-edit inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+                >
+                  <Pencil size={13} aria-hidden="true" />
                 </Button>
               </Hint>
               <Hint content={adminTip}>
                 <Button
-                  variant="dangerGhost"
+                  variant="plain"
                   size="sm"
                   type="button"
                   onClick={() => void remove(row)}
                   disabled={!isAdmin}
-                  aria-label={tr('删除触发器', 'Delete the trigger')}
-                  className="inline-flex items-center gap-1"
+                  aria-label={tr(`删除触发器 ${triggerName(row)}`, `Delete the trigger ${triggerName(row)}`)}
+                  title={tr('删除', 'Delete')}
+                  className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
                 >
-                  <Trash2 size={12} aria-hidden="true" />
-                  {tr('删除', 'Delete')}
+                  <Trash2 size={13} aria-hidden="true" />
                 </Button>
               </Hint>
             </>
           )}
         />
-      </Card>
+      </div>
 
       {editing && (
-        <TriggerModal
+        <TriggerDrawer
           modelRef={modelRef}
-          row={editing === 'new' ? null : editing}
+          row={editingTrigger}
           attributes={attributes}
+          models={models}
           onClose={() => setEditing(null)}
           onSaved={async (message) => {
             setEditing(null);
             toast.success(message);
             await load();
           }}
+          onDelete={
+            editingTrigger
+              ? async () => {
+                  if (await remove(editingTrigger)) setEditing(null);
+                }
+              : undefined
+          }
         />
       )}
       {dialog}
@@ -1055,74 +1237,307 @@ export function TriggersTab({
   );
 }
 
-function TriggerModal({
+type TriggerCategory = 'data' | 'date';
+type TriggerActionMode = 'notify' | 'webhook';
+
+const TRIGGER_FORM_EVENTS: ReadonlyArray<{
+  code: TriggerEventCode;
+  zh: string;
+  en: string;
+}> = [
+  { code: '0', zh: '新增实例', en: 'Instance added' },
+  { code: '1', zh: '删除实例', en: 'Instance deleted' },
+  { code: '2', zh: '实例变更', en: 'Instance changed' },
+];
+
+function parseEmails(raw: string): string[] {
+  return raw
+    .split(/[;,\s]+/)
+    .map((email) => email.trim())
+    .filter((email) => email.includes('@'));
+}
+
+function normalizeTos(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item === 'string') {
+      const email = item.trim();
+      if (email) out.push(email);
+      continue;
+    }
+    const record = recordOf(item);
+    if (typeof record.email === 'string' && record.email.trim()) {
+      out.push(record.email.trim());
+      continue;
+    }
+    // Cantor's employee tree stored an id here. Keep the identifier even though
+    // this build has no employee directory, so editing the rest of the trigger
+    // does not silently drop the recipient.
+    if (record.employee_id != null) out.push(`employee:${String(record.employee_id)}`);
+  }
+  return [...new Set(out)];
+}
+
+function TriggerSegment<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string; disabled?: boolean }>;
+  onChange(next: T): void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="mt-1.5 inline-flex flex-wrap rounded-lg border border-border bg-card/50 p-0.5"
+    >
+      {options.map((option) => (
+        <Button
+          key={option.value}
+          variant="plain"
+          size="sm"
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          disabled={disabled || option.disabled}
+          onClick={() => onChange(option.value)}
+          className={cn(
+            'rounded-md px-3 py-1.5 text-xs',
+            value === option.value
+              ? 'bg-indigo-500/15 text-indigo-600 shadow-sm dark:text-indigo-300'
+              : 'text-text-muted hover:text-text',
+          )}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function TriggerDrawer({
   modelRef,
   row,
   attributes,
+  models,
   onClose,
   onSaved,
+  onDelete,
 }: {
   modelRef: string;
   row: Trigger | null;
   attributes: TypeAttribute[];
+  models: CIType[];
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
+  onDelete?(): void | Promise<void>;
 }) {
   const { tr } = useI18n();
-  const option = useMemo(() => (row?.option ?? {}) as Record<string, unknown>, [row]);
-  const webhooks = (option.webhooks ?? {}) as Record<string, unknown>;
+  const option = useMemo(() => row?.option ?? {}, [row]);
+  const notifies = recordOf(option.notifies);
+  const hasWebhook = Object.keys(recordOf(option.webhooks)).length > 0;
+  const isDate = Boolean(row && row.attr_id != null);
+  const dateAttributes = useMemo(
+    () => attributes.filter((attribute) => attribute.value_type === '3' || attribute.value_type === '4'),
+    [attributes],
+  );
 
-  const [name, setName] = useState(typeof option.name === 'string' ? option.name : '');
-  const [action, setAction] = useState(typeof option.action === 'string' ? (option.action as string) : 'add');
+  const initialWebhook = useMemo(() => {
+    const config = webhookConfigOf(option.webhooks);
+    if (row?.has_webhook_authorization && (config.auth_type === 'none' || !config.auth_type)) {
+      return {
+        ...config,
+        auth_type: 'BasicAuth' as const,
+        authorization: { ...config.authorization, type: 'BasicAuth' },
+      };
+    }
+    return config;
+  }, [option.webhooks, row?.has_webhook_authorization]);
+
+  // Keep unknown channel values (cantor bots) so a save does not drop them.
+  const initialMethods = Array.isArray(notifies.method)
+    ? notifies.method.filter((method): method is string => typeof method === 'string')
+    : [];
+
+  const [name, setName] = useState(() => (typeof option.name === 'string' ? option.name : ''));
+  const [description, setDescription] = useState(() =>
+    typeof option.description === 'string' ? option.description : '',
+  );
   const [enable, setEnable] = useState(option.enable !== false);
-  const [url, setUrl] = useState(typeof webhooks.url === 'string' ? (webhooks.url as string) : '');
-  const [attrIDs, setAttrIDs] = useState<number[]>(Array.isArray(option.attr_ids) ? (option.attr_ids as number[]) : []);
-  // THE CREDENTIAL IS NEVER RETURNED, so these start empty and mean "leave it":
-  // an omitted authorization keeps the stored one, an explicitly empty one
-  // clears it. The backend draws exactly that distinction.
-  const [user, setUser] = useState('');
-  const [password, setPassword] = useState('');
+  const [category, setCategory] = useState<TriggerCategory>(isDate ? 'date' : 'data');
+  const [event, setEvent] = useState<TriggerEventCode>(() => {
+    const value = option.action;
+    return value === '0' || value === '1' || value === '2' ? value : '0';
+  });
+  const [attrIDs, setAttrIDs] = useState<number[]>(() =>
+    Array.isArray(option.attr_ids)
+      ? option.attr_ids
+          .map((id) => Number(id))
+          .filter((id) => Number.isSafeInteger(id) && id > 0)
+      : [],
+  );
+  const [dateAttrID, setDateAttrID] = useState<number | null>(() => {
+    if (isDate) return row?.attr_id ?? null;
+    return dateAttributes[0]?.id ?? null;
+  });
+  const [beforeDays, setBeforeDays] = useState(() =>
+    typeof notifies.before_days === 'number' ? notifies.before_days : 0,
+  );
+  const [notifyAt, setNotifyAt] = useState(() =>
+    typeof notifies.notify_at === 'string' && notifies.notify_at ? notifies.notify_at : '08:00',
+  );
+  const [filter, setFilter] = useState(() =>
+    typeof option.filter === 'string' ? option.filter : '',
+  );
+  const [actionMode, setActionMode] = useState<TriggerActionMode>(() => {
+    if (isDate) return 'notify';
+    return hasWebhook ? 'webhook' : 'notify';
+  });
+  const [webhook, setWebhook] = useState<WebhookConfig>(initialWebhook);
+  const [recipientEmails, setRecipientEmails] = useState<string[]>(() => normalizeTos(notifies.tos));
+  const [customEmail, setCustomEmail] = useState('');
+  const [subject, setSubject] = useState(() =>
+    typeof notifies.subject === 'string' ? notifies.subject : '',
+  );
+  const [body, setBody] = useState(() => (typeof notifies.body === 'string' ? notifies.body : ''));
+  const [methods, setMethods] = useState<string[]>(() =>
+    initialMethods.length ? initialMethods : ['email'],
+  );
+  const [users, setUsers] = useState<User[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const submit = async () => {
+  useEffect(() => {
+    let live = true;
+    setUsersLoading(true);
+    void listUsers()
+      .then((got) => {
+        if (live) {
+          setUsers(got.items ?? []);
+          setUsersError(null);
+        }
+      })
+      .catch((error) => {
+        if (live) {
+          setUsers([]);
+          setUsersError(
+            describeError(
+              error,
+              tr('无法读取员工列表；仍可填写自定义收件人。', 'Could not load people; custom recipients still work.'),
+            ),
+          );
+        }
+      })
+      .finally(() => {
+        if (live) setUsersLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [tr]);
+
+  const changeCategory = (next: TriggerCategory) => {
+    setCategory(next);
+    if (next === 'date') {
+      setActionMode('notify');
+      if (dateAttrID == null) setDateAttrID(dateAttributes[0]?.id ?? null);
+    }
+  };
+
+  const submit = async (formEvent: FormEvent<HTMLFormElement>) => {
+    formEvent.preventDefault();
+    if (submitting) return;
     if (!name.trim()) {
       setErr(tr('名称不能为空', 'A name is required'));
       return;
     }
-    if (url.trim() && !/^https?:\/\//i.test(url.trim())) {
-      setErr(tr('Webhook 地址要以 http:// 或 https:// 开头', 'The webhook address must start with http:// or https://'));
+    if (category === 'date' && dateAttrID == null) {
+      setErr(tr('请选择日期属性', 'Choose a date attribute'));
+      return;
+    }
+    if (category === 'data' && actionMode === 'webhook' && !webhook.url.trim()) {
+      setErr(tr('Webhook 地址不能为空', 'A webhook URL is required'));
       return;
     }
 
-    const nextWebhooks: Record<string, unknown> = {};
-    if (url.trim()) {
-      nextWebhooks.url = url.trim();
-      if (user.trim() || password.trim()) {
-        nextWebhooks.authorization = { user: user.trim(), password };
-      } else if (row?.has_webhook_authorization) {
-        // KEEP THE STORED CREDENTIAL: sending an empty authorization object would
-        // clear it, which is a different instruction from "I did not touch it".
-        const carried = webhooks.authorization;
-        if (carried) nextWebhooks.authorization = carried;
+    const base: Record<string, unknown> = {
+      ...option,
+      name: name.trim(),
+      description: description.trim(),
+      enable,
+      filter: filter.trim(),
+    };
+    const emails = [...new Set([...recipientEmails, ...parseEmails(customEmail)])];
+    const notifyConfig: Record<string, unknown> = {
+      tos: emails,
+      subject: subject.trim(),
+      body,
+      body_html: body,
+      method: methods.length ? methods : ['email'],
+    };
+
+    if (category === 'date') {
+      delete base.action;
+      delete base.attr_ids;
+      delete base.webhooks;
+      base.notifies = {
+        ...notifyConfig,
+        before_days: Math.max(0, beforeDays),
+        notify_at: notifyAt || '08:00',
+      };
+    } else {
+      base.action = event;
+      if (event === '2') base.attr_ids = attrIDs;
+      else delete base.attr_ids;
+
+      if (actionMode === 'notify') {
+        delete base.webhooks;
+        base.notifies = notifyConfig;
+      } else {
+        delete base.notifies;
+        const authType = webhook.auth_type ?? 'none';
+        const initialAuthType = initialWebhook.auth_type ?? 'none';
+        const values = authorizationValues(webhook.authorization);
+        const nextWebhook: Record<string, unknown> = {
+          method: webhook.method,
+          url: webhook.url.trim(),
+          parameters: webhook.parameters,
+          headers: webhook.headers,
+          body: webhook.body,
+          auth_type: authType,
+        };
+        if (authType === 'none') {
+          // An explicit None clears the stored credential.
+          nextWebhook.authorization = {};
+        } else if (Object.keys(values).length > 0) {
+          nextWebhook.authorization = { type: authType, ...values };
+        } else if (!(row?.has_webhook_authorization && authType === initialAuthType)) {
+          // Changing the auth type without entering its values must not keep a
+          // credential that belonged to the old type.
+          nextWebhook.authorization = {};
+        }
+        base.webhooks = nextWebhook;
       }
     }
 
-    const nextOption: Record<string, unknown> = {
-      ...option,
-      name: name.trim(),
-      action,
-      enable,
-      attr_ids: attrIDs,
-    };
-    if (url.trim()) nextOption.webhooks = nextWebhooks;
-    else delete nextOption.webhooks;
-
+    const attrID = category === 'date' ? dateAttrID : null;
     setSubmitting(true);
     setErr(null);
     try {
-      if (row) await updateTrigger(modelRef, row.id, { attr_id: row.attr_id, option: nextOption });
-      else await createTrigger(modelRef, { option: nextOption });
+      if (row) {
+        await updateTrigger(modelRef, row.id, { attr_id: attrID, option: base });
+      } else {
+        await createTrigger(modelRef, { attr_id: attrID, option: base });
+      }
       await onSaved(row ? tr('已保存', 'Saved') : tr('已创建', 'Created'));
     } catch (error) {
       setErr(describeError(error, tr('保存失败', 'Could not save')));
@@ -1132,118 +1547,284 @@ function TriggerModal({
   };
 
   return (
-    <Modal
+    <Drawer
       open
-      onClose={onClose}
+      onClose={() => {
+        if (!submitting) onClose();
+      }}
       size="lg"
       title={row ? tr('编辑触发器', 'Edit trigger') : tr('新建触发器', 'New trigger')}
+      description={row ? triggerName(row) : tr('配置触发条件和触发动作。', 'Configure the condition and the action.')}
       footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            variant="outline"
+            type="button"
+            onClick={() => {
+              if (!submitting) onClose();
+            }}
+            disabled={submitting}
+          >
             {tr('取消', 'Cancel')}
           </Button>
-          <Button variant="primary" type="button" onClick={() => void submit()} disabled={submitting}>
-            {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+          {onDelete && (
+            <Button
+              variant="danger"
+              type="button"
+              onClick={() => void onDelete()}
+              disabled={submitting}
+            >
+              {tr('删除', 'Delete')}
+            </Button>
+          )}
+          <Button variant="primary" type="submit" form="cmdb-trigger-form" disabled={submitting}>
+            {submitting ? tr('保存中…', 'Saving…') : tr('确定', 'Save')}
           </Button>
         </div>
       }
     >
-      {err && (
-        <div role="alert" className="mb-2 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">
-          {err}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-3">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="cmdb-trigger-name">{tr('名称', 'Name')}</Label>
-            <Input id="cmdb-trigger-name" value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full" />
-          </div>
-          <div>
-            <Label htmlFor="cmdb-trigger-action">{tr('在什么时候触发', 'When it fires')}</Label>
-            <Select
-              id="cmdb-trigger-action"
-              label={tr('在什么时候触发', 'When it fires')}
-              value={action}
-              onValueChange={setAction}
-              options={[
-                { value: 'add', label: tr('新增实例', 'Instance added') },
-                { value: 'update', label: tr('修改实例', 'Instance changed') },
-                { value: 'delete', label: tr('删除实例', 'Instance deleted') },
-              ]}
-              className="mt-1 w-full"
-            />
-          </div>
-        </div>
-
-        <label className="flex items-center gap-2 text-xs text-text-muted">
-          <Checkbox checked={enable} onCheckedChange={(next) => setEnable(next === true)} />
-          {tr('启用', 'Enabled')}
-        </label>
-
-        <div>
-          <Label htmlFor="cmdb-trigger-url">{tr('Webhook 地址', 'Webhook address')}</Label>
-          <Input
-            id="cmdb-trigger-url"
-            value={url}
-            placeholder="https://example.test/hooks/cmdb"
-            onChange={(event) => setUrl(event.target.value)}
-            className="mt-1 w-full font-mono"
-          />
-          <p className="mt-1 text-[11px] text-text-faint">
-            {tr('留空表示这个触发器不调用 webhook。', 'Leave it empty and the trigger calls no webhook.')}
-          </p>
-        </div>
-
-        {url.trim() !== '' && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="cmdb-trigger-user">{tr('Basic 认证用户名', 'Basic auth user')}</Label>
-              <Input id="cmdb-trigger-user" value={user} autoComplete="off" onChange={(event) => setUser(event.target.value)} className="mt-1 w-full" />
-            </div>
-            <div>
-              <Label htmlFor="cmdb-trigger-pass">{tr('密码', 'Password')}</Label>
-              <Input
-                id="cmdb-trigger-pass"
-                type="password"
-                value={password}
-                autoComplete="new-password"
-                onChange={(event) => setPassword(event.target.value)}
-                className="mt-1 w-full"
-              />
-            </div>
-            <p className="text-[11px] text-text-faint sm:col-span-2">
-              {row?.has_webhook_authorization
-                ? tr('已存有一组凭据。留空保持不变；填写即替换。', 'A credential is stored. Leave both empty to keep it, or fill them in to replace it.')
-                : tr('凭据保存后不会再显示。', 'Once saved, the credential is never shown again.')}
-            </p>
+      <form id="cmdb-trigger-form" onSubmit={(formEvent) => void submit(formEvent)} className="flex flex-col gap-5">
+        {err && (
+          <div role="alert" className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300">
+            {err}
           </div>
         )}
 
-        <div>
-          <span className="text-xs font-medium text-text-muted">{tr('关注哪些属性（可选）', 'Which attributes matter (optional)')}</span>
-          <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-            {attributes.map((attribute) => (
-              <label key={attribute.id} className="flex cursor-pointer items-center gap-2 border-b border-border px-3 py-1.5 text-xs last:border-0 hover:bg-card">
-                <Checkbox
-                  checked={attrIDs.includes(attribute.id)}
-                  onCheckedChange={(next) =>
-                    setAttrIDs((current) => (next === true ? [...current, attribute.id] : current.filter((id) => id !== attribute.id)))
-                  }
-                />
-                <span className="min-w-0 flex-1 truncate">{attribute.alias || attribute.name}</span>
-              </label>
-            ))}
-          </div>
-          <p className="mt-1 text-[11px] text-text-faint">
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+          <Info size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
             {tr(
-              '不选表示任何属性变化都触发。',
-              'Selecting none means any attribute change fires it.',
+              '当前版本只保存触发器配置；Webhook 与通知的触发派发尚未接入。',
+              'This build stores the trigger configuration only; webhook and notification dispatch are not wired yet.',
             )}
-          </p>
+          </span>
         </div>
-      </div>
-    </Modal>
+
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold text-text">{tr('基本信息', 'Basics')}</h3>
+          <div>
+            <Label htmlFor="cmdb-trigger-name">{tr('名称', 'Name')}</Label>
+            <Input
+              id="cmdb-trigger-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="mt-1 w-full"
+              required
+            />
+          </div>
+          <div>
+            <span className="text-xs text-text-muted">{tr('类型', 'Type')}</span>
+            <TriggerSegment
+              label={tr('触发类型', 'Trigger type')}
+              value={category}
+              onChange={changeCategory}
+              disabled={submitting}
+              options={[
+                { value: 'data', label: tr('数据变更', 'Data change') },
+                {
+                  value: 'date',
+                  label: tr('日期属性', 'Date attribute'),
+                  disabled: dateAttributes.length === 0,
+                },
+              ]}
+            />
+            <p className="mt-1 text-[11px] text-text-faint">
+              {category === 'data'
+                ? tr('当 CI 实例新增、删除或属性变更时触发。', 'Fires when an instance is added, deleted or changed.')
+                : tr('在日期属性到期前提醒。', 'Reminds before a date attribute is due.')}
+            </p>
+            {dateAttributes.length === 0 && (
+              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-300">
+                {tr('这个模型没有日期或时间属性，不能创建日期提醒。', 'This model has no date attribute, so it cannot hold a date reminder.')}
+              </p>
+            )}
+          </div>
+          <div>
+            <Label htmlFor="cmdb-trigger-description">{tr('描述', 'Description')}</Label>
+            <Textarea
+              id="cmdb-trigger-description"
+              rows={2}
+              value={description}
+              placeholder={tr('请输入描述', 'Optional description')}
+              onChange={(event) => setDescription(event.target.value)}
+              className="mt-1 w-full"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="cmdb-trigger-enabled"
+              checked={enable}
+              onCheckedChange={(next) => setEnable(next)}
+              disabled={submitting}
+            />
+            <Label htmlFor="cmdb-trigger-enabled">{tr('启用', 'Enabled')}</Label>
+          </div>
+        </section>
+
+        <section className="space-y-3 border-t border-border pt-4">
+          <h3 className="text-xs font-semibold text-text">{tr('触发条件', 'Trigger condition')}</h3>
+          {category === 'date' ? (
+            <>
+              <div>
+                <Label htmlFor="cmdb-trigger-date-attr">{tr('日期属性', 'Date attribute')}</Label>
+                <Select
+                  id="cmdb-trigger-date-attr"
+                  label={tr('日期属性', 'Date attribute')}
+                  value={dateAttrID != null ? String(dateAttrID) : ''}
+                  onValueChange={(next) => setDateAttrID(next ? Number(next) : null)}
+                  options={dateAttributes.map((attribute) => ({
+                    value: String(attribute.id),
+                    label: attribute.alias || attribute.name,
+                  }))}
+                  placeholder={tr('选择日期属性…', 'Choose a date attribute…')}
+                  className="mt-1 w-full"
+                  disabled={submitting || dateAttributes.length === 0}
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="cmdb-trigger-before-days">{tr('提前天数', 'Days before')}</Label>
+                  <Input
+                    id="cmdb-trigger-before-days"
+                    type="number"
+                    min={0}
+                    value={beforeDays}
+                    onChange={(event) => setBeforeDays(Number(event.target.value) || 0)}
+                    className="mt-1 w-full"
+                    disabled={submitting}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="cmdb-trigger-notify-at">{tr('通知时间', 'Notify at')}</Label>
+                  <Input
+                    id="cmdb-trigger-notify-at"
+                    type="time"
+                    value={notifyAt}
+                    onChange={(event) => setNotifyAt(event.target.value)}
+                    className="mt-1 w-full"
+                    disabled={submitting}
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <span className="text-xs text-text-muted">{tr('事件', 'Event')}</span>
+                <TriggerSegment
+                  label={tr('触发事件', 'Trigger event')}
+                  value={event}
+                  onChange={(next) => setEvent(next as TriggerEventCode)}
+                  disabled={submitting}
+                  options={TRIGGER_FORM_EVENTS.map((item) => ({
+                    value: item.code,
+                    label: tr(item.zh, item.en),
+                  }))}
+                />
+                <p className="mt-1 text-[11px] text-text-faint">
+                  {tr(
+                    '选择后可指定监听哪些字段的变更。',
+                    'Choose the fields this trigger watches when an instance changes.',
+                  )}
+                </p>
+              </div>
+              {event === '2' && (
+                <div>
+                  <span className="text-xs text-text-muted">
+                    {tr('模型属性', 'Model attributes')}
+                  </span>
+                  <div className="mt-1 max-h-48 overflow-y-auto rounded-md border border-border">
+                    {attributes.map((attribute) => (
+                      <label
+                        key={attribute.id}
+                        className="flex cursor-pointer items-center gap-2 border-b border-border px-3 py-1.5 text-xs last:border-0 hover:bg-card"
+                      >
+                        <Checkbox
+                          checked={attrIDs.includes(attribute.id)}
+                          disabled={submitting}
+                          onCheckedChange={(next) =>
+                            setAttrIDs((current) =>
+                              next === true
+                                ? [...current, attribute.id]
+                                : current.filter((id) => id !== attribute.id),
+                            )
+                          }
+                        />
+                        <span className="min-w-0 flex-1 truncate">{attribute.alias || attribute.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-text-faint">
+                    {tr('不选表示任何属性变化都触发。', 'Selecting none means any attribute change fires it.')}
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          <div>
+            <span className="text-xs text-text-muted">{tr('过滤条件', 'Filter')}</span>
+            <div className="mt-1.5">
+              <ConditionFilter attributes={attributes} models={models} value={filter} onApply={setFilter} />
+            </div>
+            {filter && (
+              <code className="mt-2 block break-all rounded-md border border-border bg-card/40 px-3 py-2 font-mono text-[10px] text-text-faint">
+                {filter}
+              </code>
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-3 border-t border-border pt-4">
+          <h3 className="text-xs font-semibold text-text">{tr('触发动作', 'Action')}</h3>
+          {category === 'date' ? (
+            <p className="rounded-md border border-border bg-card/40 px-3 py-2 text-[11px] text-text-muted">
+              {tr(
+                '日期属性通过通知提醒：到达提前天数后，在每天的通知时间发送。',
+                'A date attribute uses a notification: it is sent daily at the notify time once the lead days are reached.',
+              )}
+            </p>
+          ) : (
+            <TriggerSegment
+              label={tr('动作方式', 'Action type')}
+              value={actionMode}
+              onChange={(next) => setActionMode(next as TriggerActionMode)}
+              disabled={submitting}
+              options={[
+                { value: 'notify', label: tr('通知', 'Notify') },
+                { value: 'webhook', label: tr('Webhook', 'Webhook') },
+              ]}
+            />
+          )}
+
+          {actionMode === 'notify' || category === 'date' ? (
+            <TriggerNotifyEditor
+              users={users}
+              usersLoading={usersLoading}
+              usersError={usersError}
+              recipientEmails={recipientEmails}
+              onRecipientEmailsChange={setRecipientEmails}
+              customEmail={customEmail}
+              onCustomEmailChange={setCustomEmail}
+              subject={subject}
+              onSubjectChange={setSubject}
+              body={body}
+              onBodyChange={setBody}
+              methods={methods}
+              onMethodsChange={setMethods}
+              attributes={attributes}
+              disabled={submitting}
+            />
+          ) : (
+            <TriggerWebhookEditor
+              value={webhook}
+              onChange={setWebhook}
+              hasStoredAuth={Boolean(row?.has_webhook_authorization)}
+              disabled={submitting}
+            />
+          )}
+        </section>
+      </form>
+    </Drawer>
   );
 }

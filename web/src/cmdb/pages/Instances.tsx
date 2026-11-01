@@ -1226,6 +1226,20 @@ export default function InstancesPage() {
                         disabled={loading || exportColumns.length === 0}
                       />
                     )}
+                    {/* The selection bar below is a status line; its action lives
+                        in this toolbar row so it does not become a second row of
+                        controls when something is selected. */}
+                    {selectedCount > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        onClick={clearSelection}
+                        className="text-text-muted hover:text-text"
+                      >
+                        {tr('清除选择', 'Clear selection')}
+                      </Button>
+                    )}
                   </div>
                 </div>
                 {(search || condition || filtering) && (
@@ -1270,15 +1284,6 @@ export default function InstancesPage() {
                         'Choose “Selected” in Export to export only the checked instances.',
                       )}
                     </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      type="button"
-                      onClick={clearSelection}
-                      className="ms-auto text-text-muted hover:text-text"
-                    >
-                      {tr('清除选择', 'Clear selection')}
-                    </Button>
                   </div>
                 )}
         </div>

@@ -450,14 +450,17 @@ export function listTriggers(ref: string | number): Promise<Trigger[]> {
   );
 }
 
-export function createTrigger(ref: string | number, input: { attr_id?: number; option: Record<string, unknown> }): Promise<Trigger> {
+export function createTrigger(
+  ref: string | number,
+  input: { attr_id?: number | null; option: Record<string, unknown> },
+): Promise<Trigger> {
   return cmdbPost<Trigger>(`/ci-types/${encodeURIComponent(String(ref))}/triggers`, input);
 }
 
 export function updateTrigger(
   ref: string | number,
   id: number,
-  input: { attr_id?: number; option: Record<string, unknown> },
+  input: { attr_id?: number | null; option: Record<string, unknown> },
 ): Promise<Trigger> {
   return cmdbPut<Trigger>(`/ci-types/${encodeURIComponent(String(ref))}/triggers/${id}`, input);
 }

@@ -131,6 +131,11 @@ describe('the list', () => {
     // The header checkbox extends the selection to the rows on this page.
     await user.click(screen.getByRole('checkbox', { name: '选择本页全部' }));
     expect(await screen.findByText('已选 2 项')).toBeInTheDocument();
+    // The clear action belongs to the toolbar row; the bar is a status line.
+    const selectionBar = screen.getByRole('status');
+    expect(
+      within(selectionBar).queryByRole('button', { name: '清除选择' }),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '清除选择' }));
     expect(screen.queryByText(/已选 \d+ 项/)).not.toBeInTheDocument();

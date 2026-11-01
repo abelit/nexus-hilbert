@@ -449,6 +449,10 @@ describe('the other tabs', () => {
     expect(await screen.findByRole('link', { name: '磁盘' })).toBeInTheDocument();
     expect(screen.getByText('子模型')).toBeInTheDocument();
     expect(screen.getByText('一对多')).toBeInTheDocument();
+    // The relation list shares the resource table's card and density.
+    const table = screen.getByRole('table');
+    expect(table).toHaveClass('cmdb-instance-table');
+    expect(table.parentElement).toHaveClass('cmdb-instance-table-scroll');
   });
 
   it('shows the empty state from the relations deep link', async () => {
@@ -723,5 +727,286 @@ describe('the auto-discovery tab', () => {
     await userEvent.click(await screen.findByRole('tab', { name: '自动发现' }));
     expect(await screen.findByRole('link', { name: '打开自动发现配置' })).toHaveAttribute('href', '/cmdb/discovery');
     expect(screen.getByRole('link', { name: '打开发现池' })).toHaveAttribute('href', '/cmdb/adc');
+  });
+});
+
+type TriggerWriteBody = {
+  attr_id?: number | null;
+  option: {
+    name?: string;
+    description?: string;
+    enable?: boolean;
+    action?: string;
+    attr_ids?: number[];
+    filter?: string;
+    webhooks?: Record<string, unknown>;
+    notifies?: Record<string, unknown>;
+  };
+};
+
+function triggerHandlers() {
+  server.use(
+    // A date attribute for the date-trigger case; the base fixture only has
+    // text attributes.
+    http.get('/api/v1/cmdb/ci-types/1/attributes', () =>
+      HttpResponse.json({
+        type_id: 1,
+        unique_id: 10,
+        unique: 'hostname',
+        attributes: [
+          ownAttribute,
+          { ...inheritedAttribute, id: 21, name: 'expires_at', alias: '到期时间', value_type: '3', inherited: false },
+        ],
+      }),
+    ),
+    http.get('/api/v1/users', () =>
+      HttpResponse.json({
+        items: [
+          {
+            id: 7,
+            email: 'ops@example.test',
+            display_name: 'Ops',
+            phone: '',
+            role: 'admin',
+            status: 'active',
+            created_at: '',
+            updated_at: '',
+          },
+        ],
+        total: 1,
+      }),
+    ),
+    http.get('/api/v1/cmdb/ci-types/1/triggers', () =>
+      HttpResponse.json({
+        items: [
+          {
+            id: 51,
+            type_id: 1,
+            option: {
+              name: 'notify ops',
+              description: 'Webhook on updates',
+              enable: true,
+              action: '2',
+              attr_ids: [10],
+              webhooks: { url: 'https://example.test/hook' },
+            },
+            has_webhook_authorization: true,
+          },
+          {
+            id: 52,
+            type_id: 1,
+            attr_id: 21,
+            option: {
+              name: 'warranty reminder',
+              description: '',
+              enable: false,
+              notifies: {
+                before_days: 7,
+                notify_at: '08:00',
+                method: ['email'],
+                tos: ['ops@example.test'],
+                subject: 'Warranty',
+              },
+            },
+            has_webhook_authorization: false,
+          },
+        ],
+        total: 2,
+      }),
+    ),
+  );
+}
+
+describe('the triggers tab', () => {
+  it('renders the cantor-shaped list on the shared table surface', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    triggerHandlers();
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '触发器' }));
+    expect(await screen.findByText('notify ops')).toBeInTheDocument();
+    expect(screen.getByText('Webhook on updates')).toBeInTheDocument();
+    expect(screen.getByText('warranty reminder')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: '启用 notify ops' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: '启用 warranty reminder' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '编辑触发器 notify ops' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '删除触发器 notify ops' })).toBeInTheDocument();
+
+    const table = screen.getByRole('table');
+    expect(table).toHaveClass('cmdb-instance-table');
+    expect(table.parentElement).toHaveClass('cmdb-instance-table-scroll');
+    // Cantor stores the event as "2"; the table must read "修改", not the code.
+    expect(within(table).getByText('修改')).toBeInTheDocument();
+    expect(within(table).getByText('日期提醒')).toBeInTheDocument();
+  });
+
+  it('toggles a trigger from the row while carrying the rest of its option', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    triggerHandlers();
+    let patched: TriggerWriteBody | null = null;
+    server.use(
+      http.put('/api/v1/cmdb/ci-types/1/triggers/51', async ({ request }) => {
+        patched = (await request.json()) as TriggerWriteBody;
+        return HttpResponse.json({
+          id: 51,
+          type_id: 1,
+          option: patched.option,
+          has_webhook_authorization: true,
+        });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '触发器' }));
+    await user.click(await screen.findByRole('switch', { name: '启用 notify ops' }));
+
+    await waitFor(() => expect(patched).not.toBeNull());
+    expect(patched!.option.enable).toBe(false);
+    expect(patched!.option.action).toBe('2');
+    expect(patched!.option.attr_ids).toEqual([10]);
+    expect(patched!.option.webhooks).toEqual({ url: 'https://example.test/hook' });
+  });
+
+  it('creates a trigger with cantor event codes and update-only attribute scope', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    triggerHandlers();
+    let posted: TriggerWriteBody | null = null;
+    server.use(
+      http.post('/api/v1/cmdb/ci-types/1/triggers', async ({ request }) => {
+        posted = (await request.json()) as TriggerWriteBody;
+        return HttpResponse.json({
+          id: 99,
+          type_id: 1,
+          option: posted.option,
+          has_webhook_authorization: false,
+        });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '触发器' }));
+    await user.click(await screen.findByRole('button', { name: '新建触发器' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('名称'), 'new hook');
+    await user.click(within(dialog).getByRole('radio', { name: '实例变更' }));
+    await user.click(within(dialog).getByRole('checkbox', { name: '主机名' }));
+    await user.click(within(dialog).getByRole('radio', { name: 'Webhook' }));
+    await user.type(within(dialog).getByLabelText('Webhook 地址'), 'https://example.test/new');
+    await user.click(within(dialog).getByRole('button', { name: '确定' }));
+
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.attr_id).toBeNull();
+    expect(posted!.option).toMatchObject({
+      name: 'new hook',
+      description: '',
+      enable: true,
+      filter: '',
+      action: '2',
+      attr_ids: [10],
+      webhooks: {
+        method: 'GET',
+        url: 'https://example.test/new',
+        parameters: {},
+        headers: {},
+        body: '',
+        auth_type: 'none',
+        authorization: {},
+      },
+    });
+  });
+
+  it('preserves an imported cantor date/notify trigger when only metadata changes', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    triggerHandlers();
+    let patched: TriggerWriteBody | null = null;
+    server.use(
+      http.put('/api/v1/cmdb/ci-types/1/triggers/52', async ({ request }) => {
+        patched = (await request.json()) as TriggerWriteBody;
+        return HttpResponse.json({
+          id: 52,
+          type_id: 1,
+          attr_id: 21,
+          option: patched.option,
+          has_webhook_authorization: false,
+        });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '触发器' }));
+    await user.click(await screen.findByRole('button', { name: '编辑触发器 warranty reminder' }));
+
+    const dialog = await screen.findByRole('dialog');
+    const nameInput = within(dialog).getByLabelText('名称');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'renamed reminder');
+    await user.click(within(dialog).getByRole('button', { name: '确定' }));
+
+    await waitFor(() => expect(patched).not.toBeNull());
+    expect(patched!.attr_id).toBe(21);
+    expect(patched!.option.name).toBe('renamed reminder');
+    expect(patched!.option.notifies).toEqual({
+      before_days: 7,
+      notify_at: '08:00',
+      method: ['email'],
+      tos: ['ops@example.test'],
+      subject: 'Warranty',
+      body: '',
+      body_html: '',
+    });
+    expect(patched!.option).not.toHaveProperty('webhooks');
+    expect(patched!.option).not.toHaveProperty('action');
+  });
+
+  it('creates a notification trigger with recipients and content', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    triggerHandlers();
+    let posted: TriggerWriteBody | null = null;
+    server.use(
+      http.post('/api/v1/cmdb/ci-types/1/triggers', async ({ request }) => {
+        posted = (await request.json()) as TriggerWriteBody;
+        return HttpResponse.json({
+          id: 100,
+          type_id: 1,
+          option: posted.option,
+          has_webhook_authorization: false,
+        });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '触发器' }));
+    await user.click(await screen.findByRole('button', { name: '新建触发器' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('名称'), 'notify ops');
+    await user.click(within(dialog).getByRole('button', { name: '选择收件人' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Ops' }));
+    await user.keyboard('{Escape}');
+    expect(await within(dialog).findByText('ops@example.test')).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText('通知标题'), 'Instance changed');
+    await user.type(within(dialog).getByLabelText('通知内容'), 'changed by trigger');
+    await user.click(within(dialog).getByRole('button', { name: '确定' }));
+
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.option).toMatchObject({
+      name: 'notify ops',
+      enable: true,
+      action: '0',
+      notifies: {
+        tos: ['ops@example.test'],
+        subject: 'Instance changed',
+        body: 'changed by trigger',
+        body_html: 'changed by trigger',
+        method: ['email'],
+      },
+    });
+    expect(posted!.option).not.toHaveProperty('webhooks');
   });
 });

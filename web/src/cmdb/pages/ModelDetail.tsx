@@ -357,7 +357,7 @@ export default function ModelDetailPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="triggers">
+          <TabsContent value="triggers" className="h-full min-h-0">
             <TriggersTab modelRef={ref} attributes={attributes} isAdmin={isAdmin} adminTip={adminTip} />
           </TabsContent>
           </div>
