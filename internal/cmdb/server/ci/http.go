@@ -271,7 +271,11 @@ func (h *Handler) updateInstance(w http.ResponseWriter, r *http.Request) {
 
 func writeResponse(res *cibiz.WriteResult) map[string]any {
 	body := map[string]any{"ci_id": res.CIID, "created": res.Created}
-	if len(res.Changes) > 0 {
+	// A CREATE RESPONSE STAYS `{ci_id, created}`. The store now carries the
+	// inserted rows' changes back to the trigger dispatcher, but the create
+	// endpoint never returned them and a caller that parsed the old shape must
+	// not have to discover a new key. An update was already reporting changes.
+	if len(res.Changes) > 0 && !res.Created {
 		changes := make([]map[string]any, 0, len(res.Changes))
 		for _, chg := range res.Changes {
 			item := map[string]any{"attr_id": chg.AttrID}

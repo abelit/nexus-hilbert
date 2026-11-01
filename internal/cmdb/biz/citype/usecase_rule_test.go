@@ -596,9 +596,8 @@ func TestAdoptedTriggerCredentialIsInert(t *testing.T) {
 	}
 }
 
-// cantor fired the trigger and answered 200. The port has no sender, and a
-// route that appears to work while sending nothing is worse than one that says
-// so.
+// A composition without a dispatcher must still answer explicitly rather than
+// pretending the test was sent. Production wires one; see TestTestTriggerDelegates.
 func TestTestTriggerReportsDispatchUnsupported(t *testing.T) {
 	repo := ruleRepo(10, textAttr(1, "hostname"))
 	row := citypemodel.CITypeTrigger{TypeID: 10, Notify: map[string]any{TriggerKeyEnable: true}}
@@ -622,5 +621,77 @@ func TestRuleUsecaseWithoutRepoReportsNotWired(t *testing.T) {
 	}
 	if _, err := uc.ListTriggers(ctx, "1"); !errors.Is(err, errs.ErrNotWiredYet) {
 		t.Fatalf("ListTriggers() error = %v", err)
+	}
+}
+
+type fakeTriggerTester struct {
+	called bool
+	id     model.ID
+	err    error
+}
+
+func (f *fakeTriggerTester) TestTrigger(_ context.Context, id model.ID) error {
+	f.called = true
+	f.id = id
+	return f.err
+}
+
+func TestTestTriggerDelegatesToTheDispatcher(t *testing.T) {
+	repo := ruleRepo(10, textAttr(1, "hostname"))
+	row := citypemodel.CITypeTrigger{TypeID: 10, Notify: map[string]any{TriggerKeyEnable: true}}
+	row.ID = 701
+	repo.triggers = []citypemodel.CITypeTrigger{row}
+	tester := &fakeTriggerTester{}
+	uc := attrUsecase(repo).WithTriggerTester(tester)
+
+	if err := uc.TestTrigger(context.Background(), "10", 701); err != nil {
+		t.Fatalf("TestTrigger: %v", err)
+	}
+	if !tester.called || tester.id != 701 {
+		t.Fatalf("tester called=%v id=%d", tester.called, tester.id)
+	}
+}
+
+func TestTestTriggerKeepsTheModelScopeCheckBeforeDispatch(t *testing.T) {
+	repo := ruleRepo(10, textAttr(1, "hostname"))
+	row := citypemodel.CITypeTrigger{TypeID: 99, Notify: map[string]any{TriggerKeyEnable: true}}
+	row.ID = 702
+	repo.triggers = []citypemodel.CITypeTrigger{row}
+	tester := &fakeTriggerTester{}
+	uc := attrUsecase(repo).WithTriggerTester(tester)
+
+	err := uc.TestTrigger(context.Background(), "10", 702)
+	if !errors.Is(err, ErrRuleNotInType) {
+		t.Fatalf("error = %v, want ErrRuleNotInType", err)
+	}
+	if tester.called {
+		t.Fatal("tester was called for a trigger belonging to another model")
+	}
+}
+
+func TestTriggerAuthorizationPresenceIgnoresTheTypeMarker(t *testing.T) {
+	option := map[string]any{
+		TriggerKeyWebhooks: map[string]any{
+			"url": "https://example.test/hook",
+			WebhookAuthKey: map[string]any{
+				"type": "NIrYVege5aiBDqHQxXgvwQ==",
+			},
+		},
+	}
+	if HasTriggerAuthorization(option) {
+		t.Fatal("an authorization block carrying only the encrypted type has no credential to keep")
+	}
+	withCredential := map[string]any{
+		TriggerKeyWebhooks: map[string]any{
+			"url": "https://example.test/hook",
+			WebhookAuthKey: map[string]any{
+				"type":     "BasicAuth",
+				"username": "ops",
+				"password": "sealed",
+			},
+		},
+	}
+	if !HasTriggerAuthorization(withCredential) {
+		t.Fatal("a stored username/password must still be reported")
 	}
 }

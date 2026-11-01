@@ -79,6 +79,7 @@ type Usecase struct {
 	types       TypeResolver
 	log         *slog.Logger
 	fileCleaner FileCleaner
+	triggers    TriggerDispatcher
 
 	// Now is the clock the write path stamps defaults and audit rows with.
 	// Injected so a test can pin it; cantor read the wall clock inline, which
@@ -96,6 +97,14 @@ func NewUsecase(repo Repo, types TypeResolver, log *slog.Logger) *Usecase {
 		log: log.With(slog.String("comp", "cmdb-ci")),
 		Now: time.Now,
 	}
+}
+
+// WithTriggerDispatcher injects the optional trigger side effect. It is wired
+// at the composition root after both the instance and model-configuration use
+// cases exist, because the dispatcher reads the model's rules.
+func (u *Usecase) WithTriggerDispatcher(dispatcher TriggerDispatcher) *Usecase {
+	u.triggers = dispatcher
+	return u
 }
 
 // WriteRequest is one instance create or update.
@@ -203,7 +212,7 @@ func (u *Usecase) write(ctx context.Context, in WriteRequest, relations []Relati
 	// and closed it with a Redis lock keyed on the model's name; with no Redis
 	// the equivalent is a row lock inside the transaction, which only the
 	// repository can take.
-	return u.repo.WriteCI(ctx, WriteSpec{
+	result, err := u.repo.WriteCI(ctx, WriteSpec{
 		TypeRef: set.Type.Name, TypeID: set.Type.ID,
 		UniqueAttrID: set.UniqueAttrID, UniqueValue: uniqueRaw,
 		Policy: policy,
@@ -212,6 +221,17 @@ func (u *Usecase) write(ctx context.Context, in WriteRequest, relations []Relati
 		MarkAutoDiscovery: markAutoDiscovery,
 		Relations:         relations,
 	})
+	if err != nil {
+		return nil, err
+	}
+	kind := model.OperateUpdate
+	if result.Created {
+		kind = model.OperateAdd
+	}
+	if result.Created || len(result.Changes) > 0 {
+		u.dispatchAfterWrite(ctx, set, result.CIID, kind, result.Changes, in.Audit)
+	}
+	return result, nil
 }
 
 // Update writes values onto an existing instance, addressed by id.
@@ -285,6 +305,9 @@ func (u *Usecase) Update(ctx context.Context, ciID model.ID, in WriteRequest) (*
 		return nil, err
 	}
 	u.cleanupChangedFiles(ctx, set, oldFileRows, values)
+	if len(changes) > 0 {
+		u.dispatchAfterWrite(ctx, set, ciID, model.OperateUpdate, changes, in.Audit)
+	}
 	return &WriteResult{CIID: ciID, Created: false, Changes: changes}, nil
 }
 
@@ -306,18 +329,42 @@ func (u *Usecase) Delete(ctx context.Context, ciID model.ID) error {
 	// Collect the file values while the rows still exist. The delete itself is
 	// the primary operation; object cleanup is best effort and must not turn a
 	// successful CI deletion into an error.
-	var fileValues []string
-	if u.fileCleaner != nil && u.types != nil {
-		set, setErr := u.types.ResolveForCI(ctx, fmt.Sprint(ci.TypeID))
-		if setErr == nil && set != nil {
-			if rows, rowErr := u.repo.LoadValueRows(ctx, ciID); rowErr == nil {
-				fileValues = fileValuesForRows(set, rows)
-			}
+	//
+	// THE TRIGGER EVENT IS BUILT HERE TOO, before the row and its values are
+	// gone. cantor did the same: a delete rule's filter and its templates are
+	// evaluated against the instance as it stood, not against the empty shell
+	// that remains afterwards.
+	var set *AttributeSet
+	if u.types != nil && (u.fileCleaner != nil || u.triggers != nil) {
+		resolved, setErr := u.types.ResolveForCI(ctx, fmt.Sprint(ci.TypeID))
+		if setErr != nil {
+			u.log.Warn("cmdb ci: could not resolve the model for the delete event", slog.Any("err", setErr))
+		} else {
+			set = resolved
 		}
+	}
+	var rows []ValueRow
+	if set != nil && (u.fileCleaner != nil || u.triggers != nil) {
+		loaded, rowErr := u.repo.LoadValueRows(ctx, ciID)
+		if rowErr != nil {
+			u.log.Warn("cmdb ci: could not load values before delete", slog.Any("err", rowErr))
+		} else {
+			rows = loaded
+		}
+	}
+	var fileValues []string
+	if u.fileCleaner != nil && set != nil {
+		fileValues = fileValuesForRows(set, rows)
+	}
+	var firings []TriggerFiring
+	if set != nil && u.triggers != nil {
+		event := buildTriggerEvent(set, ciID, model.OperateDelete, nil, rows, AuditInfo{})
+		firings = u.prepareTrigger(ctx, set, event)
 	}
 	if err := u.repo.DeleteCI(ctx, ciID); err != nil {
 		return err
 	}
+	u.sendTrigger(firings)
 	u.cleanupDeletedFiles(fileValues)
 	return nil
 }

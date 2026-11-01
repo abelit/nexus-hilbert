@@ -91,6 +91,14 @@ func TestWriteCICreates(t *testing.T) {
 	if !res.Created || res.CIID == 0 {
 		t.Fatalf("result = %+v, want a create", res)
 	}
+	if len(res.Changes) == 0 {
+		t.Fatal("a create must report the changes its history rows describe")
+	}
+	for _, change := range res.Changes {
+		if change.RecordID == 0 {
+			t.Fatalf("change = %+v, want the operation record it was written under", change)
+		}
+	}
 
 	var ci cimodel.CI
 	if err := db.First(&ci, res.CIID).Error; err != nil {
@@ -149,6 +157,9 @@ func TestWriteCIAppliesTheExistPolicy(t *testing.T) {
 	}
 	if res.Created {
 		t.Fatal("Created = true, want the existing instance updated")
+	}
+	if len(res.Changes) == 0 || res.Changes[0].RecordID == 0 {
+		t.Fatalf("changes = %+v, want the update linked to its record", res.Changes)
 	}
 	if n := countCIs(t, db, f.ct.ID); n != 1 {
 		t.Fatalf("instances = %d, want one", n)

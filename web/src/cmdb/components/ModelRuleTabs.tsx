@@ -1,6 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Info, LayoutGrid, Network, Pencil, Plus, Table2, Trash2 } from 'lucide-react';
+import { Info, LayoutGrid, Network, Pencil, Plus, Send, Table2, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -33,6 +33,7 @@ import {
   relationChildren,
   relationParents,
   saveRelation,
+  testTrigger,
   updateTrigger,
   type CIType,
   type RelatedType,
@@ -979,7 +980,9 @@ function triggerIsDate(row: Trigger): boolean {
 }
 
 function triggerEnabled(row: Trigger): boolean {
-  return triggerOption(row).enable !== false;
+  const value = triggerOption(row).enable;
+  if (value === true || value === 1) return true;
+  return typeof value === 'string' && value.toLowerCase() === 'true';
 }
 
 function triggerTypeLabel(
@@ -1011,6 +1014,7 @@ export function TriggersTab({
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<Trigger | 'new' | null>(null);
   const [toggling, setToggling] = useState<number | null>(null);
+  const [testing, setTesting] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1064,6 +1068,19 @@ export function TriggersTab({
       toast.error(describeError(error, tr('无法更新触发器', 'Could not update the trigger')));
     } finally {
       setToggling(null);
+    }
+  };
+
+  const test = async (row: Trigger) => {
+    if (!isAdmin || testing === row.id) return;
+    setTesting(row.id);
+    try {
+      await testTrigger(modelRef, row.id);
+      toast.success(tr('测试请求已发送', 'Test request sent'));
+    } catch (error) {
+      toast.error(describeError(error, tr('测试失败', 'Test failed')));
+    } finally {
+      setTesting(null);
     }
   };
 
@@ -1140,8 +1157,8 @@ export function TriggersTab({
           )}{' '}
           <span className="text-amber-600 dark:text-amber-300">
             {tr(
-              '当前版本只保存配置，触发派发尚未接入。',
-              'This build stores the configuration only; dispatch is not wired yet.',
+              '数据事件触发器会在实例写入后发送 Webhook；通知投递和日期触发器尚未接入。',
+              'Data-event triggers send their webhook after an instance write; notification delivery and date triggers are not wired yet.',
             )}
           </span>
         </p>
@@ -1176,38 +1193,59 @@ export function TriggersTab({
           empty={tr('还没有触发器', 'No triggers yet')}
           tableClassName="cmdb-instance-table"
           scrollerClassName="cmdb-instance-table-scroll"
-          actions={(row) => (
-            <>
-              <Hint content={adminTip}>
-                <Button
-                  variant="plain"
-                  size="sm"
-                  type="button"
-                  onClick={() => setEditing(row)}
-                  disabled={!isAdmin}
-                  aria-label={tr(`编辑触发器 ${triggerName(row)}`, `Edit the trigger ${triggerName(row)}`)}
-                  title={tr('编辑', 'Edit')}
-                  className="cmdb-liquid-action-edit inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-                >
-                  <Pencil size={13} aria-hidden="true" />
-                </Button>
-              </Hint>
-              <Hint content={adminTip}>
-                <Button
-                  variant="plain"
-                  size="sm"
-                  type="button"
-                  onClick={() => void remove(row)}
-                  disabled={!isAdmin}
-                  aria-label={tr(`删除触发器 ${triggerName(row)}`, `Delete the trigger ${triggerName(row)}`)}
-                  title={tr('删除', 'Delete')}
-                  className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-                >
-                  <Trash2 size={13} aria-hidden="true" />
-                </Button>
-              </Hint>
-            </>
-          )}
+          actions={(row) => {
+            const testable =
+              !triggerIsDate(row) && Object.keys(recordOf(triggerOption(row).webhooks)).length > 0;
+            const testTip = testable
+              ? adminTip
+              : tr('只有 Webhook 触发器可以测试', 'Only webhook triggers can be tested');
+            return (
+              <>
+                <Hint content={testTip}>
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    onClick={() => void test(row)}
+                    disabled={!isAdmin || !testable || testing === row.id}
+                    aria-label={tr(`测试触发器 ${triggerName(row)}`, `Test the trigger ${triggerName(row)}`)}
+                    title={testable ? tr('测试', 'Test') : testTip}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0 text-text-faint hover:text-indigo-600 dark:hover:text-indigo-300"
+                  >
+                    <Send size={13} aria-hidden="true" />
+                  </Button>
+                </Hint>
+                <Hint content={adminTip}>
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    onClick={() => setEditing(row)}
+                    disabled={!isAdmin}
+                    aria-label={tr(`编辑触发器 ${triggerName(row)}`, `Edit the trigger ${triggerName(row)}`)}
+                    title={tr('编辑', 'Edit')}
+                    className="cmdb-liquid-action-edit inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+                  >
+                    <Pencil size={13} aria-hidden="true" />
+                  </Button>
+                </Hint>
+                <Hint content={adminTip}>
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    onClick={() => void remove(row)}
+                    disabled={!isAdmin}
+                    aria-label={tr(`删除触发器 ${triggerName(row)}`, `Delete the trigger ${triggerName(row)}`)}
+                    title={tr('删除', 'Delete')}
+                    className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+                  >
+                    <Trash2 size={13} aria-hidden="true" />
+                  </Button>
+                </Hint>
+              </>
+            );
+          }}
         />
       </div>
 
@@ -1370,7 +1408,7 @@ function TriggerDrawer({
   const [description, setDescription] = useState(() =>
     typeof option.description === 'string' ? option.description : '',
   );
-  const [enable, setEnable] = useState(option.enable !== false);
+  const [enable, setEnable] = useState(() => (row ? triggerEnabled(row) : true));
   const [category, setCategory] = useState<TriggerCategory>(isDate ? 'date' : 'data');
   const [event, setEvent] = useState<TriggerEventCode>(() => {
     const value = option.action;
@@ -1594,8 +1632,8 @@ function TriggerDrawer({
           <Info size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
           <span>
             {tr(
-              '当前版本只保存触发器配置；Webhook 与通知的触发派发尚未接入。',
-              'This build stores the trigger configuration only; webhook and notification dispatch are not wired yet.',
+              '数据事件 + Webhook 触发器会在实例写入提交后发送请求；通知与日期触发器仍只保存配置。',
+              'Data-event + webhook triggers send their request after an instance write commits; notification and date triggers still store configuration only.',
             )}
           </span>
         </div>

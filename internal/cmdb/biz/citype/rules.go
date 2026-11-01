@@ -58,14 +58,14 @@ var (
 	// the lookup turns that into a not-found.
 	ErrRuleNotInType = fmt.Errorf("%w: it belongs to a different model", errs.ErrNotFound)
 
-	// ErrTriggerDispatchUnsupported is returned by the manual test-fire route.
+	// ErrTriggerDispatchUnsupported is returned by the manual test-fire route
+	// when the process has no dispatcher wired.
 	//
-	// The trigger rows themselves are configuration and are fully supported;
-	// what the port does not have is the dispatch path — the outbound webhook
-	// and notification senders, and the CI write hook that decides when a
-	// trigger fires. Reporting that explicitly beats a route that appears to
-	// work and sends nothing.
-	ErrTriggerDispatchUnsupported = fmt.Errorf("%w: trigger dispatch is not implemented in this build", errs.ErrNotWiredYet)
+	// PRODUCTION WIRES ONE. The fallback exists for a test build or a future
+	// composition that omits the sender: reporting "not implemented" is still
+	// better than a 200 that sends nothing, but it is no longer the normal
+	// answer for an installed service.
+	ErrTriggerDispatchUnsupported = fmt.Errorf("%w: trigger dispatch is not wired in this build", errs.ErrNotWiredYet)
 )
 
 // Trigger option keys. cantor's option column is an open-ended JSON document,
@@ -270,9 +270,20 @@ func TriggerAuthorization(option map[string]any) map[string]string {
 }
 
 // HasTriggerAuthorization reports whether the option carries stored
-// authorization values, without exposing them.
+// CREDENTIAL values, without exposing them.
+//
+// THE TYPE MARKER ALONE IS NOT A CREDENTIAL. An adopted row can carry an
+// encrypted `type` and nothing else — the real token may live in the Headers
+// tab — and reporting that as "a credential is stored" makes the console hide
+// the actual state. Key names other than `type` are what the dispatcher can
+// present to the receiver.
 func HasTriggerAuthorization(option map[string]any) bool {
-	return len(TriggerAuthorization(option)) > 0
+	for key := range TriggerAuthorization(option) {
+		if key != "type" {
+			return true
+		}
+	}
+	return false
 }
 
 // TriggerAuthorizationProvided reports whether an option SPEAKS about the

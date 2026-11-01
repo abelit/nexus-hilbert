@@ -45,13 +45,28 @@ import (
 // buildHandlers constructs the CMDB use cases and handlers in the same order
 // as cmd/ongrid's historical wiring. The cross-package ports stay in this
 // assembly layer: neither business package imports the other's implementation.
-func buildHandlers(db *gorm.DB, log *slog.Logger, fileOpts cmdbfilebiz.Options) cmdbserver.Handlers {
+func buildHandlers(db *gorm.DB, log *slog.Logger, fileOpts cmdbfilebiz.Options) (cmdbserver.Handlers, func(context.Context) error) {
 	citypeUC := cmdbcitypebiz.NewUsecase(cmdbcitypedata.NewRepo(db), log)
 	ciUC := cmdbcibiz.NewUsecase(
 		cmdbcistore.NewRepo(db),
 		cmdbcitypebiz.NewCIResolver(citypeUC),
 		log,
 	)
+	historyRepo := cmdbhistorydata.NewRepo(db)
+
+	// The trigger dispatcher sits between the two use cases. The instance write
+	// prepares firings from the model's rules; the model-configuration side
+	// supplies the rules and exposes the manual test route. The history repo is
+	// the one writer of a firing outcome.
+	triggerEngine := cmdbcibiz.NewTriggerEngine(
+		ciUC,
+		cmdbcitypebiz.NewTriggerSource(citypeUC),
+		historyRepo,
+		log,
+	).WithSampleSource(ciUC)
+	ciUC.WithTriggerDispatcher(triggerEngine)
+	citypeUC.WithTriggerTester(triggerEngine)
+
 	discoveryRepo := cmdbdiscoverydata.NewRepo(db)
 	discoveryUC := cmdbdiscoverybiz.NewUsecase(discoveryRepo).
 		WithModels(cmdbcitypebiz.NewDiscoveryResolver(citypeUC)).
@@ -63,7 +78,7 @@ func buildHandlers(db *gorm.DB, log *slog.Logger, fileOpts cmdbfilebiz.Options) 
 		WithWriter(cmdbcibiz.NewDiscoveryWriter(ciUC)).
 		WithAttributes(cmdbcitypebiz.NewDiscoveryAttributeResolver(citypeUC))
 
-	historyUC := cmdbhistorybiz.NewUsecase(cmdbhistorydata.NewRepo(db)).
+	historyUC := cmdbhistorybiz.NewUsecase(historyRepo).
 		WithTypeNames(cmdbcitypebiz.NewHistoryTypeNames(citypeUC)).
 		WithAttributes(cmdbcitypebiz.NewHistoryAttributes(citypeUC)).
 		WithCINames(cmdbcibiz.NewHistoryCINames(ciUC))
@@ -84,6 +99,8 @@ func buildHandlers(db *gorm.DB, log *slog.Logger, fileOpts cmdbfilebiz.Options) 
 		CIType:       cmdbcitypeserver.NewHandler(citypeUC),
 		CI:           cmdbciserver.NewHandler(ciUC),
 		File:         cmdbfileserver.NewHandler(fileUC),
+	}, func(ctx context.Context) error {
+		return triggerEngine.Close(ctx)
 	}
 }
 

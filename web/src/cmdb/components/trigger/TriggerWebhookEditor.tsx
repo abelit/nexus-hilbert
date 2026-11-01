@@ -230,6 +230,9 @@ export function TriggerWebhookEditor({
   };
 
   const authValue = authorizationValues(auth);
+  const hasAuthorizationHeader = Object.keys(value.headers).some(
+    (key) => key.toLowerCase() === 'authorization',
+  );
 
   return (
     <div className="space-y-3">
@@ -321,6 +324,19 @@ export function TriggerWebhookEditor({
                 '已存有一组凭据。留空保持不变；填写即替换。',
                 'A credential is stored. Leave the fields empty to keep it, or fill them in to replace it.',
               )}
+            </p>
+          )}
+          {hasAuthorizationHeader && (
+            <p className="text-[11px] text-text-faint">
+              {Object.keys(authValue).length === 0
+                ? tr(
+                    'Headers 中已设置 Authorization，将直接使用该值；在这里填写凭据会覆盖它。',
+                    'An Authorization header is configured and will be used as-is; credentials here override it.',
+                  )
+                : tr(
+                    '这里的凭据会覆盖 Headers 中的 Authorization。',
+                    'These credentials override the Authorization header.',
+                  )}
             </p>
           )}
         </TabsContent>

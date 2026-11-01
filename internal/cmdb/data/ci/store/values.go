@@ -48,7 +48,8 @@ func (r *Repo) CreateCIWithValues(ctx context.Context, in cibiz.CreateInput) (*c
 
 	ci := *in.CI
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return insertCIWithValues(tx, &ci, in.Specs, in.Values, in.Audit)
+		_, err := insertCIWithValues(tx, &ci, in.Specs, in.Values, in.Audit)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -61,7 +62,11 @@ func (r *Repo) CreateCIWithValues(ctx context.Context, in cibiz.CreateInput) (*c
 // It is split out so the transactional write path can run it inside ITS
 // transaction, together with the unique-value lookup and the per-model lock.
 // Two transactions would leave the gap that the lock exists to close.
-func insertCIWithValues(tx *gorm.DB, ci *cimodel.CI, specs map[cmdbmodel.ID]cibiz.AttributeSpec, values map[cmdbmodel.ID]any, audit cibiz.AuditInfo) error {
+//
+// It returns the attribute-level changes, each carrying the operation record
+// its history row was written under. The trigger dispatcher uses that record to
+// link a firing back to the write.
+func insertCIWithValues(tx *gorm.DB, ci *cimodel.CI, specs map[cmdbmodel.ID]cibiz.AttributeSpec, values map[cmdbmodel.ID]any, audit cibiz.AuditInfo) ([]cibiz.Change, error) {
 	// The CI carries the same audit label as an update, so the detail header can
 	// name the creator before the first edit. A system write (import, discovery)
 	// has no email and leaves the column empty, which the console hides.
@@ -72,15 +77,15 @@ func insertCIWithValues(tx *gorm.DB, ci *cimodel.CI, specs map[cmdbmodel.ID]cibi
 	// The CI must exist before values can reference it, so the plan is built
 	// with the assigned id rather than a placeholder.
 	if err := tx.Create(ci).Error; err != nil {
-		return fmt.Errorf("insert CI: %w", err)
+		return nil, fmt.Errorf("insert CI: %w", err)
 	}
 
 	plan, changes, err := planUpsert(ci.ID, ci.TypeID, specs, nil, values)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := applyPlan(tx, ci.ID, plan); err != nil {
-		return err
+		return nil, err
 	}
 
 	// The document is rendered from the FINAL rows, so it cannot disagree with
@@ -88,15 +93,18 @@ func insertCIWithValues(tx *gorm.DB, ci *cimodel.CI, specs map[cmdbmodel.ID]cibi
 	final := applyPlanToRows(nil, plan)
 	doc, err := buildProps(specs, final, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := tx.Model(&cimodel.CI{}).Where("id = ?", ci.ID).
 		Update("props_json", doc).Error; err != nil {
-		return fmt.Errorf("write CI document: %w", err)
+		return nil, fmt.Errorf("write CI document: %w", err)
 	}
 	ci.PropsJSON = doc
 
-	return writeAudit(tx, ci.TypeID, changes, audit)
+	if err := writeAudit(tx, ci.TypeID, changes, audit); err != nil {
+		return nil, err
+	}
+	return changes, nil
 }
 
 // UpsertCIValues applies value changes to an existing CI in one transaction.
@@ -412,7 +420,12 @@ func writeAudit(tx *gorm.DB, typeID cmdbmodel.ID, changes []cibiz.Change, in cib
 		return fmt.Errorf("insert operation record: %w", err)
 	}
 	operate := string(cmdbmodel.OperateAdd)
-	for _, chg := range changes {
+	for i := range changes {
+		chg := changes[i]
+		// Every change in one write shares the record, and the caller gets the
+		// id back so a trigger firing can point at it. The slice is modified in
+		// place, which is why the parameter is not copied.
+		changes[i].RecordID = rec.ID
 		history := &cimodel.AttributeHistory{
 			RecordID:    rec.ID,
 			CIID:        chg.CIID,

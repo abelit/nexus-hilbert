@@ -22,7 +22,7 @@ import (
 //	POST   /v1/cmdb/ci-types/{ref}/triggers                        (admin)
 //	PUT    /v1/cmdb/ci-types/{ref}/triggers/{id}                   (admin)
 //	DELETE /v1/cmdb/ci-types/{ref}/triggers/{id}                   (admin)
-//	POST   /v1/cmdb/ci-types/{ref}/triggers/{id}/test              (admin) — 501
+//	POST   /v1/cmdb/ci-types/{ref}/triggers/{id}/test              (admin) — fire now
 //
 // THE READS ARE ADMIN-GATED TOO, which is deliberate and does not match the
 // attribute routes. cantor gated these two on CONFIG as well, and for a reason:
@@ -225,13 +225,12 @@ func (h *Handler) deleteTrigger(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// testTrigger reports that dispatch is not implemented.
+// testTrigger fires one rule immediately.
 //
-// cantor's route fired the trigger's webhook or notification immediately. The
-// port has neither sender nor the CI hook that decides when a trigger fires, so
-// the route answers 501 with a slug rather than 200 with nothing sent — an
-// operator told "test sent" would spend the afternoon debugging their webhook
-// endpoint instead of the missing implementation.
+// The route is synchronous and reports a failed delivery as an error, because
+// the operator pressed a button and is waiting for the answer. It answers 501
+// only when the dispatcher is not wired (a test build), never when a configured
+// receiver refused the request.
 func (h *Handler) testTrigger(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {

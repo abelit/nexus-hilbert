@@ -345,7 +345,7 @@ func applyAddressChangeTx(ctx context.Context, tx *gorm.DB, change cibiz.Address
 		}
 
 		row := &cimodel.CI{TypeID: change.SubnetTypeID}
-		if err := insertCIWithValues(tx, row, change.AddressSpecs, values, change.Audit); err != nil {
+		if _, err := insertCIWithValues(tx, row, change.AddressSpecs, values, change.Audit); err != nil {
 			return result, err
 		}
 		if err := relateToSubnetTx(tx, change, row.ID); err != nil {

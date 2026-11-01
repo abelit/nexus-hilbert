@@ -469,6 +469,17 @@ export function deleteTrigger(ref: string | number, id: number): Promise<void> {
   return cmdbDelete(`/ci-types/${encodeURIComponent(String(ref))}/triggers/${id}`);
 }
 
+/**
+ * Fires one stored trigger immediately.
+ *
+ * The backend sends the webhook synchronously and reports a receiver refusal as
+ * an error, so the button's toast is the delivery result rather than an
+ * acknowledgement that the request was queued.
+ */
+export function testTrigger(ref: string | number, id: number): Promise<void> {
+  return cmdbPost<void>(`/ci-types/${encodeURIComponent(String(ref))}/triggers/${id}/test`);
+}
+
 // --- plumbing ---
 
 /**

@@ -130,7 +130,7 @@ func main() {
 	}
 
 	s3UseSSL := cfg.FileStorage.S3UseSSL
-	handlers := buildHandlers(db, log, cmdbfilebiz.Options{
+	handlers, closeTriggers := buildHandlers(db, log, cmdbfilebiz.Options{
 		DefaultLocalPath:        cfg.FileStorage.LocalDir,
 		DefaultStorageBackend:   cfg.FileStorage.Backend,
 		DefaultS3EndpointURL:    cfg.FileStorage.S3EndpointURL,
@@ -158,6 +158,15 @@ func main() {
 	eg.Go(func() error { return metricsServer.Start(egCtx) })
 	if err := eg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		fatal(log, "service stopped with error", err)
+	}
+
+	// The HTTP servers have stopped, so no more writes can enqueue firings.
+	// Draining here gives the queued ones their deadline instead of dropping
+	// them at process exit.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := closeTriggers(shutdownCtx); err != nil {
+		log.Warn("trigger dispatcher did not drain", slog.Any("err", err))
 	}
 	log.Info("shutdown complete", slog.String("version", version))
 }

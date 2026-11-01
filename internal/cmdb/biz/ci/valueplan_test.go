@@ -447,3 +447,25 @@ func contains(haystack, needle string) bool {
 	}
 	return false
 }
+
+func TestPlanSingleValuedRepairsDuplicateRowsInsteadOfAddingAnother(t *testing.T) {
+	specs := specsOf(spec(1, "mon_url", value.TypeText, unindexed))
+	existing := []ValueRow{
+		{RowID: 1, AttrID: 1, Table: value.TableTexts, Text: "old"},
+		{RowID: 2, AttrID: 1, Table: value.TableTexts, Text: "new"},
+		{RowID: 3, AttrID: 1, Table: value.TableTexts, Text: "new"},
+	}
+	plan, changes, err := PlanValueUpsert(10, 3, specs, existing, map[model.ID]any{1: "new"})
+	if err != nil {
+		t.Fatalf("plan error = %v", err)
+	}
+	if len(plan.Inserts) != 0 {
+		t.Fatalf("inserts = %+v, want none: a row already holds the value", plan.Inserts)
+	}
+	if len(plan.Deletes) != 2 || plan.Deletes[0].RowID != 1 || plan.Deletes[1].RowID != 3 {
+		t.Fatalf("deletes = %+v, want the stale row and the duplicate", plan.Deletes)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("changes = %+v, want a silent repair", changes)
+	}
+}

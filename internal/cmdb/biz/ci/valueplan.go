@@ -85,6 +85,11 @@ type Change struct {
 	Old       any
 	New       any
 	IsDynamic bool
+
+	// RecordID is the operation record the change was written under. It is
+	// filled in by the store after the record row exists, and is what lets a
+	// trigger firing point back at the write that caused it.
+	RecordID model.ID
 }
 
 // ValuePlan is the ordered set of row mutations for one write.
@@ -234,13 +239,31 @@ func planSingleValued(
 	}
 
 	var plan ValuePlan
-	// cantor reads a single existing row; extra rows would be a data defect,
-	// so all of them are replaced rather than leaving orphans behind.
+	// A row already holding the new value is KEPT, not replaced. The old code
+	// deleted the differing rows and then inserted another copy anyway, so a
+	// repeated edit of a single-valued attribute accumulated duplicate rows —
+	// and the next read's "last row wins" could show a stale value.
+	keptMatch := false
 	for _, row := range rows {
 		if rowText(row) == fmt.Sprint(stored) {
+			if keptMatch {
+				plan.Deletes = append(plan.Deletes, ValueOp{Kind: OpDelete, Table: table, AttrID: spec.ID, RowID: row.RowID})
+				continue
+			}
+			keptMatch = true
 			continue
 		}
 		plan.Deletes = append(plan.Deletes, ValueOp{Kind: OpDelete, Table: table, AttrID: spec.ID, RowID: row.RowID})
+	}
+
+	var changes []Change
+	if keptMatch {
+		if len(plan.Deletes) == 0 {
+			return ValuePlan{}, nil, nil
+		}
+		// Only stale duplicates were removed; the value itself did not change.
+		// Repairing them must not emit a history row or fire a trigger.
+		return plan, changes, nil
 	}
 
 	insert, err := buildInsert(spec.ID, table, spec.ValueType, stored)
@@ -248,15 +271,10 @@ func planSingleValued(
 		return ValuePlan{}, nil, err
 	}
 
-	var changes []Change
 	if len(rows) == 0 {
 		plan.Inserts = append(plan.Inserts, insert)
 		changes = appendChange(changes, spec, ciID, typeID, model.OperateAdd, nil, stored)
 		return plan, changes, nil
-	}
-	// Only a real difference is a change; an identical value is a no-op.
-	if len(plan.Deletes) == 0 {
-		return ValuePlan{}, nil, nil
 	}
 	plan.Inserts = append(plan.Inserts, insert)
 	changes = appendChange(changes, spec, ciID, typeID, model.OperateUpdate, rowText(rows[0]), stored)

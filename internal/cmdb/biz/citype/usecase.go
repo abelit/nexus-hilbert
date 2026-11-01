@@ -17,6 +17,16 @@ import (
 type Usecase struct {
 	repo Repo
 	log  *slog.Logger
+
+	// triggerTester is the optional manual test-fire path. It lives behind an
+	// interface because the sender belongs to the instance side; this package
+	// owns the rule and its ownership check, not the outbound request.
+	triggerTester TriggerTester
+}
+
+// TriggerTester fires one stored rule on demand.
+type TriggerTester interface {
+	TestTrigger(ctx context.Context, triggerID model.ID) error
 }
 
 // NewUsecase builds the usecase. A nil logger falls back to slog.Default.
@@ -25,6 +35,13 @@ func NewUsecase(repo Repo, log *slog.Logger) *Usecase {
 		log = slog.Default()
 	}
 	return &Usecase{repo: repo, log: log.With(slog.String("comp", "cmdb-citype"))}
+}
+
+// WithTriggerTester injects the optional dispatcher. The assembly layer wires
+// it after both use cases exist.
+func (u *Usecase) WithTriggerTester(tester TriggerTester) *Usecase {
+	u.triggerTester = tester
+	return u
 }
 
 // View is a CI type enriched with the derived fields the console needs.

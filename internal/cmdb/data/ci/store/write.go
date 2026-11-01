@@ -132,7 +132,8 @@ func writeCITx(tx *gorm.DB, in cibiz.WriteSpec) (cibiz.WriteResult, error) {
 	}
 
 	ci := &cimodel.CI{TypeID: in.TypeID, IsAutoDiscovery: in.MarkAutoDiscovery}
-	if err := insertCIWithValues(tx, ci, in.Specs, in.Values, in.Audit); err != nil {
+	changes, err := insertCIWithValues(tx, ci, in.Specs, in.Values, in.Audit)
+	if err != nil {
 		return result, err
 	}
 	// The containment edge is written HERE rather than by the caller
@@ -155,7 +156,7 @@ func writeCITx(tx *gorm.DB, in cibiz.WriteSpec) (cibiz.WriteResult, error) {
 	if err := writeRelationSpecsTx(tx, ci.ID, in); err != nil {
 		return result, err
 	}
-	return cibiz.WriteResult{CIID: ci.ID, Created: true}, nil
+	return cibiz.WriteResult{CIID: ci.ID, Created: true, Changes: changes}, nil
 }
 
 // writeRelationSpecsTx lays down the edges a discovered instance established.

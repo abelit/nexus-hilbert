@@ -832,6 +832,8 @@ describe('the triggers tab', () => {
     expect(screen.getByRole('switch', { name: '启用 warranty reminder' })).not.toBeChecked();
     expect(screen.getByRole('button', { name: '编辑触发器 notify ops' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '删除触发器 notify ops' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '测试触发器 notify ops' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '测试触发器 warranty reminder' })).toBeDisabled();
 
     const table = screen.getByRole('table');
     expect(table).toHaveClass('cmdb-instance-table');
@@ -867,6 +869,54 @@ describe('the triggers tab', () => {
     expect(patched!.option.action).toBe('2');
     expect(patched!.option.attr_ids).toEqual([10]);
     expect(patched!.option.webhooks).toEqual({ url: 'https://example.test/hook' });
+  });
+
+  it('fires a trigger from the row and reports the delivery', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    triggerHandlers();
+    let tested = false;
+    server.use(
+      http.post('/api/v1/cmdb/ci-types/1/triggers/51/test', () => {
+        tested = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '触发器' }));
+    await user.click(await screen.findByRole('button', { name: '测试触发器 notify ops' }));
+
+    await waitFor(() => expect(tested).toBe(true));
+    expect(await screen.findByText('测试请求已发送')).toBeInTheDocument();
+  });
+
+  it('shows a trigger without an explicit enable flag as disabled', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/triggers', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 53,
+              type_id: 1,
+              option: {
+                name: 'legacy trigger',
+                action: '0',
+                webhooks: { url: 'https://example.test/legacy' },
+              },
+              has_webhook_authorization: false,
+            },
+          ],
+          total: 1,
+        }),
+      ),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '触发器' }));
+    expect(await screen.findByRole('switch', { name: '启用 legacy trigger' })).not.toBeChecked();
   });
 
   it('creates a trigger with cantor event codes and update-only attribute scope', async () => {
@@ -917,6 +967,39 @@ describe('the triggers tab', () => {
         authorization: {},
       },
     });
+  });
+
+  it('preserves a data trigger event when only metadata changes', async () => {
+    const user = userEvent.setup();
+    baseHandlers();
+    triggerHandlers();
+    let patched: TriggerWriteBody | null = null;
+    server.use(
+      http.put('/api/v1/cmdb/ci-types/1/triggers/51', async ({ request }) => {
+        patched = (await request.json()) as TriggerWriteBody;
+        return HttpResponse.json({
+          id: 51,
+          type_id: 1,
+          option: patched.option,
+          has_webhook_authorization: true,
+        });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: '触发器' }));
+    await user.click(await screen.findByRole('button', { name: '编辑触发器 notify ops' }));
+
+    const dialog = await screen.findByRole('dialog');
+    const nameInput = within(dialog).getByLabelText('名称');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'renamed ops');
+    await user.click(within(dialog).getByRole('button', { name: '确定' }));
+
+    await waitFor(() => expect(patched).not.toBeNull());
+    expect(patched!.option.action).toBe('2');
+    expect(patched!.option.attr_ids).toEqual([10]);
+    expect(patched!.option.webhooks).toMatchObject({ url: 'https://example.test/hook' });
   });
 
   it('preserves an imported cantor date/notify trigger when only metadata changes', async () => {

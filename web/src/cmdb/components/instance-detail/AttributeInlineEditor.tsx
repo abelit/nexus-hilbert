@@ -178,7 +178,10 @@ export function AttributeInlineEditor({
       type={type}
       isList={attribute.is_list}
       value={draft}
-      onChange={setDraft}
+      // A boolean switch is an instant control: `setDraft` alone would leave
+      // the new value in local state and the blur handler would cancel it, so
+      // the switch would visibly flip and never write.
+      onChange={type === '7' ? choose : setDraft}
       disabled={saving}
       placeholder={label}
       aria-label={label}

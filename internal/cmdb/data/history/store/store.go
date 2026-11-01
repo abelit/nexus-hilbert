@@ -13,12 +13,15 @@ import (
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
 )
 
-// Repo implements the history reads over GORM.
+// Repo implements the history reads over GORM, plus the one write the
+// dispatcher owns.
 //
-// THE HISTORY IS NOT WRITTEN HERE. The instance and model-configuration paths
-// already write `c_records` and the four history tables inside the transaction
-// that makes the change; this package only joins them. A second writer would be
-// a second truth about what an audit row means.
+// THE CHANGE HISTORY IS NOT WRITTEN HERE. The instance and model-configuration
+// paths already write `c_records` and the four history tables inside the
+// transaction that makes the change; this package only joins them. The
+// exception is a trigger FIRING, which has no transaction of its own: it is the
+// outcome of an outbound request made after the write committed, and the
+// dispatcher records it through InsertTriggerRecord.
 type Repo struct {
 	db *gorm.DB
 }
@@ -230,6 +233,21 @@ func (r *Repo) ListTypeRecords(ctx context.Context, f historybiz.TypeFilter) ([]
 }
 
 // --- trigger history ---
+
+// InsertTriggerRecord persists one firing outcome.
+//
+// IT IS APPEND-ONLY BY DESIGN. A trigger row may be soft-deleted and its firing
+// rows must survive it — "why did this fire last week" is asked after the rule
+// is gone. The caller passes a fully built row; this method only writes it.
+func (r *Repo) InsertTriggerRecord(ctx context.Context, row *cimodel.TriggerHistory) error {
+	if row == nil {
+		return fmt.Errorf("cmdb history: insert trigger record: nil row")
+	}
+	if err := r.db.WithContext(ctx).Create(row).Error; err != nil {
+		return fmt.Errorf("cmdb history: insert trigger record: %w", err)
+	}
+	return nil
+}
 
 type triggerJoin struct {
 	cimodel.TriggerHistory

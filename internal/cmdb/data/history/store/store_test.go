@@ -333,3 +333,35 @@ func TestListAttributeRecordsCarriesSensitivityFromTheDictionary(t *testing.T) {
 		t.Fatalf("row 2 (cpu) marked sensitive: %+v", byID[2])
 	}
 }
+
+func TestInsertTriggerRecordPersistsOneFiring(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewRepo(db)
+	webhook := `{"ok":true}`
+	action := "2"
+	row := &cimodel.TriggerHistory{
+		OperateType: &action,
+		RecordID:    ptr(model.ID(1)),
+		CIID:        100,
+		TriggerID:   ptr(model.ID(4)),
+		TriggerName: ptr("notify"),
+		IsOK:        true,
+		Webhook:     &webhook,
+	}
+	if err := repo.InsertTriggerRecord(context.Background(), row); err != nil {
+		t.Fatalf("InsertTriggerRecord: %v", err)
+	}
+	if row.ID == 0 {
+		t.Fatal("insert did not assign an id")
+	}
+	var got cimodel.TriggerHistory
+	if err := db.First(&got, row.ID).Error; err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.CIID != 100 || got.TriggerName == nil || *got.TriggerName != "notify" || !got.IsOK {
+		t.Fatalf("row = %+v", got)
+	}
+	if got.Webhook == nil || *got.Webhook != webhook || got.RecordID == nil || *got.RecordID != 1 {
+		t.Fatalf("row = %+v", got)
+	}
+}

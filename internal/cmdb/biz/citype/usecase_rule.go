@@ -421,12 +421,12 @@ func (u *Usecase) DeleteTrigger(ctx context.Context, ref string, id model.ID, ac
 	})
 }
 
-// TestTrigger reports that dispatch is not implemented.
+// TestTrigger fires a stored rule immediately through the injected dispatcher.
 //
-// cantor's route fired the trigger's webhook or notification immediately. The
-// port has neither sender, and a route that answers 200 while sending nothing
-// is worse than one that says so — the operator would be debugging the wrong
-// side of the system.
+// THE OWNERSHIP CHECK STAYS HERE, before the sender is called: a caller
+// authorised for model A must not be able to fire a rule belonging to model B
+// by naming its id. The dispatcher owns the request and records the outcome;
+// this package owns the rule and the permission boundary.
 func (u *Usecase) TestTrigger(ctx context.Context, ref string, id model.ID) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
@@ -441,7 +441,10 @@ func (u *Usecase) TestTrigger(ctx context.Context, ref string, id model.ID) erro
 	if _, err := u.triggerInType(ctx, view.Type.ID, id); err != nil {
 		return err
 	}
-	return ErrTriggerDispatchUnsupported
+	if u.triggerTester == nil {
+		return ErrTriggerDispatchUnsupported
+	}
+	return u.triggerTester.TestTrigger(ctx, id)
 }
 
 // triggerInType loads a trigger and refuses one belonging to another model.
