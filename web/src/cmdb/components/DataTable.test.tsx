@@ -86,6 +86,34 @@ describe('sorting', () => {
   });
 });
 
+describe('caller styling', () => {
+  it('applies the caller’s scroller class', () => {
+    const { container } = render(
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        scrollerClassName="cmdb-instance-table-scroll"
+      />,
+    );
+    expect(container.querySelector('.cmdb-instance-table-scroll')).not.toBeNull();
+  });
+
+  it('applies the caller’s table class without dropping the shared ones', () => {
+    render(
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        tableClassName="cmdb-instance-table"
+      />,
+    );
+    const table = screen.getByRole('table');
+    expect(table).toHaveClass('og-resource-table');
+    expect(table).toHaveClass('cmdb-instance-table');
+  });
+});
+
 describe('actions', () => {
   it('drops the action column below the caller’s breakpoint', () => {
     const original = window.innerWidth;

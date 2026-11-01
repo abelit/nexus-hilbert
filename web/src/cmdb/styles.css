@@ -362,6 +362,122 @@ html.dark .cmdb-liquid .cmdb-liquid-action-danger {
   text-underline-offset: 3px;
 }
 
+/* ---------------------------------------------------------------
+   Resource table — the calm data surface chosen for the instances list.
+
+   THE SCROLLER IS THE CARD, not the workspace panel. It hugs a short table
+   (flex: 0 1 auto) and only reaches the available height when the rows need to
+   scroll. That keeps a two-row result from leaving a large glass plate below
+   it, while the sticky header still belongs to the vertical scroller.
+   --------------------------------------------------------------- */
+.cmdb-liquid .cmdb-instance-table-scroll {
+  flex: 0 1 auto;
+  max-height: 100%;
+  overflow-y: auto;
+  border: 1px solid var(--liquid-border-soft);
+  border-radius: 14px;
+  background: rgb(var(--card));
+  box-shadow: 0 16px 40px rgb(15 23 42 / 0.08);
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--text) / 0.22) transparent;
+}
+
+html.dark .cmdb-liquid .cmdb-instance-table-scroll {
+  box-shadow: 0 20px 50px rgb(0 0 0 / 0.28);
+}
+
+.cmdb-liquid .cmdb-instance-table {
+  font-size: 12px;
+}
+
+.cmdb-liquid .cmdb-instance-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--liquid-border-soft);
+  background: rgb(var(--card));
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.cmdb-liquid .cmdb-instance-table tbody td {
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+.cmdb-liquid .cmdb-instance-table tbody tr {
+  border-bottom-color: var(--liquid-border-soft);
+}
+
+/* A quiet accent on the row's first cell: hover is a hint, selection is a state. */
+.cmdb-liquid .cmdb-instance-table tbody tr:hover > td:first-child {
+  box-shadow: inset 2px 0 0 rgb(99 102 241 / 0.45);
+}
+
+.cmdb-liquid .cmdb-instance-table tbody tr[data-selected] > td:first-child {
+  box-shadow: inset 2px 0 0 rgb(99 102 241);
+}
+
+/* The action column is horizontally static below 2xl (the design language's
+   rule against a pinned column covering data). The header still sticks
+   vertically, but it must not keep `right: 0` and ride over the other columns. */
+@media (max-width: 1535.98px) {
+  .cmdb-liquid .cmdb-instance-table thead th.sticky {
+    right: auto;
+  }
+
+  /* With the action column static, its cells must share the row surface rather
+     than keeping the pinned column's slightly different fill. */
+  .cmdb-liquid .cmdb-instance-table.og-action-table thead th.sticky {
+    background-color: rgb(var(--card));
+  }
+
+  .cmdb-liquid .cmdb-instance-table.og-action-table tbody tr > td.sticky,
+  .cmdb-liquid .cmdb-instance-table.og-action-table tbody tr:hover > td.sticky {
+    background-color: transparent;
+  }
+}
+
+.cmdb-instance-identity {
+  color: rgb(var(--text));
+  font-weight: 600;
+}
+
+/* Row actions stay quiet until the row is used; the grid keeps its own colours. */
+.cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-view,
+.cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-topology,
+.cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-edit,
+.cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-danger,
+html.dark .cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-view,
+html.dark .cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-topology,
+html.dark .cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-edit,
+html.dark .cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-danger {
+  color: rgb(var(--text-faint));
+}
+
+.cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-view:hover:not(:disabled),
+.cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-topology:hover:not(:disabled),
+.cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-edit:hover:not(:disabled) {
+  background: rgb(var(--text) / 0.06);
+  color: rgb(var(--text));
+  text-decoration: none;
+}
+
+.cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-danger:hover:not(:disabled) {
+  background: rgb(225 29 72 / 0.08);
+  color: rgb(225 29 72);
+  text-decoration: none;
+}
+
+html.dark .cmdb-liquid .cmdb-instance-table .cmdb-liquid-action-danger:hover:not(:disabled) {
+  color: rgb(251 113 133);
+}
+
 .cmdb-liquid-policy {
   display: inline-flex;
   align-items: center;

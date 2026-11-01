@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router-dom';
@@ -149,6 +149,61 @@ describe('the list', () => {
     // THE SUBSCRIPTION IS THE COLUMN SET: an attribute nobody subscribed to is
     // not a column, even though the row carries it.
     expect(screen.queryByRole('columnheader', { name: 'root_password' })).not.toBeInTheDocument();
+  });
+
+  it('puts the identifying attribute first, regardless of the field order', async () => {
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
+    // The operator subscribed note first; the identity column still leads.
+    server.use(
+      http.get('/api/v1/cmdb/preferences/ci-types/host/fields', () =>
+        HttpResponse.json({
+          type_id: 1,
+          is_subscribed: true,
+          fields: [
+            { attr_id: 11, is_fixed: false },
+            { attr_id: 10, is_fixed: true },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    await screen.findByText('web-01');
+    const headers = screen
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent?.trim())
+      .filter(Boolean);
+    expect(headers.slice(0, 2)).toEqual(['hostname', 'note']);
+  });
+
+  it('shortens a UUID identifier and copies the full value', async () => {
+    const uuid = '0ab8d7d1-c9f4-40cc-b3a1-9ebd4ff4a4c0';
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: uuid, note: 'hello' } }]);
+    renderPage();
+
+    expect(await screen.findByText('0ab8d7d1…a4c0')).toBeInTheDocument();
+    // The full identifier is available as a tooltip, not as a wall of text.
+    expect(screen.queryByText(uuid)).not.toBeInTheDocument();
+
+    // userEvent installs its own clipboard stub; fireEvent keeps the spy above.
+    fireEvent.click(screen.getByRole('button', { name: /复制 hostname/ }));
+    expect(writeText).toHaveBeenCalledWith(uuid);
+    expect(await screen.findByText('已复制')).toBeInTheDocument();
+  });
+
+  it('puts the resource table on its own card surface', async () => {
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
+    renderPage();
+
+    await screen.findByText('web-01');
+    const table = screen.getByRole('table');
+    expect(table).toHaveClass('cmdb-instance-table');
+    expect(table.parentElement).toHaveClass('cmdb-instance-table-scroll');
   });
 
   it('searches the whole model through /ci/s on Enter and clears back to the list', async () => {

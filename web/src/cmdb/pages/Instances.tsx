@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
   ChevronDown,
   ChevronRight,
+  Copy,
   Eye,
   FileUp,
   Folder,
@@ -96,6 +97,34 @@ const EXPORT_PAGE_SIZE = 500;
 const EXPORT_MAX_ROWS = 10_000;
 
 type View = 'table' | 'grid';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A UUID is an identifier, not prose: shorten it and let the operator copy it. */
+function isUUID(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
+function shortUUID(value: string): string {
+  return `${value.slice(0, 8)}…${value.slice(-4)}`;
+}
+
+/**
+ * The attribute a row is named by: the model's configured show field, then a
+ * conventional `name`, then the unique field. The grid and the table both use
+ * it so a row is called the same thing in either view.
+ */
+function identityAttribute(
+  columns: TypeAttribute[],
+  model: CIType | null | undefined,
+): TypeAttribute | undefined {
+  return (
+    columns.find((attribute) => Boolean(model?.show_name) && attribute.name === model?.show_name) ??
+    columns.find((attribute) => attribute.name === 'name') ??
+    columns.find((attribute) => Boolean(model?.unique_key) && attribute.name === model?.unique_key) ??
+    columns[0]
+  );
+}
 
 export default function InstancesPage() {
   const { tr } = useI18n();
@@ -610,50 +639,113 @@ export default function InstancesPage() {
     );
   };
 
-  const tableColumns: Column<Instance>[] = columns.map((attribute) => ({
-    key: `attr-${attribute.id}`,
-    header: attribute.alias || attribute.name,
-    width: attribute.name === model?.unique_key ? 'w-full' : undefined,
-    sortable: false,
-    cell: (row) => {
-      const value = row.values?.[attribute.name];
-      const label = attribute.is_reference
-        ? referenceText(value, referenceLabels)
-        : choiceText(attribute, value);
-      const raw = attribute.is_reference ? referenceRawText(value) : displayValue(value);
-      return (
-        <span
-          className="block min-w-0 truncate"
-          title={attribute.is_file ? undefined : label && label !== raw ? `${label} (${raw})` : raw}
-        >
-          {attribute.is_file ? (
-            <FileField
-              key={`${row.ci_id}-${attribute.id}`}
-              compact
-              attribute={attribute}
-              value={value}
-              disabled={attribute.is_computed}
-              loadValue={async () => (await getInstanceFileValues(row.ci_id))[attribute.name]}
-              onChange={(_files, serialized) => saveFileValue(row, attribute, serialized)}
-            />
-          ) : (
-            <AttributeValue
-              type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
-              value={value}
-              label={label}
-            />
-          )}
-        </span>
-      );
+  const copyIdentifier = useCallback(
+    async (value: string) => {
+      if (!navigator.clipboard?.writeText) {
+        toast.error(
+          tr('当前浏览器不支持自动复制，请手动选择复制。', 'Copy is unavailable in this browser; select the value manually.'),
+        );
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(value);
+        toast.success(tr('已复制', 'Copied'));
+      } catch {
+        toast.error(tr('复制失败，请手动复制。', 'Could not copy; select the value manually.'));
+      }
     },
-  }));
+    [toast, tr],
+  );
+
+  // THE IDENTITY COLUMN LEADS. The subscription still decides which fields are
+  // shown, but the field a row is named by belongs first; a UUID or a long code
+  // ahead of the name makes the table read like a log rather than a list.
+  const identity = useMemo(() => identityAttribute(columns, model), [columns, model]);
+  const orderedColumns = useMemo(() => {
+    if (!identity) return columns;
+    return [identity, ...columns.filter((attribute) => attribute.id !== identity.id)];
+  }, [columns, identity]);
+
+  const tableColumns: Column<Instance>[] = orderedColumns.map((attribute) => {
+    const isIdentity = identity?.id === attribute.id;
+    const isUnique = attribute.name === model?.unique_key;
+    return {
+      key: `attr-${attribute.id}`,
+      header: attribute.alias || attribute.name,
+      width: isIdentity ? 'w-[32rem]' : isUnique ? 'w-[11rem]' : 'w-[10rem]',
+      sortable: false,
+      cell: (row) => {
+        const value = row.values?.[attribute.name];
+        const label = attribute.is_reference
+          ? referenceText(value, referenceLabels)
+          : choiceText(attribute, value);
+        const raw = attribute.is_reference ? referenceRawText(value) : displayValue(value);
+        const title = attribute.is_file
+          ? undefined
+          : label && label !== raw
+            ? `${label} (${raw})`
+            : raw;
+        const copyLabel = attribute.alias || attribute.name;
+        return (
+          <span
+            className={cn(
+              'block min-w-0 truncate',
+              isIdentity
+                ? 'cmdb-instance-identity max-w-[26rem]'
+                : 'max-w-[12rem] text-text-muted',
+            )}
+            title={title}
+          >
+            {attribute.is_file ? (
+              <FileField
+                key={`${row.ci_id}-${attribute.id}`}
+                compact
+                attribute={attribute}
+                value={value}
+                disabled={attribute.is_computed}
+                loadValue={async () => (await getInstanceFileValues(row.ci_id))[attribute.name]}
+                onChange={(_files, serialized) => saveFileValue(row, attribute, serialized)}
+              />
+            ) : isUnique && isUUID(raw) ? (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <code
+                  className="truncate rounded bg-text/5 px-1.5 py-0.5 font-mono text-[11px] text-text-muted"
+                  title={raw}
+                >
+                  {shortUUID(raw)}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => void copyIdentifier(raw)}
+                  aria-label={tr(
+                    `复制 ${copyLabel} ${shortUUID(raw)}`,
+                    `Copy ${copyLabel} ${shortUUID(raw)}`,
+                  )}
+                  title={tr(`复制 ${copyLabel}`, `Copy ${copyLabel}`)}
+                  className="inline-flex size-5 shrink-0 items-center justify-center rounded text-text-faint hover:bg-text/5 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+                >
+                  <Copy size={11} aria-hidden="true" />
+                </button>
+              </span>
+            ) : (
+              <AttributeValue
+                type={isValueTypeCode(attribute.value_type) ? attribute.value_type : '2'}
+                value={value}
+                label={label}
+              />
+            )}
+          </span>
+        );
+      },
+    };
+  });
 
   // The exported columns are the subscribed ones the table shows. References
   // are omitted, as cantor did: their stored value is an id, and resolving every
   // referenced instance would turn one export into hundreds of lookups.
   const exportColumns = useMemo<ExportColumn<Instance>[]>(
     () =>
-      columns
+      orderedColumns
         .filter((attribute) => !attribute.is_reference)
         .map((attribute) => ({
           key: attribute.name,
@@ -663,7 +755,7 @@ export default function InstancesPage() {
             return choiceText(attribute, value) ?? displayValue(value);
           },
         })),
-    [columns],
+    [orderedColumns],
   );
 
   // 全部 means "the current server query", not "the twenty rows on screen".
@@ -1199,7 +1291,16 @@ export default function InstancesPage() {
           </div>
           <div ref={contentRef} className="cmdb-liquid-content relative flex min-h-0 flex-1 flex-col">
             <div className="cmdb-model-config-body flex min-h-0 flex-1 flex-col p-4">
-              <section className="cmdb-liquid-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
+              {/* THE TABLE OWNS ITS SURFACE. The workspace is a full-height
+                  liquid surface; the data band sits on it and ends after the
+                  rows, so a two-row result does not leave a giant glass panel
+                  below the content. The grid keeps the panel. */}
+              <section
+                className={cn(
+                  'flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl',
+                  view === 'grid' && 'cmdb-liquid-panel',
+                )}
+              >
                 {view === 'table' ? (
                   <div className="flex min-h-0 flex-1 flex-col p-3">
                     {!loading && !err && rows.length === 0 && (search || condition) ? (
@@ -1237,6 +1338,8 @@ export default function InstancesPage() {
                       error={err}
                       onRetry={() => void load()}
                       storageKey={`instances-${model?.name ?? 'none'}`}
+                      tableClassName="cmdb-instance-table"
+                      scrollerClassName="cmdb-instance-table-scroll"
                       empty={
                         model && attributes.length === 0
                           ? tr('这个模型还没有绑定属性，存不了实例。去模型详情里加几个。', 'This model has no bound attributes, so it cannot hold instances. Add some on its page.')
@@ -1538,10 +1641,7 @@ function InstanceCard({
   onSaveFile(attribute: TypeAttribute, serialized: string): void | Promise<void>;
 }) {
   const { tr } = useI18n();
-  const titleAttribute =
-    columns.find((attribute) => attribute.name === 'name') ??
-    columns.find((attribute) => attribute.name === model?.unique_key) ??
-    columns[0];
+  const titleAttribute = identityAttribute(columns, model);
   const titleLabel = titleAttribute?.is_reference
     ? referenceText(row.values?.[titleAttribute.name], referenceLabels)
     : titleAttribute

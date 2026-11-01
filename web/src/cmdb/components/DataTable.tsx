@@ -113,6 +113,20 @@ type Props<T> = {
   storageKey?: string;
 
   /**
+   * Extra classes for the `<table>` itself. A page that needs its own density
+   * or surface (the resource table does) applies them here instead of wrapping
+   * the table in a second layout element.
+   */
+  tableClassName?: string;
+
+  /**
+   * Extra classes for the scrolling wrapper. A page can turn the scroller into
+   * its own card surface, which also lets it hug a short table instead of
+   * stretching to the workspace height.
+   */
+  scrollerClassName?: string;
+
+  /**
    * Controlled column visibility. When set, the page owns the state (via
    * `useColumnVisibility`) and usually renders the picker in its own toolbar.
    */
@@ -146,6 +160,8 @@ export function DataTable<T>({
   selection,
   onRowClick,
   storageKey,
+  tableClassName,
+  scrollerClassName,
   hiddenColumns,
   onToggleColumn,
   hideColumnPicker,
@@ -336,8 +352,14 @@ export function DataTable<T>({
         // THE SCROLLER IS THE TABLE'S OWN. A dense CMDB table must scroll inside
         // its container; letting it push the page wide would take the header and
         // the first columns out of reach on a narrow window.
-        <div className={cn('min-w-0 overflow-x-auto', fill && 'cmdb-table-scroll min-h-0 flex-1 overflow-y-auto')}>
-          <table className={cn('og-resource-table', showActions && 'og-action-table')}>
+        <div
+          className={cn(
+            'min-w-0 overflow-x-auto',
+            fill && 'cmdb-table-scroll min-h-0 flex-1 overflow-y-auto',
+            scrollerClassName,
+          )}
+        >
+          <table className={cn('og-resource-table', showActions && 'og-action-table', tableClassName)}>
             <thead>
               <tr>
                 {selectable && (
