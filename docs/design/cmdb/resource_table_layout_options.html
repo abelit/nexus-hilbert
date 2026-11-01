@@ -1,0 +1,1996 @@
+<meta charset="utf-8">
+<title>CMDB 资源表格方案</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ---------------------------------------------------------------
+     Design plan
+     Color : deep blue-black page, cool slate panels, soft blue accent,
+             amber/rose only for issues.
+     Type  : Sora (display), IBM Plex Sans (UI/body), IBM Plex Mono (IDs).
+     Layout: one large, realistic app frame per option; options switch in
+             place; a comparison table closes the page.
+     This page deliberately commits to a dark editor look; the mockup frame
+     has its own light/dark switch so both themes can be judged.
+     --------------------------------------------------------------- */
+  :root {
+    color-scheme: dark;
+    --page-bg: #070a11;
+    --page-surface: #0d131e;
+    --page-surface-2: #111927;
+    --page-border: rgba(148, 163, 184, 0.14);
+    --page-border-strong: rgba(148, 163, 184, 0.24);
+    --page-text: #e9eef8;
+    --page-muted: #9ba7bb;
+    --page-faint: #6f7c91;
+    --page-accent: #8ab6ff;
+    --page-accent-2: #3b82f6;
+    --page-good: #5ee1a3;
+    --page-warn: #f6c35b;
+    --page-danger: #fb8a9d;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --display: "Sora", "IBM Plex Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  *,
+  *::before,
+  *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100%;
+    background:
+      radial-gradient(900px 520px at 12% -10%, rgba(59, 130, 246, 0.14), transparent 62%),
+      radial-gradient(760px 480px at 94% 0%, rgba(14, 165, 233, 0.08), transparent 64%),
+      var(--page-bg);
+    color: var(--page-text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    height: env(safe-area-inset-top, 0px);
+    z-index: 40;
+    background: var(--page-bg);
+  }
+
+  .page {
+    width: 100%;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding-left: max(18px, env(safe-area-inset-left, 0px));
+    padding-right: max(18px, env(safe-area-inset-right, 0px));
+    padding-block: clamp(28px, 5vw, 54px) 48px;
+  }
+
+  .eyebrow {
+    margin: 0;
+    font: 600 10px/1 var(--sans);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--page-accent);
+  }
+
+  h1 {
+    margin: 10px 0 0;
+    font: 600 clamp(27px, 3.3vw, 38px)/1.14 var(--display);
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+
+  .lede {
+    max-width: 68ch;
+    margin: 12px 0 0;
+    color: var(--page-muted);
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    margin-top: 14px;
+  }
+
+  .meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border: 1px solid var(--page-border);
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.04);
+    color: var(--page-faint);
+    font-size: 10.5px;
+  }
+
+  .meta-chip b { color: var(--page-muted); font-weight: 500; }
+
+  /* sticky switcher */
+  .controls {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 30;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 24px;
+    padding: 8px;
+    border: 1px solid var(--page-border);
+    border-radius: 14px;
+    background: rgba(9, 14, 23, 0.86);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 32px;
+    padding: 6px 10px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--page-muted);
+    font: 500 11.5px/1 var(--sans);
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+
+  .tab:hover { background: rgba(148, 163, 184, 0.08); color: var(--page-text); }
+
+  .tab[aria-pressed="true"] {
+    border-color: rgba(138, 182, 255, 0.32);
+    background: rgba(138, 182, 255, 0.13);
+    color: #dceaff;
+  }
+
+  .tab .tag {
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(94, 225, 163, 0.12);
+    color: var(--page-good);
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .preview-theme {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding-left: 4px;
+  }
+
+  .preview-theme > span {
+    color: var(--page-faint);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .seg {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--page-border);
+    border-radius: 8px;
+    background: rgba(148, 163, 184, 0.05);
+  }
+
+  .seg button {
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--page-faint);
+    font: 500 10.5px/1 var(--sans);
+    cursor: pointer;
+  }
+
+  .seg button:hover { color: var(--page-text); }
+
+  .seg button[aria-pressed="true"] {
+    background: rgba(148, 163, 184, 0.14);
+    color: var(--page-text);
+  }
+
+  button:focus-visible {
+    outline: 2px solid var(--page-accent);
+    outline-offset: 2px;
+  }
+
+  .i {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: -2px;
+  }
+
+  .i.sm { width: 11px; height: 11px; }
+
+  /* ---------------------------------------------------------------
+     Option section
+     --------------------------------------------------------------- */
+  .option { margin-top: 18px; }
+
+  .option-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 12px;
+    margin-bottom: 10px;
+  }
+
+  .option-kicker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--page-border-strong);
+    border-radius: 7px;
+    color: var(--page-accent);
+    font: 600 11px/1 var(--display);
+  }
+
+  .option-title {
+    margin: 0;
+    font: 600 18px/1.2 var(--display);
+    letter-spacing: -0.015em;
+  }
+
+  .option-sub {
+    color: var(--page-muted);
+    font-size: 12.5px;
+  }
+
+  /* ---------------------------------------------------------------
+     Mockup frame + mock design tokens
+     --------------------------------------------------------------- */
+  .mock {
+    border: 1px solid var(--page-border);
+    border-radius: 18px;
+    padding: 9px;
+    background: linear-gradient(180deg, rgba(148, 163, 184, 0.05), rgba(148, 163, 184, 0.01));
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.36);
+    overflow: hidden;
+  }
+
+  .mock[data-theme="dark"] {
+    --m-bg: #0a0f19;
+    --m-rail: #0b111c;
+    --m-panel: #0f1623;
+    --m-panel-2: #121a29;
+    --m-panel-3: #0c121e;
+    --m-border: rgba(148, 163, 184, 0.14);
+    --m-border-2: rgba(148, 163, 184, 0.25);
+    --m-text: #e7edf7;
+    --m-muted: #97a3b6;
+    --m-faint: #68758a;
+    --m-hover: rgba(148, 163, 184, 0.07);
+    --m-selected: rgba(96, 165, 250, 0.1);
+    --m-accent: #7cc4ff;
+    --m-accent-bg: rgba(59, 130, 246, 0.14);
+    --m-good: #4ade80;
+    --m-good-bg: rgba(34, 197, 94, 0.12);
+    --m-warn: #fbbf24;
+    --m-danger: #fb7185;
+    --m-shadow: 0 26px 80px rgba(0, 0, 0, 0.5);
+  }
+
+  .mock[data-theme="light"] {
+    --m-bg: #f3f6fa;
+    --m-rail: #ffffff;
+    --m-panel: #ffffff;
+    --m-panel-2: #f7f9fc;
+    --m-panel-3: #fbfcfe;
+    --m-border: #e3e8ef;
+    --m-border-2: #cbd5e1;
+    --m-text: #111827;
+    --m-muted: #5f6b7c;
+    --m-faint: #8b97a8;
+    --m-hover: rgba(15, 23, 42, 0.035);
+    --m-selected: rgba(37, 99, 235, 0.06);
+    --m-accent: #2563eb;
+    --m-accent-bg: rgba(37, 99, 235, 0.08);
+    --m-good: #16a34a;
+    --m-good-bg: rgba(22, 163, 74, 0.09);
+    --m-warn: #b45309;
+    --m-danger: #dc2626;
+    --m-shadow: 0 26px 70px rgba(15, 23, 42, 0.13);
+  }
+
+  .mock-app {
+    display: grid;
+    grid-template-columns: 176px minmax(0, 1fr);
+    min-height: 548px;
+    overflow: hidden;
+    border: 1px solid var(--m-border);
+    border-radius: 12px;
+    background: var(--m-bg);
+    color: var(--m-text);
+    font-family: var(--sans);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--m-shadow);
+  }
+
+  /* The current layout sits on the old liquid-glass wash. The revised
+     options sit on a calmer surface. */
+  .mock[data-option="current"] .mock-app {
+    background:
+      linear-gradient(135deg, rgba(15, 23, 42, 0.4), rgba(30, 27, 75, 0.22) 45%, rgba(8, 51, 68, 0.2)),
+      var(--m-bg);
+  }
+
+  .mock[data-option="current"][data-theme="light"] .mock-app {
+    background:
+      linear-gradient(135deg, rgba(239, 246, 255, 0.8), rgba(245, 243, 255, 0.55) 45%, rgba(236, 254, 255, 0.45)),
+      var(--m-bg);
+  }
+
+  .mock[data-option="a"] .mock-app,
+  .mock[data-option="b"] .mock-app,
+  .mock[data-option="c"] .mock-app,
+  .mock[data-option="d"] .mock-app {
+    background:
+      radial-gradient(900px 320px at 88% -10%, rgba(59, 130, 246, 0.07), transparent 62%),
+      var(--m-bg);
+  }
+
+  /* rail */
+  .mock-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: 12px 10px;
+    border-right: 1px solid var(--m-border);
+    background: var(--m-rail);
+  }
+
+  .rail-brand {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--m-text);
+    font-size: 10.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .brand-mark {
+    display: grid;
+    place-items: center;
+    width: 21px;
+    height: 21px;
+    flex: none;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #3b82f6, #22d3ee);
+    color: #04121f;
+    font: 700 10px/1 var(--display);
+  }
+
+  .rail-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 7px;
+    border: 1px solid var(--m-border);
+    border-radius: 7px;
+    background: var(--m-panel);
+    color: var(--m-faint);
+    font-size: 9.5px;
+  }
+
+  .rail-group {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 2px;
+    color: var(--m-faint);
+    font-size: 8.5px;
+    letter-spacing: 0.06em;
+  }
+
+  .rail-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    padding: 5px 6px;
+    border-radius: 6px;
+    color: var(--m-muted);
+    font-size: 10px;
+  }
+
+  .rail-item.is-active {
+    background: var(--m-accent-bg);
+    color: var(--m-text);
+    box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.16);
+  }
+
+  .rail-item .mi {
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    flex: none;
+    border: 1px solid var(--m-border-2);
+    border-radius: 4px;
+    color: var(--m-faint);
+  }
+
+  .rail-item b { display: block; font-weight: 500; line-height: 1.2; }
+  .rail-item em {
+    display: block;
+    color: var(--m-faint);
+    font: 8px/1.2 var(--mono);
+    font-style: normal;
+  }
+
+  /* main column */
+  .mock-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .mock-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    min-height: 47px;
+    padding: 9px 13px;
+    border-bottom: 1px solid var(--m-border);
+  }
+
+  .crumbs {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--m-faint);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .crumbs b { color: var(--m-text); font-weight: 500; }
+  .crumbs i { padding: 0 4px; font-style: normal; color: var(--m-faint); }
+
+  .top-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .stat {
+    padding: 2px 7px;
+    border: 1px solid var(--m-border);
+    border-radius: 999px;
+    background: var(--m-panel);
+    color: var(--m-faint);
+    font-size: 8.5px;
+    white-space: nowrap;
+  }
+
+  .stat b { margin-left: 3px; color: var(--m-text); font-weight: 600; }
+
+  .icon-btn,
+  .ghost-btn,
+  .primary-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 7px;
+    border: 1px solid var(--m-border);
+    border-radius: 6px;
+    background: var(--m-panel);
+    color: var(--m-muted);
+    font: 500 9.5px/1 var(--sans);
+    white-space: nowrap;
+  }
+
+  .icon-btn { width: 24px; padding: 0; }
+
+  .primary-btn {
+    border-color: rgba(59, 130, 246, 0.55);
+    background: linear-gradient(180deg, #4f8df7, #3b74e8);
+    color: #fff;
+  }
+
+  .mock-workspace {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: 11px 13px 13px;
+  }
+
+  .mock-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .env-tabs {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--m-muted);
+    font-size: 10px;
+  }
+
+  .env-tabs span { padding: 3px 7px; border-radius: 5px; }
+
+  .env-tabs .is-active {
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    background: var(--m-accent-bg);
+    color: var(--m-accent);
+  }
+
+  .tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .search {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 130px;
+    padding: 4px 7px;
+    border: 1px solid var(--m-border);
+    border-radius: 6px;
+    background: var(--m-panel);
+    color: var(--m-muted);
+    font-size: 9.5px;
+  }
+
+  .search .x { margin-left: auto; color: var(--m-faint); }
+
+  .tool {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 7px;
+    border: 1px solid var(--m-border);
+    border-radius: 6px;
+    background: var(--m-panel);
+    color: var(--m-muted);
+    font-size: 9.5px;
+    white-space: nowrap;
+  }
+
+  .tool.is-active {
+    border-color: rgba(96, 165, 250, 0.24);
+    background: var(--m-accent-bg);
+    color: var(--m-accent);
+  }
+
+  .tool.density { gap: 2px; padding: 2px; }
+  .tool.density span { padding: 2px 5px; border-radius: 4px; }
+  .tool.density .on { background: var(--m-accent-bg); color: var(--m-accent); }
+
+  /* table */
+  .mock-tablewrap {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .mock-scroll {
+    min-width: 0;
+    overflow-x: auto;
+    border: 1px solid var(--m-border);
+    border-radius: 9px;
+    background: var(--m-panel);
+    scrollbar-width: thin;
+    scrollbar-color: var(--m-border-2) transparent;
+  }
+
+  .mock table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 10.5px;
+  }
+
+  .mock th {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--m-border);
+    background: var(--m-panel-2);
+    color: var(--m-faint);
+    font-size: 8.8px;
+    font-weight: 500;
+    letter-spacing: 0.07em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .mock td {
+    padding: 10px;
+    border-bottom: 1px solid var(--m-border);
+    color: var(--m-muted);
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  .mock tbody tr:last-child td { border-bottom: 0; }
+  .mock tbody tr:hover { background: var(--m-hover); }
+
+  .cb {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border: 1px solid var(--m-border-2);
+    border-radius: 3px;
+    vertical-align: middle;
+  }
+
+  .cb.is-checked {
+    display: inline-grid;
+    place-items: center;
+    border-color: rgba(96, 165, 250, 0.6);
+    background: rgba(59, 130, 246, 0.24);
+    color: var(--m-accent);
+    font-size: 8px;
+    line-height: 1;
+  }
+
+  .uuid {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--m-muted);
+  }
+
+  .mono { font-family: var(--mono); font-size: 9.5px; }
+  .name { color: var(--m-text); }
+
+  .acts {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .act {
+    display: inline-grid;
+    place-items: center;
+    width: 17px;
+    height: 17px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--m-faint);
+    cursor: pointer;
+  }
+
+  .act:hover { background: var(--m-hover); color: var(--m-text); }
+  .act.danger:hover { color: var(--m-danger); }
+
+  /* current / B table: no width discipline, so the long values widen it */
+  .mock[data-option="current"] table,
+  .mock[data-option="b"] table { min-width: 1040px; }
+
+  .mock[data-option="current"] .mock-scroll { background: rgba(15, 22, 35, 0.55); }
+  .mock[data-option="current"][data-theme="light"] .mock-scroll { background: rgba(255, 255, 255, 0.6); }
+  .mock[data-option="current"] th { text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* B: theme-only improvement */
+  .mock[data-option="b"] .mock-scroll {
+    border-color: var(--m-border-2);
+    background: var(--m-panel);
+  }
+  .mock[data-option="b"] th {
+    border-bottom-color: var(--m-border-2);
+    background: var(--m-panel-2);
+    color: var(--m-muted);
+    font-size: 9.5px;
+    letter-spacing: 0.02em;
+    text-transform: none;
+  }
+  .mock[data-option="b"] td { padding: 12px 10px; }
+  .mock[data-option="b"] tbody tr:nth-child(2) { background: var(--m-hover); }
+
+  /* A: disciplined columns, identity first */
+  .mock[data-option="a"] table { table-layout: fixed; min-width: 720px; }
+  .mock[data-option="a"] th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 8px 9px;
+    border-bottom-color: var(--m-border-2);
+    background: var(--m-panel-2);
+    color: var(--m-muted);
+    font-size: 9.5px;
+    letter-spacing: 0.01em;
+    text-transform: none;
+  }
+  .mock[data-option="a"] td { padding: 7px 9px; }
+  .mock[data-option="a"] .mock-scroll { border-color: var(--m-border-2); }
+  /* A demonstrates the fix: the panel hugs its rows instead of stretching. */
+  .mock[data-option="a"] .mock-app { min-height: 0; }
+  .mock[data-option="a"] .mock-empty { min-height: 0; padding-top: 4px; }
+  .cell-clip {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cell-name { color: var(--m-text); font-weight: 600; }
+  .id-short {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--m-muted);
+  }
+  .copy { color: var(--m-faint); }
+
+  /* C: pinned identity, dense rows */
+  .mock[data-option="c"] table { min-width: 700px; }
+  .mock[data-option="c"] th {
+    padding: 6px 9px;
+    background: var(--m-panel-2);
+    color: var(--m-muted);
+    font-size: 9px;
+    letter-spacing: 0.01em;
+    text-transform: none;
+  }
+  .mock[data-option="c"] td { padding: 5px 9px; }
+  .mock[data-option="c"] tbody tr.is-selected { background: var(--m-selected); }
+  .mock[data-option="c"] .idcell {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    border-right: 1px solid var(--m-border);
+    background: var(--m-panel);
+    box-shadow: 10px 0 16px -16px rgba(0, 0, 0, 0.9);
+  }
+  .mock[data-option="c"] th.idcell { z-index: 3; background: var(--m-panel-2); }
+  .mock[data-option="c"] tr.is-selected .idcell { background: var(--m-panel); }
+  .ident { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .ident b {
+    overflow: hidden;
+    color: var(--m-text);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ident span {
+    color: var(--m-faint);
+    font-family: var(--mono);
+    font-size: 8.5px;
+  }
+
+  /* D: cards */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .rcard {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--m-border);
+    border-radius: 11px;
+    background: var(--m-panel);
+  }
+
+  .rcard:hover { border-color: var(--m-border-2); }
+
+  .rcard-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .rcard-id {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .vm-ico {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    border: 1px solid rgba(96, 165, 250, 0.24);
+    border-radius: 7px;
+    background: var(--m-accent-bg);
+    color: var(--m-accent);
+  }
+
+  .chip-good {
+    padding: 2px 6px;
+    border: 1px solid rgba(74, 222, 128, 0.28);
+    border-radius: 999px;
+    background: var(--m-good-bg);
+    color: var(--m-good);
+    font-size: 8.5px;
+    white-space: nowrap;
+  }
+
+  .rcard h3 {
+    display: -webkit-box;
+    overflow: hidden;
+    margin: 0;
+    color: var(--m-text);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .rcard .short {
+    margin-top: -3px;
+    color: var(--m-faint);
+    font-family: var(--mono);
+    font-size: 8.5px;
+  }
+
+  .rcard dl {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 10px;
+    margin: 0;
+    font-size: 9.5px;
+  }
+
+  .rcard dt { color: var(--m-faint); }
+
+  .rcard dd {
+    min-width: 0;
+    overflow: hidden;
+    margin: 0;
+    color: var(--m-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rcard-foot {
+    display: flex;
+    gap: 5px;
+    padding-top: 8px;
+    border-top: 1px solid var(--m-border);
+  }
+
+  .rcard-foot .ghost-btn { height: 22px; font-size: 9px; }
+  .rcard-foot .more { margin-left: auto; }
+
+  /* footer + scroll hint */
+  .mock-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding-top: 2px;
+    color: var(--m-faint);
+    font-size: 9px;
+  }
+
+  .scrollhint {
+    flex: 1;
+    max-width: 260px;
+    height: 5px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.09);
+  }
+
+  .scrollhint span {
+    display: block;
+    width: 30%;
+    height: 100%;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.36);
+  }
+
+  .scrollhint-label { color: var(--m-faint); font-size: 8.5px; }
+
+  .mock-empty {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    min-height: 150px;
+    padding: 8px 2px 0;
+    color: var(--m-faint);
+    font-size: 8.5px;
+    opacity: 0.75;
+  }
+
+  /* ---------------------------------------------------------------
+     Details under the mockup
+     --------------------------------------------------------------- */
+  .detail {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .detail-card {
+    padding: 12px 14px;
+    border: 1px solid var(--page-border);
+    border-radius: 12px;
+    background: rgba(148, 163, 184, 0.03);
+  }
+
+  .detail-card h3 {
+    margin: 0 0 6px;
+    color: var(--page-accent);
+    font: 600 9.5px/1 var(--sans);
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+
+  .detail-card p {
+    margin: 0;
+    color: var(--page-muted);
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+
+  .detail-card ul {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding-left: 15px;
+    color: var(--page-muted);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
+  .detail-card li::marker { color: var(--page-faint); }
+
+  .issues {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  .issue {
+    padding: 2px 7px;
+    border: 1px solid rgba(251, 138, 157, 0.28);
+    border-radius: 999px;
+    background: rgba(251, 138, 157, 0.08);
+    color: #ffc4ce;
+    font-size: 10px;
+  }
+
+  .issue.warn {
+    border-color: rgba(246, 195, 91, 0.28);
+    background: rgba(246, 195, 91, 0.08);
+    color: #ffe1a6;
+  }
+
+  /* ---------------------------------------------------------------
+     Comparison
+     --------------------------------------------------------------- */
+  .compare {
+    margin-top: 30px;
+    overflow: hidden;
+    border: 1px solid var(--page-border);
+    border-radius: 16px;
+    background: var(--page-surface);
+  }
+
+  .compare-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px 16px;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--page-border);
+  }
+
+  .compare-head h2 {
+    margin: 0;
+    font: 600 16px/1.2 var(--display);
+    letter-spacing: -0.01em;
+  }
+
+  .compare-head p {
+    margin: 4px 0 0;
+    color: var(--page-muted);
+    font-size: 12px;
+  }
+
+  .recommend {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    border: 1px solid rgba(94, 225, 163, 0.24);
+    border-radius: 999px;
+    background: rgba(94, 225, 163, 0.08);
+    color: var(--page-good);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .table-scroll { overflow-x: auto; }
+
+  .compare table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .compare th {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--page-border);
+    background: rgba(148, 163, 184, 0.03);
+    color: var(--page-faint);
+    font: 500 9px/1 var(--sans);
+    letter-spacing: 0.12em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .compare td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--page-border);
+    color: var(--page-muted);
+    vertical-align: top;
+  }
+
+  .compare tr:last-child td { border-bottom: 0; }
+  .compare td b { color: var(--page-text); font-weight: 600; }
+  .compare td .sub { display: block; margin-top: 2px; color: var(--page-faint); font-size: 10.5px; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border: 1px solid var(--page-border);
+    border-radius: 5px;
+    color: var(--page-muted);
+    font-size: 9.5px;
+    white-space: nowrap;
+  }
+
+  .badge.low { border-color: rgba(94, 225, 163, 0.24); background: rgba(94, 225, 163, 0.07); color: var(--page-good); }
+  .badge.mid { border-color: rgba(246, 195, 91, 0.26); background: rgba(246, 195, 91, 0.07); color: var(--page-warn); }
+  .badge.high { border-color: rgba(251, 138, 157, 0.26); background: rgba(251, 138, 157, 0.07); color: var(--page-danger); }
+
+  .footnote {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-top: 18px;
+    color: var(--page-faint);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .footnote b { color: var(--page-muted); font-weight: 500; }
+
+  /* ---------------------------------------------------------------
+     Responsive
+     --------------------------------------------------------------- */
+  @media (max-width: 980px) {
+    .mock-app { grid-template-columns: 148px minmax(0, 1fr); }
+    .mock-rail { padding: 10px 8px; }
+    .rail-item b { font-size: 9.5px; }
+    .detail { grid-template-columns: 1fr 1fr; }
+    .detail-card:last-child { grid-column: 1 / -1; }
+  }
+
+  @media (max-width: 720px) {
+    .page { padding-block: 24px 36px; }
+    .controls { padding: 6px; border-radius: 12px; }
+    .tabs { gap: 2px; }
+    .tab { padding: 6px 8px; font-size: 10.5px; }
+    .mock { padding: 6px; border-radius: 14px; }
+    .mock-app { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    .mock-rail { display: none; }
+    .mock-top { padding: 8px 10px; }
+    .top-actions .stat:nth-child(n + 3) { display: none; }
+    .mock-workspace { padding: 9px 10px 10px; }
+    .mock-toolbar { gap: 6px; }
+    .search { flex: 1 1 140px; min-width: 0; }
+    .tools { width: 100%; }
+    .detail { grid-template-columns: 1fr; }
+    .detail-card:last-child { grid-column: auto; }
+    .cards { grid-template-columns: 1fr; }
+    .compare-head { padding: 14px; }
+  }
+
+  @media (max-width: 480px) {
+    .preview-theme > span { display: none; }
+    .tab { font-size: 10px; padding: 5px 7px; }
+    .mock-top { gap: 6px; }
+    .crumbs { max-width: 55%; }
+    .top-actions .ghost-btn { display: none; }
+    .primary-btn { height: 22px; font-size: 9px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.01ms !important; }
+  }
+</style>
+
+<svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="m10.4 10.4 3.2 3.2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 3.2v3.4H9.6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 16 16"><path d="M1.8 8s2.3-3.6 6.2-3.6S14.2 8 14.2 8s-2.3 3.6-6.2 3.6S1.8 8 1.8 8Z"/><circle cx="8" cy="8" r="1.6"/></symbol>
+  <symbol id="i-topology" viewBox="0 0 16 16"><circle cx="8" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M8 5.6v2.2M7 9.2 5.2 10.8M9 9.2l1.8 1.6"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 16 16"><path d="m3 13 .6-2.7 6.3-6.3a1.3 1.3 0 0 1 1.9 1.9L5.5 12.2 3 13Z"/><path d="M9.2 4.8 11.6 7.2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 16 16"><path d="M3 5h10M6 5V3.4h4V5M5 5l.6 8h4.8L11 5"/></symbol>
+  <symbol id="i-more" viewBox="0 0 16 16"><circle cx="4" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r=".9" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.2" y="5.2" width="7" height="7.6" rx="1.1"/><path d="M10.2 5.2V3.9a1 1 0 0 0-1-1H4.1a1 1 0 0 0-1 1v5.2a1 1 0 0 0 1 1h1.1"/></symbol>
+  <symbol id="i-vm" viewBox="0 0 16 16"><rect x="2.4" y="3.6" width="11.2" height="7.6" rx="1.2"/><path d="M6 13.4h4M8 11.2v2.2"/></symbol>
+</svg>
+
+<div class="page">
+  <header>
+    <p class="eyebrow">CMDB · 资源数据</p>
+    <h1>资源表格方案</h1>
+    <p class="lede">
+      同一份虚拟机数据，在四种布局与深色主题方向下的实际效果。切换标签查看布局，右上角可切换预览的深浅色。
+      所有预览都使用截图中的数据：2 台虚拟机，匹配查询「230」。
+    </p>
+    <div class="meta-row">
+      <span class="meta-chip">模型 <b>虚拟机 / vserver</b></span>
+      <span class="meta-chip">数据源 <b>当前截图</b></span>
+      <span class="meta-chip">推荐 <b>A · 稳重数据表</b></span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="tabs" role="group" aria-label="表格方案">
+      <button class="tab" type="button" data-tab="current" aria-pressed="false">当前</button>
+      <button class="tab" type="button" data-tab="a" aria-pressed="true">A · 稳重数据表 <span class="tag">推荐</span></button>
+      <button class="tab" type="button" data-tab="b" aria-pressed="false">B · 仅主题修正</button>
+      <button class="tab" type="button" data-tab="c" aria-pressed="false">C · 紧凑工作台</button>
+      <button class="tab" type="button" data-tab="d" aria-pressed="false">D · 主从卡片</button>
+    </div>
+    <div class="preview-theme">
+      <span>预览主题</span>
+      <div class="seg" role="group" aria-label="预览主题">
+        <button type="button" data-mock-theme="dark" aria-pressed="true">深色</button>
+        <button type="button" data-mock-theme="light" aria-pressed="false">浅色</button>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <!-- ============================ CURRENT ============================ -->
+    <section class="option" data-panel="current" hidden>
+      <div class="option-head">
+        <span class="option-kicker">0</span>
+        <h2 class="option-title">当前布局</h2>
+        <span class="option-sub">保留现有截图，作为对照</span>
+      </div>
+
+      <div class="mock" data-option="current" data-theme="dark">
+        <div class="mock-app">
+          <aside class="mock-rail" aria-hidden="true">
+            <div class="rail-brand"><span class="brand-mark">C</span><span>CMDB 资源管理平台</span></div>
+            <div class="rail-search"><svg class="i sm"><use href="#i-search"/></svg> 搜索模型…</div>
+            <div class="rail-group"><span>资源层-计算资源</span><span>5</span></div>
+            <div class="rail-item"><span class="mi">▤</span><span><b>物理机</b><em>server</em></span></div>
+            <div class="rail-item"><span class="mi">▥</span><span><b>内存</b><em>RAM</em></span></div>
+            <div class="rail-item is-active"><span class="mi">▦</span><span><b>虚拟机</b><em>vserver</em></span></div>
+            <div class="rail-item"><span class="mi">▧</span><span><b>硬盘</b><em>harddisk</em></span></div>
+            <div class="rail-item"><span class="mi">▨</span><span><b>网卡</b><em>NIC</em></span></div>
+            <div class="rail-group"><span>资源层-数据中心</span><span>10</span></div>
+            <div class="rail-item"><span class="mi">▩</span><span><b>数据中心</b><em>dcim_idc</em></span></div>
+            <div class="rail-item"><span class="mi">▣</span><span><b>机房</b><em>dcim_server_room</em></span></div>
+          </aside>
+          <div class="mock-main">
+            <header class="mock-top">
+              <div class="crumbs">资源模型 <i>/</i> 资源数据 <i>/</i> <b>虚拟机</b></div>
+              <div class="top-actions">
+                <span class="stat">匹配实例 <b>2</b></span>
+                <span class="stat">本页 <b>2</b></span>
+                <span class="stat">本页 Active <b>100%</b></span>
+                <span class="stat">本页 PROD <b>2</b></span>
+                <span class="icon-btn" title="刷新"><svg class="i sm"><use href="#i-refresh"/></svg></span>
+                <span class="ghost-btn">批量导入</span>
+                <span class="primary-btn">＋ 新建实例</span>
+              </div>
+            </header>
+            <div class="mock-workspace">
+              <div class="mock-toolbar">
+                <div class="env-tabs"><span class="is-active">全部环境</span><span>生产</span></div>
+                <div class="tools">
+                  <span class="search"><svg class="i sm"><use href="#i-search"/></svg> 230 <span class="x">×</span></span>
+                  <span class="tool">条件过滤</span>
+                  <span class="tool">字段</span>
+                  <span class="tool is-active">列表</span>
+                  <span class="tool">网格</span>
+                  <span class="tool">导出</span>
+                </div>
+              </div>
+              <div class="mock-tablewrap">
+                <div class="mock-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style="width:30px"></th>
+                        <th>ID</th>
+                        <th>数据中心</th>
+                        <th>代码</th>
+                        <th>名称</th>
+                        <th>别名</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><span class="cb"></span></td>
+                        <td><span class="uuid">0ab8d7d1-c9f4-40cc-b3a1-9ebd4ff4a4c0</span></td>
+                        <td>多彩航空大厦3楼IDC</td>
+                        <td><span class="mono">vsvr-20260513-0027</span></td>
+                        <td><span class="name">p-cgz-srv-app-172030006230-运维管理-CMDB</span></td>
+                        <td>p-cgz</td>
+                        <td>
+                          <span class="acts">
+                            <span class="act" style="color:#22d3ee"><svg class="i"><use href="#i-eye"/></svg></span>
+                            <span class="act" style="color:#60a5fa"><svg class="i"><use href="#i-topology"/></svg></span>
+                            <span class="act" style="color:#60a5fa"><svg class="i"><use href="#i-pencil"/></svg></span>
+                            <span class="act" style="color:#fb7185"><svg class="i"><use href="#i-trash"/></svg></span>
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><span class="cb"></span></td>
+                        <td><span class="uuid">1388a0eb-11cc-40a5-8c5f-4a8855d5f091</span></td>
+                        <td>多彩航空大厦3楼IDC</td>
+                        <td><span class="mono">vsvr-20260513-0230</span></td>
+                        <td><span class="name">p-cgz-srv-bus-172016002059-空地一体化-应用服务器</span></td>
+                        <td>p-cgz</td>
+                        <td>
+                          <span class="acts">
+                            <span class="act" style="color:#22d3ee"><svg class="i"><use href="#i-eye"/></svg></span>
+                            <span class="act" style="color:#60a5fa"><svg class="i"><use href="#i-topology"/></svg></span>
+                            <span class="act" style="color:#60a5fa"><svg class="i"><use href="#i-pencil"/></svg></span>
+                            <span class="act" style="color:#fb7185"><svg class="i"><use href="#i-trash"/></svg></span>
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="mock-foot">
+                  <span class="scrollhint"><span></span></span>
+                  <span class="scrollhint-label">横向滚动 · 大量留白</span>
+                  <span>1 / 1 · 共 2 条</span>
+                </div>
+                <div class="mock-empty">表格撑满工作区，空数据区域占用大量玻璃背景</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail">
+        <div class="detail-card">
+          <h3>现状</h3>
+          <p>信息完整，但视觉重心落在 UUID 和渐变背景上，名称、代码、别名之间没有层级。</p>
+          <div class="issues">
+            <span class="issue">留白过大</span>
+            <span class="issue">横向滚动</span>
+            <span class="issue warn">表头对比偏弱</span>
+            <span class="issue warn">身份层级不清</span>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3>问题来源</h3>
+          <ul>
+            <li>表格用 fill 撑满工作区，2 行数据下方留下大片玻璃背景。</li>
+            <li>UUID 与长名称没有列宽上限，自动布局把表格撑宽。</li>
+            <li>表头 11px 大写 + 低透明度，行分隔与悬停也很轻。</li>
+            <li>四个操作图标同时着色，视觉噪音高于数据本身。</li>
+          </ul>
+        </div>
+        <div class="detail-card">
+          <h3>适合</h3>
+          <p>作为基线对照。除非只想确认现状，不建议原样保留。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ A ============================ -->
+    <section class="option" data-panel="a">
+      <div class="option-head">
+        <span class="option-kicker">A</span>
+        <h2 class="option-title">稳重数据表</h2>
+        <span class="option-sub">保留现有结构，重做层级、列宽与表面</span>
+      </div>
+
+      <div class="mock" data-option="a" data-theme="dark">
+        <div class="mock-app">
+          <aside class="mock-rail" aria-hidden="true">
+            <div class="rail-brand"><span class="brand-mark">C</span><span>CMDB 资源管理平台</span></div>
+            <div class="rail-search"><svg class="i sm"><use href="#i-search"/></svg> 搜索模型…</div>
+            <div class="rail-group"><span>资源层-计算资源</span><span>5</span></div>
+            <div class="rail-item"><span class="mi">▤</span><span><b>物理机</b><em>server</em></span></div>
+            <div class="rail-item"><span class="mi">▥</span><span><b>内存</b><em>RAM</em></span></div>
+            <div class="rail-item is-active"><span class="mi">▦</span><span><b>虚拟机</b><em>vserver</em></span></div>
+            <div class="rail-item"><span class="mi">▧</span><span><b>硬盘</b><em>harddisk</em></span></div>
+            <div class="rail-item"><span class="mi">▨</span><span><b>网卡</b><em>NIC</em></span></div>
+            <div class="rail-group"><span>资源层-数据中心</span><span>10</span></div>
+            <div class="rail-item"><span class="mi">▩</span><span><b>数据中心</b><em>dcim_idc</em></span></div>
+            <div class="rail-item"><span class="mi">▣</span><span><b>机房</b><em>dcim_server_room</em></span></div>
+          </aside>
+          <div class="mock-main">
+            <header class="mock-top">
+              <div class="crumbs">资源模型 <i>/</i> 资源数据 <i>/</i> <b>虚拟机</b></div>
+              <div class="top-actions">
+                <span class="stat">匹配实例 <b>2</b></span>
+                <span class="stat">本页 <b>2</b></span>
+                <span class="stat">本页 Active <b>100%</b></span>
+                <span class="stat">本页 PROD <b>2</b></span>
+                <span class="icon-btn" title="刷新"><svg class="i sm"><use href="#i-refresh"/></svg></span>
+                <span class="ghost-btn">批量导入</span>
+                <span class="primary-btn">＋ 新建实例</span>
+              </div>
+            </header>
+            <div class="mock-workspace">
+              <div class="mock-toolbar">
+                <div class="env-tabs"><span class="is-active">全部环境</span><span>生产</span></div>
+                <div class="tools">
+                  <span class="search"><svg class="i sm"><use href="#i-search"/></svg> 230 <span class="x">×</span></span>
+                  <span class="tool">条件过滤</span>
+                  <span class="tool">字段</span>
+                  <span class="tool is-active">列表</span>
+                  <span class="tool">网格</span>
+                  <span class="tool">导出</span>
+                </div>
+              </div>
+              <div class="mock-tablewrap">
+                <div class="mock-scroll">
+                  <table>
+                    <colgroup>
+                      <col style="width:4%">
+                      <col style="width:29%">
+                      <col style="width:15%">
+                      <col style="width:17%">
+                      <col style="width:7%">
+                      <col style="width:17%">
+                      <col style="width:11%">
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>名称</th>
+                        <th>代码</th>
+                        <th>数据中心</th>
+                        <th>别名</th>
+                        <th>ID</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><span class="cb"></span></td>
+                        <td><span class="cell-clip cell-name" title="p-cgz-srv-app-172030006230-运维管理-CMDB">p-cgz-srv-app-172030006230-运维管理-CMDB</span></td>
+                        <td class="mono">vsvr-20260513-0027</td>
+                        <td>多彩航空大厦3楼IDC</td>
+                        <td>p-cgz</td>
+                        <td><span class="id-short" title="0ab8d7d1-c9f4-40cc-b3a1-9ebd4ff4a4c0">0ab8d7d1…a4c0 <span class="copy"><svg class="i sm"><use href="#i-copy"/></svg></span></span></td>
+                        <td>
+                          <span class="acts">
+                            <button class="act" type="button" aria-label="查看"><svg class="i"><use href="#i-eye"/></svg></button>
+                            <button class="act" type="button" aria-label="拓扑"><svg class="i"><use href="#i-topology"/></svg></button>
+                            <button class="act" type="button" aria-label="编辑"><svg class="i"><use href="#i-pencil"/></svg></button>
+                            <button class="act danger" type="button" aria-label="删除"><svg class="i"><use href="#i-trash"/></svg></button>
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><span class="cb"></span></td>
+                        <td><span class="cell-clip cell-name" title="p-cgz-srv-bus-172016002059-空地一体化-应用服务器">p-cgz-srv-bus-172016002059-空地一体化-应用服务器</span></td>
+                        <td class="mono">vsvr-20260513-0230</td>
+                        <td>多彩航空大厦3楼IDC</td>
+                        <td>p-cgz</td>
+                        <td><span class="id-short" title="1388a0eb-11cc-40a5-8c5f-4a8855d5f091">1388a0eb…f091 <span class="copy"><svg class="i sm"><use href="#i-copy"/></svg></span></span></td>
+                        <td>
+                          <span class="acts">
+                            <button class="act" type="button" aria-label="查看"><svg class="i"><use href="#i-eye"/></svg></button>
+                            <button class="act" type="button" aria-label="拓扑"><svg class="i"><use href="#i-topology"/></svg></button>
+                            <button class="act" type="button" aria-label="编辑"><svg class="i"><use href="#i-pencil"/></svg></button>
+                            <button class="act danger" type="button" aria-label="删除"><svg class="i"><use href="#i-trash"/></svg></button>
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="mock-foot">
+                  <span>名称优先 · 次要列限宽截断</span>
+                  <span>1 / 1 · 共 2 条</span>
+                </div>
+                <div class="mock-empty">表格高度随内容结束，工作区继续延伸</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail">
+        <div class="detail-card">
+          <h3>目标</h3>
+          <p>不改变操作习惯，只让表格更稳、更快读。这是改动量和收益最平衡的一版。</p>
+        </div>
+        <div class="detail-card">
+          <h3>关键改动</h3>
+          <ul>
+            <li>身份列前置：名称优先，UUID 缩略为可复制的短 ID。</li>
+            <li>表头吸顶、去掉大写字母间距，提高对比度。</li>
+            <li>行高压缩到 36–40px，名称加粗，其余列降级。</li>
+            <li>次要列限宽 + 截断 + 悬浮完整值，常见宽度不再横向滚动。</li>
+            <li>表格改近实色表面，玻璃只保留在页面外壳。</li>
+            <li>操作图标中性色，悬停才着色；删除仅悬停变红。</li>
+            <li>少量数据时表格高度随内容，不再撑满全屏留白。</li>
+          </ul>
+        </div>
+        <div class="detail-card">
+          <h3>代价与适合</h3>
+          <p>中等 CSS/组件调整。列顺序改为“名称优先”，需要确认与字段配置的优先级。适合日常浏览、少量编辑和大多数资源模型。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ B ============================ -->
+    <section class="option" data-panel="b" hidden>
+      <div class="option-head">
+        <span class="option-kicker">B</span>
+        <h2 class="option-title">仅主题修正</h2>
+        <span class="option-sub">只改深色主题，不动布局</span>
+      </div>
+
+      <div class="mock" data-option="b" data-theme="dark">
+        <div class="mock-app">
+          <aside class="mock-rail" aria-hidden="true">
+            <div class="rail-brand"><span class="brand-mark">C</span><span>CMDB 资源管理平台</span></div>
+            <div class="rail-search"><svg class="i sm"><use href="#i-search"/></svg> 搜索模型…</div>
+            <div class="rail-group"><span>资源层-计算资源</span><span>5</span></div>
+            <div class="rail-item"><span class="mi">▤</span><span><b>物理机</b><em>server</em></span></div>
+            <div class="rail-item"><span class="mi">▥</span><span><b>内存</b><em>RAM</em></span></div>
+            <div class="rail-item is-active"><span class="mi">▦</span><span><b>虚拟机</b><em>vserver</em></span></div>
+            <div class="rail-item"><span class="mi">▧</span><span><b>硬盘</b><em>harddisk</em></span></div>
+            <div class="rail-item"><span class="mi">▨</span><span><b>网卡</b><em>NIC</em></span></div>
+            <div class="rail-group"><span>资源层-数据中心</span><span>10</span></div>
+            <div class="rail-item"><span class="mi">▩</span><span><b>数据中心</b><em>dcim_idc</em></span></div>
+            <div class="rail-item"><span class="mi">▣</span><span><b>机房</b><em>dcim_server_room</em></span></div>
+          </aside>
+          <div class="mock-main">
+            <header class="mock-top">
+              <div class="crumbs">资源模型 <i>/</i> 资源数据 <i>/</i> <b>虚拟机</b></div>
+              <div class="top-actions">
+                <span class="stat">匹配实例 <b>2</b></span>
+                <span class="stat">本页 <b>2</b></span>
+                <span class="stat">本页 Active <b>100%</b></span>
+                <span class="stat">本页 PROD <b>2</b></span>
+                <span class="icon-btn" title="刷新"><svg class="i sm"><use href="#i-refresh"/></svg></span>
+                <span class="ghost-btn">批量导入</span>
+                <span class="primary-btn">＋ 新建实例</span>
+              </div>
+            </header>
+            <div class="mock-workspace">
+              <div class="mock-toolbar">
+                <div class="env-tabs"><span class="is-active">全部环境</span><span>生产</span></div>
+                <div class="tools">
+                  <span class="search"><svg class="i sm"><use href="#i-search"/></svg> 230 <span class="x">×</span></span>
+                  <span class="tool">条件过滤</span>
+                  <span class="tool">字段</span>
+                  <span class="tool is-active">列表</span>
+                  <span class="tool">网格</span>
+                  <span class="tool">导出</span>
+                </div>
+              </div>
+              <div class="mock-tablewrap">
+                <div class="mock-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style="width:30px"></th>
+                        <th>ID</th>
+                        <th>数据中心</th>
+                        <th>代码</th>
+                        <th>名称</th>
+                        <th>别名</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><span class="cb"></span></td>
+                        <td><span class="uuid">0ab8d7d1-c9f4-40cc-b3a1-9ebd4ff4a4c0</span></td>
+                        <td>多彩航空大厦3楼IDC</td>
+                        <td><span class="mono">vsvr-20260513-0027</span></td>
+                        <td><span class="name">p-cgz-srv-app-172030006230-运维管理-CMDB</span></td>
+                        <td>p-cgz</td>
+                        <td>
+                          <span class="acts">
+                            <button class="act" type="button" aria-label="查看"><svg class="i"><use href="#i-eye"/></svg></button>
+                            <button class="act" type="button" aria-label="拓扑"><svg class="i"><use href="#i-topology"/></svg></button>
+                            <button class="act" type="button" aria-label="编辑"><svg class="i"><use href="#i-pencil"/></svg></button>
+                            <button class="act danger" type="button" aria-label="删除"><svg class="i"><use href="#i-trash"/></svg></button>
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><span class="cb"></span></td>
+                        <td><span class="uuid">1388a0eb-11cc-40a5-8c5f-4a8855d5f091</span></td>
+                        <td>多彩航空大厦3楼IDC</td>
+                        <td><span class="mono">vsvr-20260513-0230</span></td>
+                        <td><span class="name">p-cgz-srv-bus-172016002059-空地一体化-应用服务器</span></td>
+                        <td>p-cgz</td>
+                        <td>
+                          <span class="acts">
+                            <button class="act" type="button" aria-label="查看"><svg class="i"><use href="#i-eye"/></svg></button>
+                            <button class="act" type="button" aria-label="拓扑"><svg class="i"><use href="#i-topology"/></svg></button>
+                            <button class="act" type="button" aria-label="编辑"><svg class="i"><use href="#i-pencil"/></svg></button>
+                            <button class="act danger" type="button" aria-label="删除"><svg class="i"><use href="#i-trash"/></svg></button>
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="mock-foot">
+                  <span class="scrollhint"><span></span></span>
+                  <span class="scrollhint-label">布局未变：横向滚动仍在</span>
+                  <span>1 / 1 · 共 2 条</span>
+                </div>
+                <div class="mock-empty">主题变实了，但留白与列宽问题仍在</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail">
+        <div class="detail-card">
+          <h3>目标</h3>
+          <p>用最小的改动先解决“看不清”的问题，布局与交互保持现状。</p>
+        </div>
+        <div class="detail-card">
+          <h3>关键改动</h3>
+          <ul>
+            <li>表格表面从半透明玻璃改为近实色面板。</li>
+            <li>表头更亮、去掉大写字母间距，行分隔和悬停更清晰。</li>
+            <li>操作图标改为中性色，悬停才着色。</li>
+            <li>Liquid Glass 只保留在页面外壳与侧栏。</li>
+          </ul>
+        </div>
+        <div class="detail-card">
+          <h3>代价与适合</h3>
+          <p>最小改动、最低风险。但大片留白、横向滚动、身份层级问题都不解决。适合先快速提升可读性，后续再动布局。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ C ============================ -->
+    <section class="option" data-panel="c" hidden>
+      <div class="option-head">
+        <span class="option-kicker">C</span>
+        <h2 class="option-title">紧凑工作台</h2>
+        <span class="option-sub">吸顶表头、吸附身份列、密度切换</span>
+      </div>
+
+      <div class="mock" data-option="c" data-theme="dark">
+        <div class="mock-app">
+          <aside class="mock-rail" aria-hidden="true">
+            <div class="rail-brand"><span class="brand-mark">C</span><span>CMDB 资源管理平台</span></div>
+            <div class="rail-search"><svg class="i sm"><use href="#i-search"/></svg> 搜索模型…</div>
+            <div class="rail-group"><span>资源层-计算资源</span><span>5</span></div>
+            <div class="rail-item"><span class="mi">▤</span><span><b>物理机</b><em>server</em></span></div>
+            <div class="rail-item"><span class="mi">▥</span><span><b>内存</b><em>RAM</em></span></div>
+            <div class="rail-item is-active"><span class="mi">▦</span><span><b>虚拟机</b><em>vserver</em></span></div>
+            <div class="rail-item"><span class="mi">▧</span><span><b>硬盘</b><em>harddisk</em></span></div>
+            <div class="rail-item"><span class="mi">▨</span><span><b>网卡</b><em>NIC</em></span></div>
+            <div class="rail-group"><span>资源层-数据中心</span><span>10</span></div>
+            <div class="rail-item"><span class="mi">▩</span><span><b>数据中心</b><em>dcim_idc</em></span></div>
+            <div class="rail-item"><span class="mi">▣</span><span><b>机房</b><em>dcim_server_room</em></span></div>
+          </aside>
+          <div class="mock-main">
+            <header class="mock-top">
+              <div class="crumbs">资源模型 <i>/</i> 资源数据 <i>/</i> <b>虚拟机</b></div>
+              <div class="top-actions">
+                <span class="stat">匹配实例 <b>2</b></span>
+                <span class="stat">本页 <b>2</b></span>
+                <span class="stat">本页 Active <b>100%</b></span>
+                <span class="stat">本页 PROD <b>2</b></span>
+                <span class="icon-btn" title="刷新"><svg class="i sm"><use href="#i-refresh"/></svg></span>
+                <span class="ghost-btn">批量导入</span>
+                <span class="primary-btn">＋ 新建实例</span>
+              </div>
+            </header>
+            <div class="mock-workspace">
+              <div class="mock-toolbar">
+                <div class="env-tabs"><span class="is-active">全部环境</span><span>生产</span></div>
+                <div class="tools">
+                  <span class="search"><svg class="i sm"><use href="#i-search"/></svg> 230 <span class="x">×</span></span>
+                  <span class="tool">条件过滤</span>
+                  <span class="tool">字段</span>
+                  <span class="tool is-active">列表</span>
+                  <span class="tool">网格</span>
+                  <span class="tool density"><span class="on">紧凑</span><span>舒适</span></span>
+                  <span class="tool">导出</span>
+                </div>
+              </div>
+              <div class="mock-tablewrap">
+                <div class="mock-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style="width:4%"></th>
+                        <th class="idcell" style="width:36%">名称 / ID</th>
+                        <th style="width:22%">数据中心</th>
+                        <th style="width:20%">代码</th>
+                        <th style="width:10%">别名</th>
+                        <th style="width:8%">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr class="is-selected">
+                        <td><span class="cb is-checked">✓</span></td>
+                        <td class="idcell">
+                          <div class="ident">
+                            <b>p-cgz-srv-app-172030006230-运维管理-CMDB</b>
+                            <span>0ab8d7d1…a4c0</span>
+                          </div>
+                        </td>
+                        <td>多彩航空大厦3楼IDC</td>
+                        <td class="mono">vsvr-20260513-0027</td>
+                        <td>p-cgz</td>
+                        <td><button class="act" type="button" aria-label="更多操作"><svg class="i"><use href="#i-more"/></svg></button></td>
+                      </tr>
+                      <tr>
+                        <td><span class="cb"></span></td>
+                        <td class="idcell">
+                          <div class="ident">
+                            <b>p-cgz-srv-bus-172016002059-空地一体化-应用服务器</b>
+                            <span>1388a0eb…f091</span>
+                          </div>
+                        </td>
+                        <td>多彩航空大厦3楼IDC</td>
+                        <td class="mono">vsvr-20260513-0230</td>
+                        <td>p-cgz</td>
+                        <td><button class="act" type="button" aria-label="更多操作"><svg class="i"><use href="#i-more"/></svg></button></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="mock-foot">
+                  <span>表头吸顶 · 首列吸附 · 操作收入菜单</span>
+                  <span>1 / 1 · 共 2 条</span>
+                </div>
+                <div class="mock-empty">行高 30–34px，一屏可容纳更多资源；窄屏自动收起次要列</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail">
+        <div class="detail-card">
+          <h3>目标</h3>
+          <p>为资源量大、频繁扫读和编辑的场景服务。密度、固定列和响应式收列是重点。</p>
+        </div>
+        <div class="detail-card">
+          <h3>关键改动</h3>
+          <ul>
+            <li>表头吸顶，身份列横向吸附，操作列固定在右侧。</li>
+            <li>名称 + 短 ID 双行身份单元格，信息更集中。</li>
+            <li>紧凑 / 舒适密度切换，按操作员偏好持久化。</li>
+            <li>窄屏自动收起次要列，完整内容仍在侧栏。</li>
+            <li>多个行操作收进“⋯”菜单，减少图标噪音。</li>
+          </ul>
+        </div>
+        <div class="detail-card">
+          <h3>代价与适合</h3>
+          <p>中等改动。固定列、密度切换和窄屏收列都需要真实浏览器回归。适合资源数量大、操作频繁的团队。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ D ============================ -->
+    <section class="option" data-panel="d" hidden>
+      <div class="option-head">
+        <span class="option-kicker">D</span>
+        <h2 class="option-title">主从卡片浏览</h2>
+        <span class="option-sub">默认卡片，表格保留为“明细”</span>
+      </div>
+
+      <div class="mock" data-option="d" data-theme="dark">
+        <div class="mock-app">
+          <aside class="mock-rail" aria-hidden="true">
+            <div class="rail-brand"><span class="brand-mark">C</span><span>CMDB 资源管理平台</span></div>
+            <div class="rail-search"><svg class="i sm"><use href="#i-search"/></svg> 搜索模型…</div>
+            <div class="rail-group"><span>资源层-计算资源</span><span>5</span></div>
+            <div class="rail-item"><span class="mi">▤</span><span><b>物理机</b><em>server</em></span></div>
+            <div class="rail-item"><span class="mi">▥</span><span><b>内存</b><em>RAM</em></span></div>
+            <div class="rail-item is-active"><span class="mi">▦</span><span><b>虚拟机</b><em>vserver</em></span></div>
+            <div class="rail-item"><span class="mi">▧</span><span><b>硬盘</b><em>harddisk</em></span></div>
+            <div class="rail-item"><span class="mi">▨</span><span><b>网卡</b><em>NIC</em></span></div>
+            <div class="rail-group"><span>资源层-数据中心</span><span>10</span></div>
+            <div class="rail-item"><span class="mi">▩</span><span><b>数据中心</b><em>dcim_idc</em></span></div>
+            <div class="rail-item"><span class="mi">▣</span><span><b>机房</b><em>dcim_server_room</em></span></div>
+          </aside>
+          <div class="mock-main">
+            <header class="mock-top">
+              <div class="crumbs">资源模型 <i>/</i> 资源数据 <i>/</i> <b>虚拟机</b></div>
+              <div class="top-actions">
+                <span class="stat">匹配实例 <b>2</b></span>
+                <span class="stat">本页 <b>2</b></span>
+                <span class="stat">本页 Active <b>100%</b></span>
+                <span class="stat">本页 PROD <b>2</b></span>
+                <span class="icon-btn" title="刷新"><svg class="i sm"><use href="#i-refresh"/></svg></span>
+                <span class="ghost-btn">批量导入</span>
+                <span class="primary-btn">＋ 新建实例</span>
+              </div>
+            </header>
+            <div class="mock-workspace">
+              <div class="mock-toolbar">
+                <div class="env-tabs"><span class="is-active">全部环境</span><span>生产</span></div>
+                <div class="tools">
+                  <span class="search"><svg class="i sm"><use href="#i-search"/></svg> 230 <span class="x">×</span></span>
+                  <span class="tool">条件过滤</span>
+                  <span class="tool">字段</span>
+                  <span class="tool">列表</span>
+                  <span class="tool is-active">网格</span>
+                  <span class="tool">导出</span>
+                </div>
+              </div>
+              <div class="cards">
+                <article class="rcard">
+                  <div class="rcard-top">
+                    <div class="rcard-id">
+                      <span class="vm-ico" aria-hidden="true"><svg class="i"><use href="#i-vm"/></svg></span>
+                      <span class="chip-good">Active</span>
+                    </div>
+                    <button class="act" type="button" aria-label="更多操作"><svg class="i"><use href="#i-more"/></svg></button>
+                  </div>
+                  <h3>p-cgz-srv-app-172030006230-运维管理-CMDB</h3>
+                  <span class="short">0ab8d7d1…a4c0</span>
+                  <dl>
+                    <dt>数据中心</dt><dd>多彩航空大厦3楼IDC</dd>
+                    <dt>代码</dt><dd class="mono">vsvr-20260513-0027</dd>
+                    <dt>别名</dt><dd>p-cgz</dd>
+                  </dl>
+                  <div class="rcard-foot">
+                    <button class="ghost-btn" type="button">查看</button>
+                    <button class="ghost-btn" type="button">编辑</button>
+                    <button class="ghost-btn" type="button">拓扑</button>
+                    <span class="more"></span>
+                  </div>
+                </article>
+                <article class="rcard">
+                  <div class="rcard-top">
+                    <div class="rcard-id">
+                      <span class="vm-ico" aria-hidden="true"><svg class="i"><use href="#i-vm"/></svg></span>
+                      <span class="chip-good">Active</span>
+                    </div>
+                    <button class="act" type="button" aria-label="更多操作"><svg class="i"><use href="#i-more"/></svg></button>
+                  </div>
+                  <h3>p-cgz-srv-bus-172016002059-空地一体化-应用服务器</h3>
+                  <span class="short">1388a0eb…f091</span>
+                  <dl>
+                    <dt>数据中心</dt><dd>多彩航空大厦3楼IDC</dd>
+                    <dt>代码</dt><dd class="mono">vsvr-20260513-0230</dd>
+                    <dt>别名</dt><dd>p-cgz</dd>
+                  </dl>
+                  <div class="rcard-foot">
+                    <button class="ghost-btn" type="button">查看</button>
+                    <button class="ghost-btn" type="button">编辑</button>
+                    <button class="ghost-btn" type="button">拓扑</button>
+                    <span class="more"></span>
+                  </div>
+                </article>
+              </div>
+              <div class="mock-foot">
+                <span>卡片只放主字段，完整属性在详情抽屉</span>
+                <span>1 / 1 · 共 2 条</span>
+              </div>
+              <div class="mock-empty">宽屏两列、窄屏单列；表格仍可从“列表”切换</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail">
+        <div class="detail-card">
+          <h3>目标</h3>
+          <p>字段少、以浏览和进入详情为主时，让每一台资源都容易读、容易点。</p>
+        </div>
+        <div class="detail-card">
+          <h3>关键改动</h3>
+          <ul>
+            <li>默认展示资源卡片：名称、状态、短 ID 与 2–3 个关键字段。</li>
+            <li>点击卡片打开现有详情抽屉；操作按钮保留在卡片底部。</li>
+            <li>表格保留为“明细”视图，供需要多列对比的操作员切换。</li>
+            <li>宽屏两列、窄屏单列，卡片高度由内容决定。</li>
+          </ul>
+        </div>
+        <div class="detail-card">
+          <h3>代价与适合</h3>
+          <p>改动最大，多列对比能力下降。适合字段少、以浏览和详情为主，或需要兼顾窄屏与触控的场景。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ COMPARE ============================ -->
+    <section class="compare">
+      <div class="compare-head">
+        <div>
+          <h2>怎么选</h2>
+          <p>只想快速改善观感选 B；兼顾布局与风险选 A；资源量大选 C；字段少、以详情为主选 D。</p>
+        </div>
+        <span class="recommend">● 推荐 A · 稳重数据表</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>方案</th>
+              <th>布局变化</th>
+              <th>深色主题</th>
+              <th>改动量</th>
+              <th>主要代价</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>当前</b></td>
+              <td>平铺表格，ID 前置，行高 ~48px</td>
+              <td>玻璃 + 低对比</td>
+              <td><span class="badge">—</span></td>
+              <td>留白、横向滚动、身份层级弱</td>
+            </tr>
+            <tr>
+              <td><b>A · 稳重数据表</b><span class="sub">推荐</span></td>
+              <td>身份前置、列宽约束、紧凑行高、表头吸顶</td>
+              <td>近实色 + 高对比</td>
+              <td><span class="badge mid">中</span></td>
+              <td>需要接受“名称优先”的列顺序</td>
+            </tr>
+            <tr>
+              <td><b>B · 仅主题修正</b></td>
+              <td>不变</td>
+              <td>近实色 + 高对比</td>
+              <td><span class="badge low">小</span></td>
+              <td>留白与列宽问题保留</td>
+            </tr>
+            <tr>
+              <td><b>C · 紧凑工作台</b></td>
+              <td>吸顶/吸附、密度切换、窄屏收列</td>
+              <td>近实色 + 高对比</td>
+              <td><span class="badge mid">中</span></td>
+              <td>固定列与窄屏回归成本</td>
+            </tr>
+            <tr>
+              <td><b>D · 主从卡片</b></td>
+              <td>默认卡片，表格作为明细视图</td>
+              <td>近实色 + 高对比</td>
+              <td><span class="badge high">大</span></td>
+              <td>多列对比能力下降</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="footnote">
+      <span>◈</span>
+      <span>选好后在对话里告诉我 <b>A / B / C / D</b>。也可以混搭，例如「A 的列宽 + C 的密度切换 + B 的主题强度」，我再按组合细化。预览里的深浅色只影响截图区域，页面本身是深色工作台。</span>
+    </p>
+  </main>
+</div>
+
+<script>
+  (function () {
+    const tabs = Array.from(document.querySelectorAll('[data-tab]'));
+    const panels = Array.from(document.querySelectorAll('[data-panel]'));
+    const OPTION_KEY = 'cmdb-table-option';
+    const THEME_KEY = 'cmdb-table-mock-theme';
+
+    function remember(key, value) {
+      try { localStorage.setItem(key, value); } catch (_) { /* convenience only */ }
+    }
+
+    function read(key) {
+      try { return localStorage.getItem(key); } catch (_) { return null; }
+    }
+
+    function selectOption(id, persist) {
+      if (!panels.some(function (panel) { return panel.dataset.panel === id; })) return;
+      tabs.forEach(function (tab) {
+        tab.setAttribute('aria-pressed', String(tab.dataset.tab === id));
+      });
+      panels.forEach(function (panel) {
+        panel.hidden = panel.dataset.panel !== id;
+      });
+      if (persist) remember(OPTION_KEY, id);
+    }
+
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () { selectOption(tab.dataset.tab, true); });
+    });
+
+    const savedOption = read(OPTION_KEY);
+    selectOption(savedOption || 'a', false);
+
+    const themeButtons = Array.from(document.querySelectorAll('[data-mock-theme]'));
+
+    function setMockTheme(theme, persist) {
+      document.querySelectorAll('.mock').forEach(function (mock) {
+        mock.setAttribute('data-theme', theme);
+      });
+      themeButtons.forEach(function (button) {
+        button.setAttribute('aria-pressed', String(button.dataset.mockTheme === theme));
+      });
+      if (persist) remember(THEME_KEY, theme);
+    }
+
+    themeButtons.forEach(function (button) {
+      button.addEventListener('click', function () { setMockTheme(button.dataset.mockTheme, true); });
+    });
+
+    const savedTheme = read(THEME_KEY);
+    setMockTheme(savedTheme === 'light' ? 'light' : 'dark', false);
+  })();
+</script>

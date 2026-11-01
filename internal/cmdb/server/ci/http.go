@@ -43,6 +43,8 @@ func NewHandler(uc *cibiz.Usecase) *Handler { return &Handler{uc: uc} }
 //
 //	GET    /v1/cmdb/ci-types/{ref}/instances   (any authed) — a page of instances
 //	GET    /v1/cmdb/instances/{id}             (any authed) — one instance
+//	GET    /v1/cmdb/instances/{id}/baseline    (any authed) — rollback preview
+//	POST   /v1/cmdb/instances/{id}/rollback    (any authed) — roll back
 //	POST   /v1/cmdb/instances                  (any authed) — create
 //	PUT    /v1/cmdb/instances                  (any authed) — create-or-replace
 //	PUT    /v1/cmdb/instances/{id}             (any authed) — update
@@ -63,6 +65,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/cmdb/ci-types/{ref}/instances", h.listInstances)
 	r.Get("/v1/cmdb/instances/{id}", h.getInstance)
 	r.Get("/v1/cmdb/instances/{id}/files", h.getInstanceFiles)
+	r.Get("/v1/cmdb/instances/{id}/baseline", h.instanceBaseline)
+	r.Post("/v1/cmdb/instances/{id}/rollback", h.rollbackInstance)
 	r.Post("/v1/cmdb/instances", h.createInstance)
 	r.Put("/v1/cmdb/instances", h.replaceInstance)
 	r.Put("/v1/cmdb/instances/{id}", h.updateInstance)

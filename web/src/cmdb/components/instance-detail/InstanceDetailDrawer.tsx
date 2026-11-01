@@ -75,7 +75,7 @@ export function InstanceDetailDrawer({
   onInstanceSaved?(instanceID: number): void;
 }) {
   const { tr } = useI18n();
-  const { isAdmin } = usePermissions();
+  const { isAdmin, canMutate } = usePermissions();
   const toast = useToast();
   const [tab, setTab] = useState<TabKey>(initialTab);
   // `nav` holds a subject opened from the topology; until then the props are
@@ -207,6 +207,13 @@ export function InstanceDetailDrawer({
     },
     [onInstanceSaved, subject.id, toast, tr],
   );
+
+  // A rollback is a write: the drawer's own copy is stale immediately, and the
+  // list behind it needs the same refresh an edit triggers.
+  const afterRollback = useCallback(() => {
+    setRetryKey((key) => key + 1);
+    onInstanceSaved?.(subject.id);
+  }, [onInstanceSaved, subject.id]);
 
   // The user list is admin-only. A non-admin still gets the numeric uid rather
   // than an empty User column; a missing user is a label we cannot resolve, not
@@ -432,7 +439,14 @@ export function InstanceDetailDrawer({
           )}
         </TabsContent>
         <TabsContent value="history" className="mt-4">
-          {tab === 'history' && <InstanceHistory ciID={subject.id} userLabel={userLabel} />}
+          {tab === 'history' && (
+            <InstanceHistory
+              ciID={subject.id}
+              userLabel={userLabel}
+              canRollback={canEdit && canMutate}
+              onRolledBack={afterRollback}
+            />
+          )}
         </TabsContent>
         <TabsContent value="triggers" className="mt-4">
           {tab === 'triggers' && <InstanceTriggers ciID={subject.id} userLabel={userLabel} />}

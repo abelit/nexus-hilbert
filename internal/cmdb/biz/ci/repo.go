@@ -48,6 +48,11 @@ type ValueRepo interface {
 	// tables, each row tagged with the table it came from.
 	LoadValueRows(ctx context.Context, ciID model.ID) ([]ValueRow, error)
 
+	// LoadAttributeHistory returns the instance's attribute changes at or
+	// after the cutoff, oldest first. The cutoff is the rewind point: those
+	// rows are the writes the rollback undoes.
+	LoadAttributeHistory(ctx context.Context, ciID model.ID, cutoff RollbackCutoff) ([]HistoryChange, error)
+
 	// LoadCI returns a CI by id, or nil when it does not exist.
 	LoadCI(ctx context.Context, ciID model.ID) (*cimodel.CI, error)
 

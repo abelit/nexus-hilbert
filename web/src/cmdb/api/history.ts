@@ -6,7 +6,7 @@
 // names and instance names ARE resolved by the service, because those live in
 // its own tables.
 
-import { cmdbGet, type Query } from './http';
+import { cmdbGet, cmdbPost, type Query } from './http';
 
 export type HistoryFilter = {
   start?: string;
@@ -179,5 +179,71 @@ export function listCITriggerHistory(ciID: number, page = 1, pageSize = 20): Pro
   return cmdbGet<TriggerHistoryPage>(`/history/ci/${encodeURIComponent(String(ciID))}/triggers`, {
     page,
     page_size: pageSize,
+  });
+}
+
+// --- rollback ---
+
+/**
+ * The rewind point.
+ *
+ * `record_id` names the write the operator selected, exactly. `before` is the
+ * manual time picker's answer; the server accepts either, and prefers the id
+ * when both are present because two writes can share a timestamp.
+ */
+export type RollbackTarget = { before?: string; record_id?: number };
+
+/** One attribute the rollback would restore. */
+export type BaselineChange = {
+  attr_id: number;
+  attr_name?: string;
+  attr_alias?: string;
+  value_type?: string;
+  is_list?: boolean;
+  /** One entry per stored value; empty means the attribute is absent. */
+  current: string[];
+  target: string[];
+};
+
+/** A changed attribute the rollback deliberately leaves alone. */
+export type BaselineSkip = {
+  attr_id: number;
+  attr_name?: string;
+  attr_alias?: string;
+  reason:
+    | 'sensitive'
+    | 'computed'
+    | 'dynamic'
+    | 'unsupported'
+    | 'unavailable'
+    | 'required'
+    | 'identity'
+    | string;
+};
+
+export type BaselinePreview = {
+  ci_id: number;
+  before?: string;
+  record_id?: number;
+  changes: BaselineChange[];
+  skipped: BaselineSkip[];
+};
+
+/** Previews a rollback without writing anything. */
+export function previewInstanceBaseline(ciID: number, target: RollbackTarget): Promise<BaselinePreview> {
+  return cmdbGet<BaselinePreview>(`/instances/${encodeURIComponent(String(ciID))}/baseline`, {
+    before: target.before,
+    record_id: target.record_id,
+  });
+}
+
+/**
+ * Applies a rollback. The server recomputes the target values from the history
+ * at apply time, so the body carries the rewind point rather than a value list.
+ */
+export function rollbackInstance(ciID: number, target: RollbackTarget): Promise<BaselinePreview> {
+  return cmdbPost<BaselinePreview>(`/instances/${encodeURIComponent(String(ciID))}/rollback`, {
+    before: target.before,
+    record_id: target.record_id,
   });
 }

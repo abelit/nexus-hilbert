@@ -31,6 +31,10 @@ func (valueRepoStub) LoadValueRows(context.Context, model.ID) ([]ValueRow, error
 	return nil, errors.New("not used")
 }
 
+func (valueRepoStub) LoadAttributeHistory(context.Context, model.ID, RollbackCutoff) ([]HistoryChange, error) {
+	return nil, errors.New("not used")
+}
+
 func (valueRepoStub) DeleteCI(context.Context, model.ID) error { return errors.New("not used") }
 
 // queryRepoStub is the do-nothing half of the query port, embedded by test

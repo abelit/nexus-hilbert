@@ -89,6 +89,7 @@ GET /v1/cmdb/history/ci/{id}
 GET /v1/cmdb/history/ci/{id}/triggers
 GET /v1/cmdb/history/relations
 GET /v1/cmdb/instances/{id}
+GET /v1/cmdb/instances/{id}/baseline
 GET /v1/cmdb/instances/{id}/files
 GET /v1/cmdb/ipam/addresses
 GET /v1/cmdb/ipam/history/operations
@@ -145,6 +146,7 @@ POST /v1/cmdb/file-storage/test
 POST /v1/cmdb/import/commit
 POST /v1/cmdb/import/preview
 POST /v1/cmdb/instances
+POST /v1/cmdb/instances/{id}/rollback
 POST /v1/cmdb/ipam/addresses
 POST /v1/cmdb/ipam/history/scans
 POST /v1/cmdb/ipam/scopes

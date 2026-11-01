@@ -1,9 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw-server';
+import { useAuth } from '@/store/auth';
 
 import type { CIType, TypeAttribute } from '../../api/citype';
 import { ToastProvider } from '../Toast';
@@ -145,12 +146,34 @@ function mocks() {
     http.get('/api/v1/cmdb/ci-relations/search', () =>
       HttpResponse.json({ numfound: 0, total: 0, page: 1, result: [] }),
     ),
+    http.get('/api/v1/cmdb/history/ci/:id', () =>
+      HttpResponse.json({
+        items: [
+          {
+            id: 1,
+            record_id: 11,
+            uid: 7,
+            operate_type: '2',
+            ci_id: 5,
+            attr_id: 11,
+            attr_name: 'note',
+            attr_alias: '备注',
+            old: 'a',
+            new: 'b',
+            created_at: '2026-10-01T10:00:00Z',
+          },
+        ],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      }),
+    ),
   );
 }
 
 function renderDrawer(
   onEdit = vi.fn(),
-  initialTab: 'overview' | 'topology' = 'topology',
+  initialTab: 'overview' | 'topology' | 'history' = 'topology',
   onInstanceSaved = vi.fn(),
 ) {
   render(
@@ -173,6 +196,10 @@ function renderDrawer(
 
 beforeEach(() => {
   localStorage.setItem('ongrid-locale', 'zh-CN');
+});
+
+afterEach(() => {
+  useAuth.setState({ token: null, role: null });
 });
 
 describe('switching resources from the topology', () => {
@@ -396,5 +423,45 @@ describe('editing a value in the detail view', () => {
     expect(within(drawer).queryByRole('button', { name: '编辑 密钥' })).not.toBeInTheDocument();
     expect(within(drawer).queryByRole('button', { name: '编辑 序列号' })).not.toBeInTheDocument();
     expect(within(drawer).getByRole('button', { name: '编辑 主机标识' })).toBeInTheDocument();
+  });
+});
+
+describe('the history tab rollback entry', () => {
+  it('offers a writer the rollback entry', async () => {
+    useAuth.setState({ token: null, role: 'user' });
+    mocks();
+    renderDrawer(vi.fn(), 'history');
+
+    const drawer = await screen.findByRole('dialog');
+    expect(await within(drawer).findByText('备注')).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: '回滚' })).toBeInTheDocument();
+    expect(
+      within(drawer).getByRole('button', { name: '回滚到此变更之前' }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps a read-only peek free of write entries', async () => {
+    useAuth.setState({ token: null, role: 'user' });
+    mocks();
+    render(
+      <ToastProvider>
+        <InstanceDetailDrawer
+          model={host}
+          models={[host, switchModel]}
+          attributes={hostAttributes}
+          groups={[]}
+          instanceID={5}
+          initialTab="history"
+          onClose={() => undefined}
+        />
+      </ToastProvider>,
+    );
+
+    const drawer = await screen.findByRole('dialog');
+    await within(drawer).findByText('备注');
+    expect(within(drawer).queryByRole('button', { name: '回滚' })).not.toBeInTheDocument();
+    expect(
+      within(drawer).queryByRole('button', { name: '回滚到此变更之前' }),
+    ).not.toBeInTheDocument();
   });
 });
