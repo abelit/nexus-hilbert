@@ -110,6 +110,9 @@ for arch in amd64 arm64; do
     "$package_root/install.sh" \
     "$package_root/uninstall.sh" \
     "$package_root/upgrade.sh" \
+    "$package_root/backup.sh" \
+    "$package_root/restore.sh" \
+    "$package_root/backup-lib.sh" \
     "$package_root/public-url.sh" \
     "$package_root/data-permissions.sh" \
     "$package_root/pcap-parser-auth.sh" \

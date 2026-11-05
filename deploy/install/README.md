@@ -186,31 +186,31 @@ v0.7.45 起所有有状态服务（MySQL / Prometheus / Loki / Tempo / qdrant / 
 - 把 `ONGRID_DATA_DIR` 指向独立 SSD / NVMe / NFS 挂载点；
 - 关键卷（`mysql`、`prometheus`）单独走快速本地盘，`loki` / `tempo` 走容量盘。
 
-### 数据备份
+### 数据备份与恢复
 
-直接对宿主机目录做快照即可，不再需要 `docker run --rm -v <named-vol>:/data`：
+发布包根目录提供 `backup.sh` 和 `restore.sh`。默认备份核心业务数据：MySQL 逻辑导出，以及 `rustfs`、`cmdb-files`、`chat-attachments`、`pages`、`packet-captures`、`pcap-parser`、`qdrant`、`workspace`、`skills`、`embeddings`、`tools` 目录，附带 `.env`、`certs/`、`VERSION` 和 `docker-compose.yml`。监控数据（`prometheus`、`loki`、`tempo`、`grafana`）默认跳过。
+
+备份会先停止 Compose 栈，只启动 MySQL 完成逻辑导出，文件目录在容器停止后打包，结束后恢复原先运行的服务，因此存在一段停机窗口。归档带有各文件 SHA-256 并包含密钥，默认权限 `600`，请存放到受控位置或同步到异地。
 
 ```bash
-# MySQL 热备（推荐）— 不停业务
-sudo docker exec ongrid-mysql sh -c \
-    'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines ongrid' \
-    | gzip > /backup/ongrid-mysql-$(date +%F).sql.gz
+# 备份到默认目录 /var/backups/ongrid/
+sudo ./backup.sh
 
-# Prom TSDB 快照（开启 admin API 后用 /api/v1/admin/tsdb/snapshot 更稳）
-# 简单姿势：tar 宿主机目录
-sudo tar czf /backup/prom-$(date +%F).tar.gz -C /var/lib/ongrid/prometheus .
+# 指定目录、只保留最近 7 份、并包含监控数据
+sudo ./backup.sh --output /backup/ongrid --keep 7 --include-monitoring
 
-# Loki / Tempo / qdrant 同理
-sudo tar czf /backup/loki-$(date +%F).tar.gz   -C /var/lib/ongrid/loki .
+# 交互式恢复（需要输入 restore 确认）
+sudo ./restore.sh /backup/ongrid/ongrid-backup-v0.7.113-20261105T120000Z.tar.gz
 
-# CMDB 文件属性附件（选择本地存储时）
-sudo tar czf /backup/cmdb-files-$(date +%F).tar.gz -C /var/lib/ongrid/cmdb-files .
-
-# 内置 RustFS 对象存储（选择 S3 时）
-sudo tar czf /backup/rustfs-$(date +%F).tar.gz -C /var/lib/ongrid/rustfs .
-sudo tar czf /backup/tempo-$(date +%F).tar.gz  -C /var/lib/ongrid/tempo .
-sudo tar czf /backup/qdrant-$(date +%F).tar.gz -C /var/lib/ongrid/qdrant .
+# 非交互恢复，完成后保持栈停止
+sudo ./restore.sh --yes --no-start /backup/ongrid/ongrid-backup-v0.7.113-20261105T120000Z.tar.gz
 ```
+
+`restore.sh` 会先校验归档完整性和路径安全，再停止栈、把现有数据目录改名为 `<name>.pre-restore-<时间戳>`、重新初始化 MySQL 并导入 dump、解包文件数据，最后启动服务。恢复过程中任何一步失败都会把旧目录移回并尝试重启原栈；恢复成功后确认业务正常，再删除 `.pre-restore-*` 目录。
+
+默认保留目标机现有的 `.env` 和 `certs/`，避免把归档里的 `ONGRID_DATA_DIR` 覆盖到不同路径；只有显式传入 `--with-config` 才会替换，且归档与当前 `ONGRID_DATA_DIR` 不一致时脚本会拒绝执行。归档中的 `docker-compose.yml` 和 `VERSION` 仅作参考，恢复时不会覆盖目标机文件。非默认安装目录通过 `ONGRID_INSTALL_DIR` 指定。
+
+跨版本恢复会给出告警，数据库 schema 兼容性不做保证；建议在相同版本或升级前恢复。
 
 ### 数据卷迁移（v0.7.45 前的安装升级到 v0.7.45+ 必读）
 
@@ -412,7 +412,7 @@ sudo docker exec ongrid-prometheus wget -qO- \
 
 `/opt/ongrid/prometheus.yml` 是 bind-mounted scrape config，改完跑 `docker compose restart prometheus` 或 `curl -XPOST http://prometheus:9090/-/reload`（`--web.enable-lifecycle` 已开）。
 
-**备份**已迁移到宿主机目录（v0.7.45+），见上文「数据存储 → 数据备份」小节，不再需要 `docker run --rm -v prometheus_data:/data`。
+**备份**已迁移到宿主机目录（v0.7.45+），见上文「数据备份与恢复」小节，不再需要 `docker run --rm -v prometheus_data:/data`。
 
 ### Agent runtime 迁移（统一 Graph）
 

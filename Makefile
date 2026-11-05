@@ -898,6 +898,7 @@ test-release-package: ## [test] 校验安装 URL 与 Compose 发布包内容
 	bash scripts/test-edge-upgrade-hook-guard.sh
 	$(MAKE) --no-print-directory test-edge-attachments
 	bash scripts/test-compose-release-package.sh
+	bash scripts/test-backup-restore.sh
 	bash scripts/test-apply-pending-upgrade.sh
 
 .PHONY: dist-clean
