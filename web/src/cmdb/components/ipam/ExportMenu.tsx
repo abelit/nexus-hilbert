@@ -163,9 +163,11 @@ export function ExportMenu<T>({
                     onClick={() => setScope(item)}
                     className={cn(
                       'min-w-0 flex-1 truncate whitespace-nowrap rounded px-2 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+                      // The popup surface is already bg-card, so the selected
+                      // segment needs the text token's fill to stay visible.
                       scope === item
-                        ? 'bg-card font-medium text-text shadow-sm'
-                        : 'text-text-muted hover:text-text',
+                        ? 'bg-text/10 font-medium text-text'
+                        : 'text-text-muted hover:bg-text/5 hover:text-text',
                     )}
                   >
                     {item === 'all'
