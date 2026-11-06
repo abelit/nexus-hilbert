@@ -52,6 +52,7 @@ type fakeService struct {
 	lastCreateModel    string
 	lastUpdateProvider string
 	lastUpdateModel    string
+	lastUpdateEffort   string
 }
 
 func TestValidateImageAttachments(t *testing.T) {
@@ -124,9 +125,10 @@ func (f *fakeService) RenameSession(_ context.Context, c svc.Caller, _, _ string
 	return f.closeErr
 }
 
-func (f *fakeService) UpdateSessionModel(_ context.Context, _ svc.Caller, _, provider, selectedModel string) error {
+func (f *fakeService) UpdateSessionModel(_ context.Context, _ svc.Caller, _, provider, selectedModel string, reasoningEffort string) error {
 	f.lastUpdateProvider = provider
 	f.lastUpdateModel = selectedModel
+	f.lastUpdateEffort = reasoningEffort
 	return nil
 }
 func (f *fakeService) PostMessage(_ context.Context, c svc.Caller, _ string, content string) (*chatprotocol.Reply, error) {
@@ -212,13 +214,13 @@ func TestUpdateSessionModel(t *testing.T) {
 	f := &fakeService{}
 	h := NewHandler(f)
 	r := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "user"})
-	req := httptest.NewRequest(http.MethodPatch, "/v1/chat/sessions/session-1", strings.NewReader(`{"provider":"deepseek","model":"deepseek-chat"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/v1/chat/sessions/session-1", strings.NewReader(`{"provider":"deepseek","model":"deepseek-v4-flash","reasoning_effort":"high"}`))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
 	}
-	if f.lastUpdateProvider != "deepseek" || f.lastUpdateModel != "deepseek-chat" {
+	if f.lastUpdateProvider != "deepseek" || f.lastUpdateModel != "deepseek-v4-flash" || f.lastUpdateEffort != "high" {
 		t.Fatalf("update route = %q/%q", f.lastUpdateProvider, f.lastUpdateModel)
 	}
 }
@@ -299,6 +301,28 @@ func TestPostMessageSessionNotFound(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body.Code != "not-found" {
 		t.Errorf("code = %q", body.Code)
+	}
+}
+
+func TestStreamErrorMarksOnlyPreDispatchRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		service  AIOpsService
+		rejected bool
+	}{
+		{"empty message", svc.New(nil, nil, nil, nil), true},
+		{"runtime error", &fakeService{postErr: errs.ErrInvalid}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := buildRouter(NewHandler(tc.service), tenantctx.Tenant{UserID: 1, Role: "user"})
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/sessions/7/messages/stream", strings.NewReader(`{"content":""}`))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			body := w.Body.String()
+			if w.Code != http.StatusOK || !strings.Contains(body, "event: error") || !strings.Contains(body, `"code":"invalid"`) || strings.Contains(body, `"turn_rejected":true`) != tc.rejected {
+				t.Fatalf("unexpected stream: %d %s", w.Code, body)
+			}
+		})
 	}
 }
 
@@ -529,5 +553,17 @@ func TestSessionDTO_RuntimeVersion(t *testing.T) {
 		if got.RuntimeVersion != version {
 			t.Fatalf("runtime=%q, want %q", got.RuntimeVersion, version)
 		}
+	}
+}
+
+func TestMessageDTOIncludesPersistedToolExecution(t *testing.T) {
+	result := `{"result":[]}`
+	detail := "invalid arguments"
+	at := time.Now().UTC()
+	end := at.Add(123 * time.Millisecond)
+	msg := &model.Message{Role: model.RoleTool, Content: &result, ToolExecution: &model.ToolCall{ToolName: "query_promql", Status: model.StatusError, Error: &detail, ArgumentsJSON: `{}`, ResultJSON: &result, StartedAt: at, EndedAt: &end}}
+	out := toMessageDTO(msg)
+	if out.ToolCall == nil || out.ToolCall.Status != model.StatusError || out.ToolCall.Error != detail || out.ToolCall.DurationMs != 123 || out.ToolCall.ResultRaw != result {
+		t.Fatalf("DTO=%+v", out.ToolCall)
 	}
 }

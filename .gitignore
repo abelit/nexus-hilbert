@@ -74,3 +74,6 @@ deploy/install/certs/
 
 # superpowers brainstorming scratch
 .superpowers/
+
+# Vite local build cache
+web/.vite/

@@ -44,14 +44,15 @@ type APMSourceResolver interface {
 }
 
 type Service struct {
-	apmSource    APMSourceResolver
-	runtime      RuntimeHandler
-	sessions     biz.SessionRepo
-	attachments  biz.AttachmentRepo
-	modelCatalog modelCapabilityCatalog
-	proposals    biz.MutatingProposalRepo
-	usage        *biz.UsageUsecase
-	log          *slog.Logger
+	checkPageIncident func(context.Context, Caller, uint64) error
+	apmSource         APMSourceResolver
+	runtime           RuntimeHandler
+	sessions          biz.SessionRepo
+	attachments       biz.AttachmentRepo
+	modelCatalog      modelCapabilityCatalog
+	proposals         biz.MutatingProposalRepo
+	usage             *biz.UsageUsecase
+	log               *slog.Logger
 
 	// cancels maps an in-flight turn's session id to its cancel func, so an
 	// explicit user "stop" (Esc) can interrupt the turn. This is needed
@@ -91,6 +92,29 @@ type modelCapabilityCatalog interface {
 }
 
 func (s *Service) SetModelCatalog(catalog modelCapabilityCatalog) { s.modelCatalog = catalog }
+
+func (s *Service) modelProviders(ctx context.Context) []llm.ProviderInfo {
+	if catalog, ok := s.modelCatalog.(interface {
+		ProvidersContext(context.Context) []llm.ProviderInfo
+	}); ok {
+		return catalog.ProvidersContext(ctx)
+	}
+	return s.modelCatalog.Providers()
+}
+
+func (s *Service) validateReasoningEffort(ctx context.Context, provider, model, effort string) error {
+	if effort == "" {
+		return nil
+	}
+	if s.modelCatalog != nil {
+		for _, entry := range s.modelProviders(ctx) {
+			if entry.ID == provider {
+				return entry.Reasoning(model).Validate(provider, model, effort)
+			}
+		}
+	}
+	return llm.ValidateReasoningEffort(provider, model, effort)
+}
 
 func (s *Service) UploadAttachment(ctx context.Context, caller Caller, sessionID, name, mimeType string, size int64, src io.Reader) (*model.Attachment, error) {
 	if caller.IsViewer() {
@@ -172,7 +196,9 @@ func (s *Service) ListMutatingProposals(ctx context.Context, caller Caller, f bi
 // the signature stays additive (callers don't break when a new field
 // like RelatedIncidentID lands).
 type CreateSessionInput struct {
-	APMSource *model.APMSourceTarget
+	ReasoningEffort *string
+	PageContext     *model.PageContext
+	APMSource       *model.APMSourceTarget
 
 	Title             string
 	Scope             []string
@@ -191,8 +217,35 @@ type CreateSessionInput struct {
 // WithAPMSourceResolver is configured at startup.
 func (s *Service) WithAPMSourceResolver(resolver APMSourceResolver) { s.apmSource = resolver }
 
+func (s *Service) SetPageIncidentCheck(check func(context.Context, Caller, uint64) error) {
+	s.checkPageIncident = check
+}
+
+func (s *Service) validatePageIncident(ctx context.Context, caller Caller, page *model.PageContext, related *uint64) error {
+	if page == nil {
+		return nil
+	}
+	id, ok := page.Fields["incident_id"]
+	if !ok {
+		return nil
+	}
+	if related == nil || *related == 0 || id != fmt.Sprint(*related) {
+		return fmt.Errorf("%w: inconsistent incident reference", errs.ErrInvalid)
+	}
+	if s.checkPageIncident == nil {
+		return errs.ErrNotWiredYet
+	}
+	return s.checkPageIncident(ctx, caller, *related)
+}
+
 // CreateSession opens a new chat session for the caller.
 func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSessionInput) (*model.Session, error) {
+	if err := in.PageContext.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+	}
+	if err := s.validatePageIncident(ctx, caller, in.PageContext, in.RelatedIncidentID); err != nil {
+		return nil, err
+	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		title = "Untitled"
@@ -200,6 +253,27 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 	provider, selectedModel := strings.TrimSpace(in.Provider), strings.TrimSpace(in.Model)
 	if (provider == "") != (selectedModel == "") {
 		return nil, fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid)
+	}
+	effort := ""
+	if s.modelCatalog != nil {
+		if provider == "" {
+			provider, selectedModel = s.modelCatalog.Default()
+		}
+		if in.ReasoningEffort == nil {
+
+			for _, entry := range s.modelProviders(ctx) {
+				if entry.ID == provider {
+					effort = entry.DefaultEffort(selectedModel)
+					break
+				}
+			}
+		}
+	}
+	if in.ReasoningEffort != nil {
+		effort = *in.ReasoningEffort
+	}
+	if err := s.validateReasoningEffort(ctx, provider, selectedModel, effort); err != nil {
+		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
 	}
 	// The current direct-runtime compatibility path is v3. Production uses
 	// the router's validated default; no caller-facing version override yet.
@@ -214,10 +288,12 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 		}
 	}
 	sess := &model.Session{
+		ReasoningEffort:   effort,
 		RuntimeVersion:    string(version),
 		UserID:            caller.UserID,
 		Title:             title,
 		RelatedIncidentID: in.RelatedIncidentID,
+		PageContext:       in.PageContext,
 		Initiator:         model.SessionInitiatorUser,
 		Audience:          model.SessionAudienceUser,
 		CreatedAt:         time.Now().UTC(),
@@ -323,7 +399,7 @@ func (s *Service) RenameSession(ctx context.Context, caller Caller, sessionID st
 // UpdateSessionModel changes the persisted LLM route for one owned session.
 // Provider/model form a pair; accepting only one would create an ambiguous
 // route and could send a model slug to the wrong upstream.
-func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, sessionID string, provider string, selectedModel string) error {
+func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, sessionID string, provider string, selectedModel string, reasoningEffort string) error {
 	if _, err := s.GetSession(ctx, caller, sessionID); err != nil {
 		return err
 	}
@@ -332,7 +408,10 @@ func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, session
 	if (provider == "") != (selectedModel == "") {
 		return fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid)
 	}
-	return s.sessions.UpdateSessionModel(ctx, sessionID, provider, selectedModel)
+	if err := s.validateReasoningEffort(ctx, provider, selectedModel, reasoningEffort); err != nil {
+		return fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+	}
+	return s.sessions.UpdateSessionModel(ctx, sessionID, provider, selectedModel, reasoningEffort)
 }
 
 // PostMessage runs one user turn through the agent and returns the final
@@ -365,19 +444,27 @@ func (s *Service) PostMessageStreamWithOpts(ctx context.Context, caller Caller, 
 	return s.runChat(ctx, caller, sessionID, content, emit, opts)
 }
 
+// TurnRejectedError means the runtime never received the user message.
+type TurnRejectedError struct{ error }
+
+func (e *TurnRejectedError) Unwrap() error { return e.error }
+
 // runChat 是聊天请求的统一入口，完成鉴权、取消管理后调用 Graph runtime。
 func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, content string, emit chatprotocol.Emit, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
 	content = strings.TrimSpace(content)
 	if content == "" && len(opts.Attachments) == 0 {
-		return nil, fmt.Errorf("%w: content required", errs.ErrInvalid)
+		return nil, &TurnRejectedError{fmt.Errorf("%w: content required", errs.ErrInvalid)}
 	}
 	sess, err := s.GetSession(ctx, caller, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, &TurnRejectedError{err}
+	}
+	if err := s.validatePageIncident(ctx, caller, sess.PageContext, sess.RelatedIncidentID); err != nil {
+		return nil, &TurnRejectedError{err}
 	}
 	if len(opts.Attachments) > 0 {
 		if s.attachments == nil {
-			return nil, errs.ErrNotWiredYet
+			return nil, &TurnRejectedError{errs.ErrNotWiredYet}
 		}
 		ids := make([]string, 0, len(opts.Attachments))
 		for _, attachment := range opts.Attachments {
@@ -385,14 +472,14 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 		}
 		resolved, resolveErr := s.attachments.ResolveAttachments(ctx, sessionID, ids, caller.UserID, caller.IsAdmin())
 		if resolveErr != nil {
-			return nil, resolveErr
+			return nil, &TurnRejectedError{resolveErr}
 		}
 		var total int64
 		for _, attachment := range resolved {
 			total += attachment.Size
 		}
 		if total > 20<<20 {
-			return nil, fmt.Errorf("%w: image attachments exceed 20 MiB", errs.ErrInvalid)
+			return nil, &TurnRejectedError{fmt.Errorf("%w: image attachments exceed 20 MiB", errs.ErrInvalid)}
 		}
 		opts.Attachments = resolved
 	}
@@ -400,8 +487,13 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 	// Empty legacy session fields deliberately fall through to the router's
 	// deployment-wide default.
 	opts = resolveSessionRunOptions(sess, opts)
+	if opts.ReasoningEffort != nil {
+		if err := s.validateReasoningEffort(ctx, opts.Provider, opts.Model, *opts.ReasoningEffort); err != nil {
+			return nil, &TurnRejectedError{fmt.Errorf("%w: %v", errs.ErrInvalid, err)}
+		}
+	}
 	if err := s.validateImageContext(ctx, sessionID, &opts); err != nil {
-		return nil, err
+		return nil, &TurnRejectedError{err}
 	}
 
 	// HLD-021: detach the chat turn from the HTTP request lifecycle. A turn now
@@ -423,7 +515,7 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 	defer s.unregisterCancel(sess.ID, cancel)
 
 	if s.runtime == nil {
-		return nil, fmt.Errorf("chat runtime unavailable: %w", errs.ErrNotWiredYet)
+		return nil, &TurnRejectedError{fmt.Errorf("chat runtime unavailable: %w", errs.ErrNotWiredYet)}
 	}
 	return s.runGraph(ctx, sess, content, emit, opts)
 }
@@ -462,6 +554,10 @@ func resolveSessionRunOptions(sess *model.Session, opts chatprotocol.RunOptions)
 	}
 	if strings.TrimSpace(opts.Model) == "" && sess.Model != nil {
 		opts.Model = strings.TrimSpace(*sess.Model)
+	}
+	if opts.ReasoningEffort == nil && sess.Provider != nil && sess.Model != nil && opts.Provider == *sess.Provider && opts.Model == *sess.Model {
+		effort := sess.ReasoningEffort
+		opts.ReasoningEffort = &effort
 	}
 	return opts
 }
@@ -550,6 +646,9 @@ func (s *Service) runGraph(ctx context.Context, sess *model.Session, content str
 		Locale:           opts.Locale,
 		Attachments:      opts.Attachments,
 		Emit:             graphEmit,
+	}
+	if opts.ReasoningEffort != nil {
+		req.ReasoningEffort = *opts.ReasoningEffort
 	}
 	reply, err := s.runtime.Handle(ctx, req)
 	if err != nil {

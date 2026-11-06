@@ -1,5 +1,8 @@
+import { AgentSidePanel } from '@/components/AgentSidePanel';
+import { AssistantRoute } from '@/lib/assistantPage';
 import { lazy, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { safeLoginReturn } from '@/lib/loginReturn';
 import { Layout } from '@/components/Layout';
 import { ChatLayout } from '@/components/ChatLayout';
 import { useAuth } from '@/store/auth';
@@ -33,7 +36,7 @@ const PagesPage = lazy(() => import('@/pages/Pages'));
 const PageViewPage = lazy(() => import('@/pages/PageView'));
 const SkillsPage = lazy(() => import('@/pages/Skills'));
 const ApprovalsPage = lazy(() => import('@/pages/Approvals'));
-const ApprovalConfirmationPage = lazy(() => import('@/pages/ApprovalConfirmation'));
+const ApprovalDetailPage = lazy(() => import('@/pages/ApprovalDetail'));
 const SkillRunPage = lazy(() => import('@/pages/SkillRun'));
 const AgentsPage = lazy(() => import('@/pages/Agents'));
 const McpPage = lazy(() => import('@/pages/Mcp'));
@@ -82,14 +85,13 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (!token) {
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search + location.hash }} />;
   }
-  return <>{children}</>;
+  return <AssistantRoute.Provider value={location.key}>{children}<AgentSidePanel /></AssistantRoute.Provider>;
 }
 
 function PublicOnly({ children }: { children: ReactNode }) {
   const token = useAuth((s) => s.token);
   const location = useLocation();
-  const from = location.state?.from;
-  if (token) return <Navigate to={typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/login') ? from : '/'} replace />;
+  if (token) return <Navigate to={safeLoginReturn(location.state?.from)} replace />;
   return <>{children}</>;
 }
 
@@ -143,7 +145,7 @@ export default function App() {
         {/* 报告 folded into 产物's 报告 tab; schedules became 任务. Old links redirect. */}
         <Route path="/reports" element={<Navigate to="/pages?tab=reports" replace />} />
         <Route path="/reports/schedules" element={<Navigate to="/tasks" replace />} />
-        <Route path="/reports/:id" element={<ReportDetailPage />} />
+        <Route path="/reports/:id" element={<ReportDetailPage key={location.pathname} />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TasksPage />} />
         <Route path="/tools" element={<DailyToolsPage />} />
@@ -154,7 +156,7 @@ export default function App() {
         <Route path="/pages/:id" element={<PagesPage />} />
         <Route path="/skills" element={<SkillsPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
-        <Route path="/approvals/:id" element={<ApprovalConfirmationPage key={location.pathname} />} />
+        <Route path="/approvals/:id" element={<ApprovalDetailPage key={location.pathname} />} />
         <Route path="/skills/:key" element={<SkillRunPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/mcp" element={<McpPage />} />

@@ -1,3 +1,4 @@
+import type { AssistantPage } from '@/lib/assistantPage';
 import { ApiError, request } from './client';
 import { getToken } from '@/store/auth';
 
@@ -49,8 +50,9 @@ export type ChatMessage = {
 };
 
 export type ChatSession = {
+  page_context?: AssistantPage;
   runtime_version?: string;
- apm_source?: { trace_id: string; repo_id: string; source_directory: string; revision: string; commit_sha: string; error?: string };
+  apm_source?: { trace_id: string; repo_id: string; source_directory: string; revision: string; commit_sha: string; error?: string };
   id: string;
   user_id: number;
   title: string;
@@ -58,6 +60,7 @@ export type ChatSession = {
   agent_id?: string | null;
   provider?: string | null;
   model?: string | null;
+  reasoning_effort?: string;
   created_at?: string;
   updated_at?: string;
   closed_at?: string | null;
@@ -90,16 +93,23 @@ export function listSessions(params?: { related_incident_id?: number }) {
   return request<{ items: ChatSession[]; total: number }>('GET', `/chat/sessions${qs}`);
 }
 
+// Older UI preferences may still contain the removed off choice.
+export function chatReasoningEffort(effort?: string) {
+  return effort === 'none' ? '' : effort;
+}
+
 export function createSession(input: {
- apm_source?: { trace_id: string; service_name: string; service_namespace: string; environment: string; service_version: string; instance_id: string };
+  page_context?: AssistantPage;
+  apm_source?: { trace_id: string; service_name: string; service_namespace: string; environment: string; service_version: string; instance_id: string };
   title: string;
   scope?: string[];
   related_incident_id?: number;
   agent_id?: string;
   provider?: string;
   model?: string;
+  reasoning_effort?: string;
 }) {
-  return request<ChatSession>('POST', '/chat/sessions', input);
+  return request<ChatSession>('POST', '/chat/sessions', { ...input, reasoning_effort: chatReasoningEffort(input.reasoning_effort) });
 }
 
 export function renameSession(sessionId: string, title: string) {
@@ -110,8 +120,8 @@ export function renameSession(sessionId: string, title: string) {
   );
 }
 
-export function updateSessionModel(sessionId: string, provider: string, model: string) {
-  return request<void>('PATCH', `/chat/sessions/${encodeURIComponent(sessionId)}`, { provider, model });
+export function updateSessionModel(sessionId: string, provider: string, model: string, reasoning_effort = '') {
+  return request<void>('PATCH', `/chat/sessions/${encodeURIComponent(sessionId)}`, { provider, model, reasoning_effort: chatReasoningEffort(reasoning_effort) });
 }
 
 // stopSession interrupts the session's in-flight turn server-side (the SPA
@@ -125,10 +135,10 @@ export function stopSession(sessionId: string | number) {
   );
 }
 
-export function getMessages(sessionId: string | number) {
+export function getMessages(sessionId: string | number, signal?: AbortSignal) {
   return request<{ items: ChatMessage[]; total: number }>(
     'GET',
-    `/chat/sessions/${encodeURIComponent(String(sessionId))}/messages`,
+    `/chat/sessions/${encodeURIComponent(String(sessionId))}/messages`, undefined, { signal },
   );
 }
 
@@ -183,6 +193,7 @@ export type SendOptions = {
   mentions?: Mention[];
   provider?: string;
   model?: string;
+  reasoning_effort?: string;
   // When true, the agent exposes its manager-scoped `web_search` skill
   // to the LLM for this turn. Default omitted = false; the agent stays
   // on internal data so a chat about CPU usage doesn't gratuitously
@@ -197,6 +208,7 @@ export function postMessage(sessionId: string | number, content: string, opts: S
   const body: Record<string, unknown> = { content };
   if (opts.provider) body.provider = opts.provider;
   if (opts.model) body.model = opts.model;
+  if (opts.reasoning_effort !== undefined) body.reasoning_effort = chatReasoningEffort(opts.reasoning_effort);
   if (opts.mentions && opts.mentions.length > 0) body.mentions = opts.mentions;
   if (opts.webSearchEnabled) body.web_search_enabled = true;
   if (opts.locale) body.locale = opts.locale;
@@ -219,16 +231,38 @@ export function searchMentions(params: { q: string; type?: MentionType; limit?: 
   return request<{ items: MentionItem[] }>('GET', `/aiops/mentions/search${suffix}`);
 }
 
+export type ReasoningCapability = {
+  levels: string[];
+  mode: string;
+  source: 'provider' | 'builtin' | 'fallback' | 'configuration';
+  default_level?: string;
+};
+
 export type LLMProvider = {
+  reasoning_capabilities?: Record<string, ReasoningCapability>;
+  reasoning_efforts?: Record<string, string[]>;
   id: string;
   label: string;
   models: string[];
   model?: string;
+  reasoning_effort?: string;
 };
+
+export type ModelSelection = { provider: string; model: string; reasoning_effort?: string };
+
+export function modelSelectionForCatalog(selection: ModelSelection | null, providers: LLMProvider[]): ModelSelection | null {
+  if (!selection) return null;
+  const provider = providers.find(item => item.id === selection.provider);
+  const levels = provider?.reasoning_capabilities?.[selection.model]?.levels ?? provider?.reasoning_efforts?.[selection.model];
+  const effort = chatReasoningEffort(selection.reasoning_effort);
+  if (effort && levels && !levels.includes(effort)) return { ...selection, reasoning_effort: '' };
+  return selection;
+}
+
 
 export type ModelCatalog = {
   providers: LLMProvider[];
-  default: { provider: string; model: string };
+  default: ModelSelection;
 };
 
 export function listModels() {
@@ -285,6 +319,9 @@ export type ApprovalPendingStreamEvent = {
   credentials?: string[];
 };
 
+// Only a rejection before runtime dispatch guarantees that resubmission is safe.
+export class RejectedChatTurnError extends ApiError {}
+
 export type StreamCallbacks = {
   onAssistant?: (e: AssistantStreamEvent) => void;
   onToolStart?: (e: ToolStreamEvent) => void;
@@ -318,6 +355,7 @@ export async function streamMessage(
   const body: Record<string, unknown> = { content };
   if (opts.provider) body.provider = opts.provider;
   if (opts.model) body.model = opts.model;
+  if (opts.reasoning_effort !== undefined) body.reasoning_effort = chatReasoningEffort(opts.reasoning_effort);
   if (opts.mentions && opts.mentions.length > 0) body.mentions = opts.mentions;
   if (opts.webSearchEnabled) body.web_search_enabled = true;
   if (opts.locale) body.locale = opts.locale;
@@ -400,8 +438,9 @@ function dispatchFrame(raw: string, cbs: StreamCallbacks) {
       cbs.onDone?.(payload as PostMessageResponse);
       break;
     case 'error': {
-      const obj = payload as { error?: string };
-      cbs.onError?.(new Error(obj.error || 'stream error'));
+      const obj = payload as { error?: string; code?: string; turn_rejected?: boolean };
+      const StreamError = obj.turn_rejected === true ? RejectedChatTurnError : ApiError;
+      cbs.onError?.(new StreamError(obj.error || 'stream error', 200, obj.code));
       break;
     }
     default:

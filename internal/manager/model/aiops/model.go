@@ -68,9 +68,12 @@ type APMSourceScope struct {
 }
 
 type Session struct {
+	ReasoningEffort string `gorm:"size:32;column:reasoning_effort;not null;default:''"`
 	// RuntimeVersion pins execution policy. Empty means historical provenance
 	// has not been classified; migrations must not guess v2 versus v3.
 	RuntimeVersion string `gorm:"size:16;column:runtime_version"`
+
+	PageContext *PageContext `gorm:"serializer:json;type:text;column:page_context"`
 
 	APMSource *APMSourceScope `gorm:"serializer:json;type:text;column:apm_source"`
 
@@ -199,7 +202,8 @@ type Message struct {
 	// orphan role=tool message and strict providers (DeepSeek v4+)
 	// reject the request with "tool must follow tool_calls". Transient:
 	// `gorm:"-"` keeps it out of the chat_messages schema.
-	ToolCalls []ToolCall `gorm:"-"`
+	ToolCalls     []ToolCall `gorm:"-"`
+	ToolExecution *ToolCall  `gorm:"-" json:"-"`
 }
 
 // Attachment stores metadata for a file uploaded to a chat session. The file

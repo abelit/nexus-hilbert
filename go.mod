@@ -3,6 +3,7 @@ module github.com/ongridio/ongrid
 go 1.25.0
 
 require (
+	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/anush008/fastembed-go v1.0.0
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.67

@@ -49,7 +49,7 @@ type AIOpsService interface {
 	CloseSession(ctx context.Context, caller svc.Caller, sessionID string) error
 	DeleteSession(ctx context.Context, caller svc.Caller, sessionID string) error
 	RenameSession(ctx context.Context, caller svc.Caller, sessionID string, title string) error
-	UpdateSessionModel(ctx context.Context, caller svc.Caller, sessionID string, provider string, model string) error
+	UpdateSessionModel(ctx context.Context, caller svc.Caller, sessionID string, provider string, model string, reasoningEffort string) error
 	PostMessage(ctx context.Context, caller svc.Caller, sessionID string, content string) (*chatprotocol.Reply, error)
 	PostMessageWithOpts(ctx context.Context, caller svc.Caller, sessionID string, content string, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error)
 	PostMessageStream(ctx context.Context, caller svc.Caller, sessionID string, content string, emit chatprotocol.Emit) (*chatprotocol.Reply, error)
@@ -311,11 +311,13 @@ func operationArtifactDTOs(items []*model.OperationArtifact) []operationArtifact
 }
 
 type createSessionReq struct {
-	APMSource *model.APMSourceTarget `json:"apm_source,omitempty"`
-	Title     string                 `json:"title"`
-	Scope     []string               `json:"scope,omitempty"`
-	Provider  string                 `json:"provider,omitempty"`
-	Model     string                 `json:"model,omitempty"`
+	ReasoningEffort *string                `json:"reasoning_effort,omitempty"`
+	PageContext     *model.PageContext     `json:"page_context,omitempty"`
+	APMSource       *model.APMSourceTarget `json:"apm_source,omitempty"`
+	Title           string                 `json:"title"`
+	Scope           []string               `json:"scope,omitempty"`
+	Provider        string                 `json:"provider,omitempty"`
+	Model           string                 `json:"model,omitempty"`
 	// RelatedIncidentID links the session back to an alert incident.
 	// Set by the IncidentDetail "深入诊断" button so the per-incident
 	// agent-timeline panel can list this session under the incident.
@@ -327,6 +329,8 @@ type createSessionReq struct {
 }
 
 type sessionDTO struct {
+	ReasoningEffort   string                `json:"reasoning_effort,omitempty"`
+	PageContext       *model.PageContext    `json:"page_context,omitempty"`
 	RuntimeVersion    string                `json:"runtime_version,omitempty"`
 	APMSource         *model.APMSourceScope `json:"apm_source,omitempty"`
 	ID                string                `json:"id"`
@@ -348,6 +352,7 @@ type listSessionsResp struct {
 }
 
 type postMessageReq struct {
+	ReasoningEffort  *string        `json:"reasoning_effort,omitempty"`
 	Content          string         `json:"content"`
 	AttachmentIDs    []string       `json:"attachment_ids,omitempty"`
 	Provider         string         `json:"provider,omitempty"`
@@ -443,7 +448,18 @@ type postMessageResp struct {
 	Iterations       int                 `json:"iterations"`
 }
 
+type toolExecutionDTO struct {
+	Name         string  `json:"name"`
+	Status       string  `json:"status"`
+	Error        string  `json:"error,omitempty"`
+	DurationMs   int64   `json:"duration_ms"`
+	ArgumentsRaw string  `json:"arguments_raw"`
+	ResultRaw    string  `json:"result_raw,omitempty"`
+	DeviceID     *uint64 `json:"device_id,omitempty"`
+}
+
 type messageDTO struct {
+	ToolCall    *toolExecutionDTO  `json:"tool_call,omitempty"`
 	ID          string             `json:"id"`
 	Role        string             `json:"role"`
 	Content     string             `json:"content,omitempty"`
@@ -504,6 +520,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errs.ErrUnauthorized)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMessageBodyBytes)
 	var req createSessionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
@@ -512,11 +529,13 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	s, err := h.svc.CreateSession(r.Context(), caller, svc.CreateSessionInput{
 		Title:             req.Title,
 		APMSource:         req.APMSource,
+		PageContext:       req.PageContext,
 		Scope:             req.Scope,
 		RelatedIncidentID: req.RelatedIncidentID,
 		AgentID:           req.AgentID,
 		Provider:          req.Provider,
 		Model:             req.Model,
+		ReasoningEffort:   req.ReasoningEffort,
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -741,6 +760,7 @@ func (h *Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	opts := chatprotocol.RunOptions{
 		Provider:         req.Provider,
 		Model:            req.Model,
+		ReasoningEffort:  req.ReasoningEffort,
 		Mentions:         toAgentMentions(req.Mentions),
 		WebSearchEnabled: req.WebSearchEnabled,
 		Locale:           req.Locale,
@@ -795,6 +815,7 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 	opts := chatprotocol.RunOptions{
 		Provider:         req.Provider,
 		Model:            req.Model,
+		ReasoningEffort:  req.ReasoningEffort,
 		Mentions:         toAgentMentions(req.Mentions),
 		WebSearchEnabled: req.WebSearchEnabled,
 		Locale:           req.Locale,
@@ -828,10 +849,12 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 
 	reply, err := h.svc.PostMessageStreamWithOpts(r.Context(), caller, id, req.Content, emit, opts)
 	if err != nil {
-		writeSSE(w, flusher, "error", map[string]string{
-			"error": err.Error(),
-			"code":  errCode(err),
-		})
+		payload := map[string]any{"error": err.Error(), "code": errCode(err)}
+		var rejected *svc.TurnRejectedError
+		if errors.As(err, &rejected) {
+			payload["turn_rejected"] = true
+		}
+		writeSSE(w, flusher, "error", payload)
 		return
 	}
 	// Belt-and-suspenders: if the agent returned without emitting a
@@ -1048,9 +1071,10 @@ func (h *Handler) closeSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateSessionReq struct {
-	Title    *string `json:"title,omitempty"`
-	Provider *string `json:"provider,omitempty"`
-	Model    *string `json:"model,omitempty"`
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	Title           *string `json:"title,omitempty"`
+	Provider        *string `json:"provider,omitempty"`
+	Model           *string `json:"model,omitempty"`
 }
 
 // @Summary Update chat session title or model route
@@ -1075,7 +1099,7 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
 		return
 	}
-	if req.Title == nil && req.Provider == nil && req.Model == nil {
+	if req.Title == nil && req.Provider == nil && req.Model == nil && req.ReasoningEffort == nil {
 		writeErr(w, fmt.Errorf("%w: no session fields supplied", errs.ErrInvalid))
 		return
 	}
@@ -1085,12 +1109,16 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.Provider != nil || req.Model != nil {
+	if req.Provider != nil || req.Model != nil || req.ReasoningEffort != nil {
 		if req.Provider == nil || req.Model == nil {
 			writeErr(w, fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid))
 			return
 		}
-		if err := h.svc.UpdateSessionModel(r.Context(), caller, id, *req.Provider, *req.Model); err != nil {
+		effort := ""
+		if req.ReasoningEffort != nil {
+			effort = *req.ReasoningEffort
+		}
+		if err := h.svc.UpdateSessionModel(r.Context(), caller, id, *req.Provider, *req.Model, effort); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -1214,14 +1242,17 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type providerDTO struct {
-		ID     string   `json:"id"`
-		Label  string   `json:"label"`
-		Models []string `json:"models"`
-		Model  string   `json:"model,omitempty"`
+		ReasoningCapabilities map[string]llm.ReasoningCapability `json:"reasoning_capabilities,omitempty"`
+		ReasoningEfforts      map[string][]string                `json:"reasoning_efforts,omitempty"`
+		ID                    string                             `json:"id"`
+		Label                 string                             `json:"label"`
+		Models                []string                           `json:"models"`
+		Model                 string                             `json:"model,omitempty"`
 	}
 	type defaultDTO struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
+		ReasoningEffort string `json:"reasoning_effort"`
+		Provider        string `json:"provider"`
+		Model           string `json:"model"`
 	}
 	type respDTO struct {
 		Providers []providerDTO `json:"providers"`
@@ -1229,16 +1260,44 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := respDTO{Providers: []providerDTO{}}
 	if h.catalog != nil {
-		for _, p := range h.catalog.Providers() {
+		var providers []llm.ProviderInfo
+		if catalog, ok := h.catalog.(interface {
+			ProvidersContext(context.Context) []llm.ProviderInfo
+		}); ok {
+			providers = catalog.ProvidersContext(r.Context())
+		} else {
+			providers = h.catalog.Providers()
+		}
+		for _, p := range providers {
+			efforts := make(map[string][]string)
+			capabilities := make(map[string]llm.ReasoningCapability)
+			for _, model := range append(append([]string(nil), p.Models...), p.Model) {
+				if model == "" {
+					continue
+				}
+				capability := p.Reasoning(model)
+				capabilities[model] = capability
+				if levels := capability.Levels; len(levels) > 0 {
+					efforts[model] = levels
+				}
+			}
 			out.Providers = append(out.Providers, providerDTO{
-				ID:     p.ID,
-				Label:  p.Label,
-				Models: p.Models,
-				Model:  p.Model,
+				ReasoningCapabilities: capabilities,
+				ReasoningEfforts:      efforts,
+				ID:                    p.ID,
+				Label:                 p.Label,
+				Models:                p.Models,
+				Model:                 p.Model,
 			})
 		}
 		defID, defModel := h.catalog.Default()
 		out.Default = defaultDTO{Provider: defID, Model: defModel}
+		for _, provider := range providers {
+			if provider.ID == defID {
+				out.Default.ReasoningEffort = provider.DefaultEffort(defModel)
+				break
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1252,10 +1311,12 @@ func toSessionDTO(s *model.Session) sessionDTO {
 		UserID:            s.UserID,
 		Title:             s.Title,
 		APMSource:         s.APMSource,
+		PageContext:       s.PageContext,
 		RelatedIncidentID: s.RelatedIncidentID,
 		AgentID:           s.AgentID,
 		Provider:          s.Provider,
 		Model:             s.Model,
+		ReasoningEffort:   s.ReasoningEffort,
 		CreatedAt:         s.CreatedAt,
 		UpdatedAt:         s.UpdatedAt,
 		ClosedAt:          s.ClosedAt,
@@ -1288,6 +1349,20 @@ func toMessageDTO(m *model.Message) messageDTO {
 	if m.Model != nil {
 		out.Model = *m.Model
 	}
+	if tc := m.ToolExecution; tc != nil {
+		x := &toolExecutionDTO{Name: tc.ToolName, Status: tc.Status, ArgumentsRaw: tc.ArgumentsJSON, DeviceID: tc.DeviceID}
+		if tc.Error != nil {
+			x.Error = *tc.Error
+		}
+		if tc.ResultJSON != nil {
+			x.ResultRaw = *tc.ResultJSON
+		}
+		if tc.EndedAt != nil {
+			x.DurationMs = tc.EndedAt.Sub(tc.StartedAt).Milliseconds()
+		}
+		out.ToolCall = x
+	}
+
 	return out
 }
 

@@ -55,7 +55,7 @@ type extensionsModule struct {
 	pageStore          pagesdata.FileStore
 }
 
-func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, notifyRouter *notify.Router, storage *storageModule, settings *settingsModule, devices *devicesModule, alerts *alertsModule, tunnel *tunnelModule, aiops *aiopsModule, runtime *runtimeModule, automation *automationModule) *extensionsModule {
+func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, notifyRouter *notify.Router, storage *storageModule, settings *settingsModule, devices *devicesModule, alerts *alertsModule, tunnel *tunnelModule, aiops *aiopsModule, runtime *runtimeModule, automation *automationModule, iam *iamModule) *extensionsModule {
 	skillSvc := aiops.skillSvc
 	// HLD-017: surface chatruntime SKILL.md skills (built-in + marketplace-
 	// installed) in the /v1/skills catalog. They live in a separate registry
@@ -136,6 +136,8 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	approvalUC.RegisterExecutor(managersvcaiops.GenericToolApprovalKind, runtime.humanApprovalBroker.Execute)
 	managersvcaiops.RegisterRuntimeApprovalExecutor(approvalUC, managersvcaiops.GenericToolApprovalKind, contract.V3, runtime.humanApprovalBroker.Execute)
 	managersvcaiops.RegisterRuntimeApprovalExecutor(approvalUC, managersvcaiops.GenericToolApprovalKind, contract.V2, runtime.humanApprovalBroker.Execute)
+	approvalUC.RequireAuthorization(iam.userUC)
+	go approvalUC.RunExecutionLeaseReconciler(rootCtx)
 	approvalHandler := managerserverapproval.NewHandler(approvalUC)
 	// HLD-017 cloud_bash producer: register the execute-on-approve executor
 	// (resolve the bound credential → inject into the Runner sandbox → run)
@@ -165,6 +167,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	}).Register(approvalUC)
 	aiops.toolsReg.SetCloudBashProposer(managersvcaiops.CloudBashProposer{Usecase: approvalUC})
 	aiops.toolsReg.SetHostBashProposer(managersvcaiops.HostBashProposer{Usecase: approvalUC})
+	aiops.toolsReg.SetHostBashPolicyApprovalEnabledProvider(settings.settingSvc.AgentCommandPolicyApprovalEnabled)
 	// The Actions page is a read-only projection over two immutable audit
 	// sources: graph ReviewGate decisions and legacy human approvals.
 	k8sHandler := managerserverk8s.NewHandler(devices.k8sSvc, managersvck8s.NewActionAuditReader(aiops.mutatingProposalRepo, approvalUC))
@@ -235,7 +238,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 			HumanApproval: runtime.humanApprovalBroker,
 		}
 		if err := rt.AppendToolBag([]aiopstoolsbase.BaseTool{
-			aiopstoolsdec.Wrap(aiopstools.NewBashToolWithProposer(tunnel.fbClient, devices.edgeUC, devices.deviceUC, managersvcaiops.HostBashProposer{Usecase: approvalUC}, log), cbDeps),
+			aiopstoolsdec.Wrap(aiopstools.NewBashToolWithProposer(tunnel.fbClient, devices.edgeUC, devices.deviceUC, managersvcaiops.HostBashProposer{Usecase: approvalUC}, settings.settingSvc.AgentCommandPolicyApprovalEnabled, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewCloudBashTool(managersvcaiops.CloudBashProposer{Usecase: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewInstallSkillTool(managersvcaiops.InstallSkillProposer{Usecase: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewServePageTool(pageStore, log), quickDeps),

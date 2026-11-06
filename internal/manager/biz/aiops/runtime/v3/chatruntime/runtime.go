@@ -638,6 +638,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
 		compose.WithToolOption(
 			graph.WithInvokeOpts(
+				basetool.WithUserID(req.UserID),
 				basetool.WithUserText(req.UserText),
 				basetool.WithConfirmedDeviceIDs(confirmedDeviceIDs(req.Mentions)),
 				basetool.WithHostWritePermission(writeEnabled && !viewerOnly),
@@ -668,6 +669,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	// ("openai"), and installs without an OpenAI key see specialists
 	// fail with `provider "openai" not configured`.
 	ctx = basetool.WithLLMChoice(ctx, req.Provider, req.Model)
+	ctx = basetool.WithReasoningEffort(ctx, req.ReasoningEffort)
 	// HLD-019: attach the session id so cloud_bash can resolve a per-session
 	// agent workspace at exec time (files persist across commands in a session
 	// instead of running in a throwaway temp dir).
@@ -695,7 +697,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 		UserText:         req.UserText,
 		UserImages:       imageInputParts(req.Attachments),
 		WebSearchEnabled: req.WebSearchEnabled,
-		MentionsRendered: mentionsRendered,
+		MentionsRendered: sess.PageContext.UserReferences(mentionsRendered),
 		AgentReminder:    agentReminder,
 		DynamicHints:     dynamicHints,
 		Locale:           req.Locale,
@@ -1214,6 +1216,9 @@ func chatModelOpts(req *Request) []model.Option {
 	}
 	if m := strings.TrimSpace(req.Model); m != "" {
 		opts = append(opts, model.WithModel(m))
+	}
+	if req.ReasoningEffort != "" {
+		opts = append(opts, llm.WithReasoningEffort(req.ReasoningEffort))
 	}
 	return opts
 }

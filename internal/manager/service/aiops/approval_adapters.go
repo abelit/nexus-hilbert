@@ -15,6 +15,7 @@ import (
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 	managerbizmcp "github.com/ongridio/ongrid/internal/manager/biz/mcp"
 	managerbizsecret "github.com/ongridio/ongrid/internal/manager/biz/secret"
+	approvalmodel "github.com/ongridio/ongrid/internal/manager/model/approval"
 )
 
 // cloudBashPayload is the approval payload for a queued cloud_bash command.
@@ -34,13 +35,13 @@ type cloudBashPayload struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
-// hostBashPayload is the approval payload for mutating host_bash commands.
-// Read-only host_bash calls never create approvals; this payload is only for
-// user-requested host mutations such as deleting a known file.
+// hostBashPayload freezes the command and targets for host writes or an
+// explicitly enabled command-policy override.
 type hostBashPayload struct {
 	DeviceIDs      []uint64 `json:"device_ids"`
 	Command        string   `json:"command"`
 	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
+	PolicyReason   string   `json:"policy_reason,omitempty"`
 }
 
 // K8sActionPayload stores the exact preflight-validated action plus the
@@ -57,7 +58,7 @@ type K8sActionPayload struct {
 // terminal timeout blob. The decorator timeout that wraps the tool is set a
 // minute longer (cbDeps.Timeout) so THIS budget is the one that fires first
 // with a clean message.
-const ApprovalWaitTimeout = 30 * time.Minute
+const ApprovalWaitTimeout = approvalmodel.AgentWaitTimeout
 
 // approvalPollInterval is how often the blocking tool re-reads the approval
 // row while waiting for the human decision.
@@ -178,8 +179,13 @@ func (s CloudBashProposer) ProposeAndAwait(ctx context.Context, command string, 
 // approval card flow as cloud_bash.
 type HostBashProposer struct{ Usecase *managerbizapproval.Usecase }
 
-func (s HostBashProposer) ProposeAndAwait(ctx context.Context, deviceIDs []uint64, command string, timeoutSeconds int, sessionID, toolCallID string, userID uint64) (string, error) {
+func (s HostBashProposer) ProposeAndAwait(ctx context.Context, deviceIDs []uint64, command string, timeoutSeconds int, sessionID, toolCallID string, userID uint64, policyReason string) (string, error) {
 	title := fmt.Sprintf("host_bash device_ids=%v %s", deviceIDs, command)
+	summary := fmt.Sprintf("device_ids=%v", deviceIDs)
+	if policyReason != "" {
+		title = "Command policy override: " + title
+		summary += "\nHuman approval bypasses the Edge command policy for this command only.\n" + policyReason
+	}
 	if len(title) > 100 {
 		title = title[:100] + "…"
 	}
@@ -187,8 +193,8 @@ func (s HostBashProposer) ProposeAndAwait(ctx context.Context, deviceIDs []uint6
 		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
 		Kind:           "host_bash",
 		Title:          title,
-		Summary:        fmt.Sprintf("device_ids=%v", deviceIDs),
-		Payload:        hostBashPayload{DeviceIDs: deviceIDs, Command: command, TimeoutSeconds: timeoutSeconds},
+		Summary:        summary,
+		Payload:        hostBashPayload{DeviceIDs: deviceIDs, Command: command, TimeoutSeconds: timeoutSeconds, PolicyReason: policyReason},
 		Source:         "agent",
 		SessionID:      sessionID,
 		ProposedBy:     userID,
@@ -228,16 +234,8 @@ func (s CloudBashProposer) awaitDecision(ctx context.Context, id string) (string
 				continue // transient read error — keep polling
 			}
 			switch a.Status {
-			case "executed":
-				if a.ResultJSON != nil {
-					return *a.ResultJSON, nil
-				}
-				return `{"status":"executed"}`, nil
-			case "failed":
-				if a.ResultJSON != nil {
-					return *a.ResultJSON, nil
-				}
-				return `{"status":"failed","message":"The approved command failed to run."}`, nil
+			case "executed", "failed":
+				return approvalToolResult(a)
 			case "rejected":
 				return `{"status":"rejected","message":"The user rejected this command; it was not run. Do not retry it without new instructions."}`, nil
 			}

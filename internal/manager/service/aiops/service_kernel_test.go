@@ -94,10 +94,12 @@ func (m *memSessions) ListSessions(_ context.Context, _ uint64, _, _ int, _ *uin
 func (m *memSessions) ListByParent(_ context.Context, _ string) ([]*model.Session, error) {
 	return nil, nil
 }
-func (m *memSessions) CloseSession(_ context.Context, _ string) error             { return nil }
-func (m *memSessions) RenameSession(_ context.Context, _, _ string) error         { return nil }
-func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string) error { return nil }
-func (m *memSessions) DeleteSession(_ context.Context, _ string) error            { return nil }
+func (m *memSessions) CloseSession(_ context.Context, _ string) error     { return nil }
+func (m *memSessions) RenameSession(_ context.Context, _, _ string) error { return nil }
+func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string, reasoningEffort string) error {
+	return nil
+}
+func (m *memSessions) DeleteSession(_ context.Context, _ string) error { return nil }
 func (m *memSessions) AppendMessage(_ context.Context, _ *model.Message) error {
 	return nil
 }
@@ -217,5 +219,21 @@ func TestService_Graph_Ownership(t *testing.T) {
 	}
 	if rt.calls.Load() != 0 {
 		t.Errorf("runtime must NOT be consulted for non-owner, got %d", rt.calls.Load())
+	}
+}
+
+func TestTurnRejectionEndsAtRuntimeDispatch(t *testing.T) {
+	store, id := newSeededSessions(7)
+	rt := &fakeRuntime{err: errs.ErrNotFound}
+	service := New(rt, store, nil, nil)
+	for _, tc := range []struct {
+		user     uint64
+		rejected bool
+	}{{8, true}, {7, false}} {
+		_, err := service.PostMessageStream(context.Background(), Caller{UserID: tc.user}, id, "hello", nil)
+		var rejected *TurnRejectedError
+		if !errors.Is(err, errs.ErrNotFound) || errors.As(err, &rejected) != tc.rejected {
+			t.Fatalf("user %d: got %T %v, want not-found with rejected=%v", tc.user, err, err, tc.rejected)
+		}
 	}
 }

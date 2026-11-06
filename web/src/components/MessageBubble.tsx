@@ -67,7 +67,7 @@ type Props = {
 };
 
 export function MessageBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperations }: Props) {
-  if (message.kind === 'tool_card' && message.tool_call) {
+  if ((message.kind === 'tool_card' || message.role === 'tool') && message.tool_call) {
     return <ToolCallSummaryBlock call={fromSummary(message.tool_call)} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
   }
   if (message.role === 'tool') return <ToolBubble message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
@@ -280,7 +280,7 @@ function ToolCallSummaryBlock({
         )}
         {typeof call.device_id === 'number' && (
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
-            edge#{call.device_id}
+            host#{call.device_id}
           </span>
         )}
         <span className="ml-auto flex items-center gap-2 text-[11px] text-zinc-500">
@@ -967,6 +967,7 @@ function PendingApprovalCard({ approvalID, kind, toolName, command }: { approval
   const [approvalKind, setApprovalKind] = useState(kind);
   const [approvedToolName, setApprovedToolName] = useState(toolName);
   const [creds, setCreds] = useState<string[]>([]);
+  const [policyReason, setPolicyReason] = useState('');
   const isHostBash = approvalKind === 'host_bash';
 
   // Reconcile with the authoritative server status on mount. When chat
@@ -984,10 +985,11 @@ function PendingApprovalCard({ approvalID, kind, toolName, command }: { approval
         if (!alive) return;
         setApprovalKind(a.kind || approvalKind);
         try {
-          const p = JSON.parse(a.payload) as { command?: string; credentials?: string[]; tool_name?: string; summary?: string };
+          const p = JSON.parse(a.payload) as { command?: string; credentials?: string[]; tool_name?: string; summary?: string; policy_reason?: string };
           if (!cmd && (p.command || p.summary)) setCmd(p.command ?? p.summary ?? '');
           if (p.tool_name) setApprovedToolName(p.tool_name);
           if (Array.isArray(p.credentials)) setCreds(p.credentials.filter(Boolean));
+          setPolicyReason(typeof p.policy_reason === 'string' ? p.policy_reason : '');
         } catch {
           /* payload not JSON — leave placeholder */
         }
@@ -1054,6 +1056,12 @@ function PendingApprovalCard({ approvalID, kind, toolName, command }: { approval
         </span>
       </div>
       <div className="px-3 pb-2.5">
+        {policyReason && (
+          <div className="my-2 break-words text-text-muted">
+            <p>{tr('此命令被 Edge 策略拦截。批准后将绕过命令策略，仅执行本次命令。', 'Edge policy blocked this command. Approval bypasses command policy for this command only.')}</p>
+            <p className="mt-1 whitespace-pre-wrap">{policyReason}</p>
+          </div>
+        )}
         <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-[11px] text-zinc-300">
           {cmd || tr('(待执行操作)', '(proposed action)')}
         </pre>
