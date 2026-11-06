@@ -317,12 +317,16 @@ type instanceDTO struct {
 	TypeID    model.ID       `json:"type_id"`
 	CreatedAt string         `json:"created_at,omitempty"`
 	UpdatedAt string         `json:"updated_at,omitempty"`
+	CreatedBy string         `json:"created_by,omitempty"`
 	UpdatedBy string         `json:"updated_by,omitempty"`
 	Values    map[string]any `json:"values"`
 }
 
 func toInstanceDTO(in cibiz.Instance) instanceDTO {
-	dto := instanceDTO{ID: in.ID, TypeID: in.TypeID, UpdatedBy: in.UpdatedBy, Values: in.Values}
+	dto := instanceDTO{
+		ID: in.ID, TypeID: in.TypeID, CreatedBy: in.CreatedBy, UpdatedBy: in.UpdatedBy,
+		Values: in.Values,
+	}
 	if dto.Values == nil {
 		dto.Values = map[string]any{}
 	}

@@ -68,8 +68,11 @@ func TestCreateCIWithValuesRoundTrip(t *testing.T) {
 	if ci.ID == 0 {
 		t.Fatal("CI got no id")
 	}
-	// The creator labels the CI's own audit column; the header shows it before
-	// the first edit.
+	// The creator labels the CI's own audit columns; the header shows it before
+	// the first edit, and created_by keeps naming the creator after later edits.
+	if ci.CreatedBy == nil || *ci.CreatedBy != "seed@example.test" {
+		t.Fatalf("created CI created_by = %v, want seed@example.test", ci.CreatedBy)
+	}
 	if ci.UpdatedBy == nil || *ci.UpdatedBy != "seed@example.test" {
 		t.Fatalf("created CI updated_by = %v, want seed@example.test", ci.UpdatedBy)
 	}

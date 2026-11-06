@@ -25,7 +25,9 @@ func TestCreateAttributeRejectsReservedNames(t *testing.T) {
 	for _, tc := range []struct{ name, alias, want string }{
 		{"ci_id", "", "ci_id"},
 		{"_type", "", "_type"},
+		{"_created_by", "", "_created_by"},
 		{"hostname", "ticket_id", "ticket_id"},
+		{"hostname", "_created_at", "_created_at"},
 	} {
 		t.Run(tc.name+"/"+tc.alias, func(t *testing.T) {
 			_, err := attrUsecase(newAttrRepo()).CreateAttribute(context.Background(), CreateAttributeInput{

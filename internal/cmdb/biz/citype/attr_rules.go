@@ -142,6 +142,8 @@ var builtinKeywords = map[string]bool{
 	"_type":       true,
 	"ci_type":     true,
 	"ticket_id":   true,
+	"_created_at": true,
+	"_created_by": true,
 	"_updated_at": true,
 	"_updated_by": true,
 }

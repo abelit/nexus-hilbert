@@ -23,6 +23,8 @@ const SEARCH_META_KEYS = new Set([
   'ci_type_alias',
   'unique',
   'unique_alias',
+  '_created_at',
+  '_created_by',
   '_updated_at',
   '_updated_by',
 ]);
@@ -36,6 +38,8 @@ export function searchRowToInstance(row: SearchRow): Instance {
   return {
     ci_id: Number(row.ci_id ?? row._id),
     type_id: Number(row._type),
+    created_at: typeof row._created_at === 'string' ? row._created_at : undefined,
+    created_by: typeof row._created_by === 'string' ? row._created_by : undefined,
     updated_at: typeof row._updated_at === 'string' ? row._updated_at : undefined,
     updated_by: typeof row._updated_by === 'string' ? row._updated_by : undefined,
     values,

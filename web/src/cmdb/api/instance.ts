@@ -15,6 +15,8 @@ export type Instance = {
   type_id: number;
   created_at?: string;
   updated_at?: string;
+  /** The email of the caller that created the row; empty for system writes. */
+  created_by?: string;
   /** cantor's nickname or the email of the caller that last wrote the row. */
   updated_by?: string;
   /** Keyed by attribute name (or alias/id, per `ret_key`). */
@@ -130,6 +132,8 @@ export type SearchRow = {
   ci_type_alias?: string;
   unique?: string;
   unique_alias?: string;
+  _created_at?: string;
+  _created_by?: string;
   _updated_at?: string;
   _updated_by?: string;
   [attribute: string]: unknown;

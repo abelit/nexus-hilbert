@@ -156,6 +156,39 @@ describe('the list', () => {
     expect(screen.queryByRole('columnheader', { name: 'root_password' })).not.toBeInTheDocument();
   });
 
+  it('renders the subscription’s built-in columns from the CI row', async () => {
+    handlers([{
+      ci_id: 5,
+      type_id: 1,
+      created_at: '2026-10-20T09:00:00Z',
+      created_by: 'alice@example.test',
+      updated_at: '2026-10-21T10:00:00Z',
+      updated_by: 'bob@example.test',
+      values: { hostname: 'web-01', note: 'hello' },
+    }]);
+    server.use(
+      http.get('/api/v1/cmdb/preferences/ci-types/host/fields', () =>
+        HttpResponse.json({
+          type_id: 1,
+          is_subscribed: true,
+          fields: [
+            { attr_id: 10, is_fixed: true },
+            // Built-ins live on the CI row, not in `values`; the column order
+            // is the subscription's, including them.
+            { builtin: '_created_at', is_fixed: false },
+            { builtin: '_created_by', is_fixed: false },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByText('web-01')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '创建时间' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '创建人' })).toBeInTheDocument();
+    expect(screen.getByText('alice@example.test')).toBeInTheDocument();
+  });
+
   it('puts the identifying attribute first, regardless of the field order', async () => {
     handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
     // The operator subscribed note first; the identity column still leads.
@@ -634,6 +667,9 @@ describe('the workspace layout', () => {
           fields: [
             { attr_id: 10, is_fixed: true },
             { attr_id: 11, is_fixed: false },
+            // A built-in column the subscription also chose: saving from this
+            // attributes-only dialog must not drop it.
+            { builtin: '_created_by', is_fixed: false },
           ],
         }),
       ),
@@ -674,6 +710,7 @@ describe('the workspace layout', () => {
         { ref: '10', is_fixed: true },
         { ref: '11', is_fixed: false },
         { ref: '13', is_fixed: false },
+        { ref: '_created_by', is_fixed: false },
       ],
     });
     expect(await screen.findByRole('columnheader', { name: '环境' })).toBeInTheDocument();

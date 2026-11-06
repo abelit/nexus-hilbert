@@ -26,6 +26,8 @@ describe('search hits', () => {
       ci_type_alias: '机柜',
       unique: 'name',
       unique_alias: '名称',
+      _created_at: '2026-10-20 09:00:00',
+      _created_by: 'alice',
       _updated_at: '2026-10-27 09:00:00',
       _updated_by: 'admin',
       name: 'rack-01',
@@ -35,6 +37,8 @@ describe('search hits', () => {
     expect(got).toEqual({
       ci_id: 41,
       type_id: 3,
+      created_at: '2026-10-20 09:00:00',
+      created_by: 'alice',
       updated_at: '2026-10-27 09:00:00',
       updated_by: 'admin',
       values: { name: 'rack-01', environment: 'prod' },

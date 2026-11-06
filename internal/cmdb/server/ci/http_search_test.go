@@ -130,7 +130,10 @@ func TestSearchResponseShape(t *testing.T) {
 		Hits: []cibiz.SearchHit{
 			{
 				Instance: cibiz.Instance{
-					ID: 42, TypeID: 1, UpdatedAt: time.Date(2024, 3, 1, 10, 30, 0, 0, time.UTC),
+					ID: 42, TypeID: 1,
+					CreatedAt: time.Date(2024, 2, 1, 9, 0, 0, 0, time.UTC),
+					UpdatedAt: time.Date(2024, 3, 1, 10, 30, 0, 0, time.UTC),
+					CreatedBy: "bob", UpdatedBy: "alice",
 					Values: map[string]any{"hostname": "web-01"},
 				},
 				TypeName: "host", TypeAlias: "主机",
@@ -160,6 +163,7 @@ func TestSearchResponseShape(t *testing.T) {
 		"_id": model.ID(42), "_type": model.ID(1), "ci_id": model.ID(42),
 		"ci_type": "host", "ci_type_alias": "主机",
 		"unique": "hostname", "unique_alias": "主机名",
+		"_created_at": "2024-02-01 09:00:00", "_created_by": "bob",
 		"_updated_at": "2024-03-01 10:30:00", "_updated_by": "alice",
 		"hostname": "web-01",
 	} {

@@ -202,6 +202,12 @@ func searchResponse(got *cibiz.SearchPage) map[string]any {
 		if hit.UniqueAlias != "" {
 			row["unique_alias"] = hit.UniqueAlias
 		}
+		if !hit.CreatedAt.IsZero() {
+			row["_created_at"] = hit.CreatedAt.Format("2006-01-02 15:04:05")
+		}
+		if hit.CreatedBy != "" {
+			row["_created_by"] = hit.CreatedBy
+		}
 		if !hit.UpdatedAt.IsZero() {
 			row["_updated_at"] = hit.UpdatedAt.Format("2006-01-02 15:04:05")
 		}

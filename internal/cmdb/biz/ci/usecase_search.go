@@ -426,6 +426,15 @@ func updatedBy(ci cimodel.CI) string {
 	return *ci.UpdatedBy
 }
 
+// createdBy reads the creator column, nullable for the same reason: imports and
+// auto-discovery create rows without a person behind them.
+func createdBy(ci cimodel.CI) string {
+	if ci.CreatedBy == nil {
+		return ""
+	}
+	return *ci.CreatedBy
+}
+
 // loadCatalog batches the dictionary reads a parsed query needs.
 func (u *Usecase) loadCatalog(ctx context.Context, refs search.Refs) (*search.Catalog, error) {
 	var attrs []search.Attr

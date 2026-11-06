@@ -383,6 +383,8 @@ func TestResolveSort(t *testing.T) {
 	}{
 		{"", "", false, "", ""},
 		{"-_updated_at", "_updated_at", true, "updated_at", ""},
+		{"_created_at", "_created_at", false, "created_at", ""},
+		{"-_created_by", "_created_by", true, "created_by", ""},
 		{"_id", "_id", false, "id", ""},
 		{"ci_type", "ci_type", false, "type_id", ""},
 		{"-cpu", "cpu", true, "", "cpu"},

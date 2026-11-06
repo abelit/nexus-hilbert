@@ -30,6 +30,12 @@ type CI struct {
 	// cannot be guessed, so it is pinned.
 	IsAutoDiscovery bool `gorm:"column:a;not null;default:false"`
 
+	// CreatedBy and UpdatedBy are the CI row's own audit columns. cantor only
+	// declared updated_by; created_by is a port addition so the console can
+	// offer a 创建人 column next to 创建时间. Both hold the caller's email and
+	// stay NULL for system writes (import, auto-discovery), which the console
+	// renders as empty.
+	CreatedBy *string `gorm:"column:created_by;size:64"`
 	UpdatedBy *string `gorm:"column:updated_by;size:64"`
 
 	// PropsJSON is a PORT-ONLY column with no cantor counterpart.

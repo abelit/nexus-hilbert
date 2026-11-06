@@ -136,11 +136,17 @@ func TestIsBuiltinAttribute(t *testing.T) {
 	}
 }
 
-// The two columns cantor shipped, in its order, because that is the order a
-// subscription that has never been edited presents them in.
-func TestBuiltinAttributesMatchCantor(t *testing.T) {
-	if len(BuiltinAttributes) != 2 || BuiltinAttributes[0] != "_updated_at" || BuiltinAttributes[1] != "_updated_by" {
-		t.Fatalf("BuiltinAttributes = %v, want cantor's two in its order", BuiltinAttributes)
+// Cantor's two columns keep their order because that is the order existing
+// subscriptions present them in; the port's created/creator pair follows.
+func TestBuiltinAttributesKeepCantorsOrder(t *testing.T) {
+	want := []string{"_updated_at", "_updated_by", "_created_at", "_created_by"}
+	if len(BuiltinAttributes) != len(want) {
+		t.Fatalf("BuiltinAttributes = %v, want %v", BuiltinAttributes, want)
+	}
+	for i, name := range want {
+		if BuiltinAttributes[i] != name {
+			t.Fatalf("BuiltinAttributes[%d] = %q, want %q", i, BuiltinAttributes[i], name)
+		}
 	}
 }
 

@@ -118,6 +118,8 @@ export function SubscriptionEditor({
         name: attribute.name,
         password: attribute.is_password,
       })),
+      { key: 'builtin:_created_by', label: tr('创建人', 'Created by'), name: '_created_by' },
+      { key: 'builtin:_created_at', label: tr('创建时间', 'Created at'), name: '_created_at' },
       { key: 'builtin:_updated_by', label: tr('更新人', 'Updated by'), name: '_updated_by' },
       { key: 'builtin:_updated_at', label: tr('更新时间', 'Updated at'), name: '_updated_at' },
     ],

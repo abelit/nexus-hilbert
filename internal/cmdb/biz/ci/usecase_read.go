@@ -60,6 +60,10 @@ type Instance struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
+	// CreatedBy is the caller that created the CI row. Empty for rows no person
+	// created (imports and auto-discovery).
+	CreatedBy string
+
 	// UpdatedBy is the CI row's own audit column. cantor stored the editor's
 	// nickname there; the Go port writes the caller's email. Empty for rows no
 	// person has touched (imports and auto-discovery), which the console hides.
@@ -256,8 +260,8 @@ func (u *Usecase) Get(ctx context.Context, ciID model.ID, fields []string, key R
 func (u *Usecase) renderInstance(set *AttributeSet, ci cimodel.CI, fallbackRows []ValueRow, fields map[string]bool, key RetKey, includeFiles bool) (Instance, error) {
 	out := Instance{
 		ID: ci.ID, TypeID: ci.TypeID, CreatedAt: ci.CreatedAt, UpdatedAt: ci.UpdatedAt,
-		UpdatedBy: updatedBy(ci),
-		Values:    map[string]any{},
+		CreatedBy: createdBy(ci), UpdatedBy: updatedBy(ci),
+		Values: map[string]any{},
 	}
 
 	doc, err := ParsePropsDocument(ci.PropsJSON)

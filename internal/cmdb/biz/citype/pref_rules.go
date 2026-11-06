@@ -53,8 +53,10 @@ const MaxTypeGroupNameLen = 32
 // translation pass can reach.
 //
 // The order is cantor's, and it is the order a subscription that has never been
-// edited presents them in.
-var BuiltinAttributes = []string{"_updated_at", "_updated_by"}
+// edited presents them in. The created/creator pair is appended after it: the
+// port adds those two columns, and keeping them last leaves existing default
+// subscriptions in the order their operators already see.
+var BuiltinAttributes = []string{"_updated_at", "_updated_by", "_created_at", "_created_by"}
 
 // IsBuiltinAttribute reports whether a name is one of the pseudo-columns.
 func IsBuiltinAttribute(name string) bool {

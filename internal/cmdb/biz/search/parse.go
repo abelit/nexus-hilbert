@@ -474,14 +474,14 @@ func ParseSort(raw string) (field string, desc bool) {
 // `ci_type` / `ci_id` for the built-in columns it shows, while saved
 // expressions and buildSearchQ write the underscore forms.
 //
-// Every name here is in cantor's BUILTIN_KEYWORDS, so no attribute can be
-// created under one of them and there is nothing for these to shadow. That is
-// why `_updated_at` is present and a plausible `_created_at` is not: the first
-// is reserved by cantor and the second is not, so treating the second as
-// built-in would hide an attribute someone could legitimately create.
+// Every name here is in the product's reserved keywords, so no attribute can be
+// created under one of them and there is nothing for these to shadow.
+// `_created_at`/`_created_by` were added to that reserved set together with the
+// c_cis columns, which is why they are sortable here too.
 var builtinSortColumns = map[string]string{
 	"id": "id", "ci_id": "id", "_id": "id",
 	"type": "type_id", "ci_type": "type_id", "_type": "type_id",
+	"_created_at": "created_at", "_created_by": "created_by",
 	"_updated_at": "updated_at", "_updated_by": "updated_by",
 }
 

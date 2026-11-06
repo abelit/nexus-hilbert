@@ -68,10 +68,13 @@ func (r *Repo) CreateCIWithValues(ctx context.Context, in cibiz.CreateInput) (*c
 // link a firing back to the write.
 func insertCIWithValues(tx *gorm.DB, ci *cimodel.CI, specs map[cmdbmodel.ID]cibiz.AttributeSpec, values map[cmdbmodel.ID]any, audit cibiz.AuditInfo) ([]cibiz.Change, error) {
 	// The CI carries the same audit label as an update, so the detail header can
-	// name the creator before the first edit. A system write (import, discovery)
-	// has no email and leaves the column empty, which the console hides.
+	// name the creator before the first edit. created_by records that actor even
+	// after later edits, which is what the 创建人 column reads. A system write
+	// (import, discovery) has no email and leaves both columns empty, which the
+	// console hides.
 	if audit.ActorEmail != "" {
 		email := audit.ActorEmail
+		ci.CreatedBy = &email
 		ci.UpdatedBy = &email
 	}
 	// The CI must exist before values can reference it, so the plan is built

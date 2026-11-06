@@ -350,12 +350,13 @@ func TestSetShowAttributesResolvesReferences(t *testing.T) {
 		{Ref: "hostname", IsFixed: true},
 		{Ref: "2"},
 		{Ref: "_updated_at"},
+		{Ref: "_created_by"},
 	})
 	if err != nil {
 		t.Fatalf("SetShowAttributes() error = %v", err)
 	}
 	spec := repo.replacedShow
-	if len(spec.Fields) != 3 {
+	if len(spec.Fields) != 4 {
 		t.Fatalf("fields = %+v", spec.Fields)
 	}
 	// A name, a numeric id and a built-in column are all expressible, which is
@@ -369,7 +370,10 @@ func TestSetShowAttributesResolvesReferences(t *testing.T) {
 	if spec.Fields[2].Builtin != "_updated_at" {
 		t.Fatalf("third = %+v", spec.Fields[2])
 	}
-	if len(got.Fields) != 3 {
+	if spec.Fields[3].Builtin != "_created_by" {
+		t.Fatalf("fourth = %+v, want the created-by column resolved", spec.Fields[3])
+	}
+	if len(got.Fields) != 4 {
 		t.Fatalf("returned fields = %+v", got.Fields)
 	}
 }

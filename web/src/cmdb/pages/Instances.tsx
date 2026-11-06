@@ -29,6 +29,7 @@ import { useDialogs } from '@/components/ui/useDialogs';
 import { Modal } from '@/components/Modal';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
+import { fullDateTime } from '@/lib/format';
 
 import { describeError } from '../api/http';
 import {
@@ -109,6 +110,42 @@ function shortUUID(value: string): string {
   return `${value.slice(0, 8)}…${value.slice(-4)}`;
 }
 
+// The bookkeeping columns every model exposes without an attribute row. They
+// live on the CI row rather than in `values`, and a subscription names them by
+// their underscore form.
+type BuiltinColumn = '_created_at' | '_created_by' | '_updated_at' | '_updated_by';
+
+const BUILTIN_COLUMNS: Record<BuiltinColumn, { zh: string; en: string }> = {
+  _created_at: { zh: '创建时间', en: 'Created at' },
+  _created_by: { zh: '创建人', en: 'Created by' },
+  _updated_at: { zh: '更新时间', en: 'Updated at' },
+  _updated_by: { zh: '更新人', en: 'Updated by' },
+};
+
+function isBuiltinColumn(name: string): name is BuiltinColumn {
+  return name in BUILTIN_COLUMNS;
+}
+
+function builtinValue(row: Instance, name: BuiltinColumn): string {
+  const raw =
+    name === '_created_at'
+      ? row.created_at
+      : name === '_created_by'
+        ? row.created_by
+        : name === '_updated_at'
+          ? row.updated_at
+          : row.updated_by;
+  if (!raw) return '';
+  // Server dates arrive as RFC3339 from the list endpoint and as cantor's
+  // space-separated form from search; the formatter accepts both.
+  return name.endsWith('_at') ? fullDateTime(raw) : raw;
+}
+
+/** One visible column: a model attribute or one of the CI's own columns. */
+type VisibleColumn =
+  | { kind: 'attribute'; attribute: TypeAttribute }
+  | { kind: 'builtin'; name: BuiltinColumn };
+
 /**
  * The attribute a row is named by: the model's configured show field, then a
  * conventional `name`, then the unique field. The grid and the table both use
@@ -150,7 +187,13 @@ export default function InstancesPage() {
   const [typeRef, setTypeRef] = useState<string>(params.get('type') ?? '');
   const [attributes, setAttributes] = useState<TypeAttribute[]>([]);
   const [groups, setGroups] = useState<AttributeGroup[]>([]);
-  const [columns, setColumns] = useState<TypeAttribute[]>([]);
+  // The subscription order includes built-in columns, so it is kept whole; the
+  // attribute-only view below feeds the identity logic, references and cards.
+  const [columnOrder, setColumnOrder] = useState<VisibleColumn[]>([]);
+  const columns = useMemo(
+    () => columnOrder.flatMap((column) => (column.kind === 'attribute' ? [column.attribute] : [])),
+    [columnOrder],
+  );
   const [rows, setRows] = useState<Instance[]>([]);
   const [numFound, setNumFound] = useState(0);
   const [page, setPage] = useState(0);
@@ -264,18 +307,31 @@ export default function InstancesPage() {
         setAttributes(list);
         setGroups(gotGroups);
 
-        // THE SUBSCRIPTION NAMES COLUMNS BY ATTRIBUTE, and a subscription that
-        // names nothing (or has never been saved) falls back to the identifying
-        // attribute plus the first few — never to an empty table.
+        // THE SUBSCRIPTION NAMES COLUMNS BY ATTRIBUTE OR BY BUILT-IN NAME, and
+        // a subscription that names no attribute (or has never been saved)
+        // falls back to the identifying attribute plus the first few — never
+        // to an empty table.
         const byID = new Map(list.map((attribute) => [attribute.id, attribute]));
-        const subscribed = (show?.fields ?? [])
-          .map((field) => (field.attr_id ? byID.get(field.attr_id) : undefined))
-          .filter((attribute): attribute is TypeAttribute => Boolean(attribute));
-        if (subscribed.length > 0) {
-          setColumns(subscribed);
+        const subscribed: VisibleColumn[] = [];
+        for (const field of show?.fields ?? []) {
+          if (field.builtin) {
+            if (isBuiltinColumn(field.builtin)) {
+              subscribed.push({ kind: 'builtin', name: field.builtin });
+            }
+            continue;
+          }
+          const attribute = field.attr_id ? byID.get(field.attr_id) : undefined;
+          if (attribute) subscribed.push({ kind: 'attribute', attribute });
+        }
+        if (subscribed.some((column) => column.kind === 'attribute')) {
+          setColumnOrder(subscribed);
         } else {
           const identifier = list.filter((attribute) => attribute.name === model?.unique_key);
-          setColumns([...identifier, ...list.filter((attribute) => attribute.name !== model?.unique_key).slice(0, 4)]);
+          const fallback = [
+            ...identifier,
+            ...list.filter((attribute) => attribute.name !== model?.unique_key).slice(0, 4),
+          ];
+          setColumnOrder(fallback.map((attribute) => ({ kind: 'attribute', attribute })));
         }
       })
       .catch((error) => live && setErr(describeError(error, tr('无法读取模型属性', 'Could not load the model’s attributes'))))
@@ -349,7 +405,7 @@ export default function InstancesPage() {
     setRows([]);
     setNumFound(0);
     setAttributes([]);
-    setColumns([]);
+    setColumnOrder([]);
     setGroups([]);
     setErr(null);
     setLoading(true);
@@ -657,16 +713,49 @@ export default function InstancesPage() {
     [toast, tr],
   );
 
+  // The 字段 dialog only lists model attributes. It must keep the built-in
+  // columns this subscription also chose rather than dropping them on save.
+  const builtinRefs = useMemo(
+    () => columnOrder.flatMap((column) => (column.kind === 'builtin' ? [column.name] : [])),
+    [columnOrder],
+  );
+  const handleFieldsSaved = useCallback(
+    (next: TypeAttribute[]) => {
+      setColumnOrder([
+        ...next.map((attribute) => ({ kind: 'attribute' as const, attribute })),
+        ...builtinRefs.map((name) => ({ kind: 'builtin' as const, name })),
+      ]);
+    },
+    [builtinRefs],
+  );
+
   // THE IDENTITY COLUMN LEADS. The subscription still decides which fields are
   // shown, but the field a row is named by belongs first; a UUID or a long code
   // ahead of the name makes the table read like a log rather than a list.
   const identity = useMemo(() => identityAttribute(columns, model), [columns, model]);
   const orderedColumns = useMemo(() => {
-    if (!identity) return columns;
-    return [identity, ...columns.filter((attribute) => attribute.id !== identity.id)];
-  }, [columns, identity]);
+    if (!identity) return columnOrder;
+    const isIdentity = (column: VisibleColumn) =>
+      column.kind === 'attribute' && column.attribute.id === identity.id;
+    return [...columnOrder.filter(isIdentity), ...columnOrder.filter((column) => !isIdentity(column))];
+  }, [columnOrder, identity]);
 
-  const tableColumns: Column<Instance>[] = orderedColumns.map((attribute) => {
+  const tableColumns: Column<Instance>[] = orderedColumns.map((column) => {
+    if (column.kind === 'builtin') {
+      const meta = BUILTIN_COLUMNS[column.name];
+      return {
+        key: `builtin-${column.name}`,
+        header: tr(meta.zh, meta.en),
+        width: 'w-[9rem]',
+        sortable: false,
+        cell: (row) => (
+          <span className="block max-w-[12rem] truncate text-text-muted" title={builtinValue(row, column.name)}>
+            {builtinValue(row, column.name) || '—'}
+          </span>
+        ),
+      };
+    }
+    const attribute = column.attribute;
     const isIdentity = identity?.id === attribute.id;
     const isUnique = attribute.name === model?.unique_key;
     return {
@@ -745,17 +834,27 @@ export default function InstancesPage() {
   // referenced instance would turn one export into hundreds of lookups.
   const exportColumns = useMemo<ExportColumn<Instance>[]>(
     () =>
-      orderedColumns
-        .filter((attribute) => !attribute.is_reference)
-        .map((attribute) => ({
+      orderedColumns.flatMap<ExportColumn<Instance>>((column) => {
+        if (column.kind === 'builtin') {
+          const meta = BUILTIN_COLUMNS[column.name];
+          return [{
+            key: column.name,
+            header: tr(meta.zh, meta.en),
+            value: (row) => builtinValue(row, column.name) || '—',
+          }];
+        }
+        const attribute = column.attribute;
+        if (attribute.is_reference) return [];
+        return [{
           key: attribute.name,
           header: attribute.alias || attribute.name,
           value: (row) => {
             const value = row.values?.[attribute.name];
             return choiceText(attribute, value) ?? displayValue(value);
           },
-        })),
-    [orderedColumns],
+        }];
+      }),
+    [orderedColumns, tr],
   );
 
   // 全部 means "the current server query", not "the twenty rows on screen".
@@ -1182,7 +1281,8 @@ export default function InstancesPage() {
                         model={model}
                         attributes={attributes}
                         columns={columns}
-                        onSaved={setColumns}
+                        builtinRefs={builtinRefs}
+                        onSaved={handleFieldsSaved}
                       />
                     )}
                     <div

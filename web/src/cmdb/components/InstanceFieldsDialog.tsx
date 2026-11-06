@@ -43,11 +43,14 @@ export function InstanceFieldsDialog({
   model,
   attributes,
   columns,
+  builtinRefs = [],
   onSaved,
 }: {
   model: CIType;
   attributes: TypeAttribute[];
   columns: TypeAttribute[];
+  /** Built-in columns the subscription also chose; they are not model attributes. */
+  builtinRefs?: string[];
   onSaved(next: TypeAttribute[]): void;
 }) {
   const { tr } = useI18n();
@@ -120,13 +123,15 @@ export function InstanceFieldsDialog({
     setSaving(true);
     setError(null);
     try {
-      await setShowFields(
-        model.id,
-        picked.map((attribute) => ({
+      await setShowFields(model.id, [
+        ...picked.map((attribute) => ({
           ref: String(attribute.id),
           is_fixed: attribute.id === pinnedId,
         })),
-      );
+        // Saving from this dialog must not silently unsubscribe the built-in
+        // columns the operator chose in 订阅设置.
+        ...builtinRefs.map((ref) => ({ ref, is_fixed: false })),
+      ]);
       onSaved(picked);
       toast.success(tr('已保存字段显示', 'Visible fields saved'));
       setOpen(false);

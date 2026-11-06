@@ -165,6 +165,9 @@ describe('the subscription page', () => {
     // gone (the keyboard sensor keeps the grip usable without a pointer).
     expect(within(dialog).getByRole('button', { name: '拖动 hostname' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: '上移 hostname' })).not.toBeInTheDocument();
+    // The CI's own columns are offered beside the model attributes.
+    expect(within(dialog).getByRole('checkbox', { name: '创建人' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('checkbox', { name: '创建时间' })).toBeInTheDocument();
     await user.click(within(dialog).getByRole('checkbox', { name: 'cpu' }));
     await user.click(within(dialog).getByRole('button', { name: '移入已选' }));
     await user.click(within(dialog).getByRole('button', { name: '保存' }));
