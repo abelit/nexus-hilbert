@@ -18,6 +18,7 @@ bin/
 dist/stage/
 dist/out/
 tmp/
+node_modules/
 
 # Stray top-level binaries from `go build` / `go run`
 /ongrid
