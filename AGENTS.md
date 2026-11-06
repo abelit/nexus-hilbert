@@ -8,6 +8,7 @@
 - 修复前读完整调用链，搜索相关函数的调用方；优先在共同入口修复根因，复用已有组件、工具和依赖。
 - 项目规则以本文件、[贡献指南](CONTRIBUTING.md)、[安全政策](SECURITY.md)及相关专题文档为准。发现冲突时指出具体条款，避免借小改动迁移架构、协议或数据模型。
 - 前端任务必读[前端设计语言与开发规范](docs/design/frontend-design-language.md)；依赖边界查 [.go-arch-lint.yml](.go-arch-lint.yml)；构建与测试入口查 [Makefile](Makefile)、[前端脚本](web/package.json)和 [.github/workflows](.github/workflows)。
+- 本 fork 的分支模型、上游同步和合回 `main` 的流程见 [Fork 维护与上游同步流程](docs/guides/fork-sync-workflow.md)；向 ongridio/ongrid 提交变更仍遵循[贡献指南](CONTRIBUTING.md)。
 - [gospec 参考版本](https://github.com/singchia/gospec/blob/0eb883fb40b62b509125d35a1c27e7e6a238d390/spec/spec.md)固定为 `0eb883fb40b62b509125d35a1c27e7e6a238d390`。项目规则未覆盖时，按其任务路由表只读相关的 1–3 个专题；外部规范不覆盖项目规则。
 - 如需读取本地 gospec，先查 `.claude/skills/gospec/spec/spec.md`，再查 `~/.claude/skills/gospec/spec/spec.md`，并核对上述版本。缺失或版本不符时可读取固定版本链接；不要自动安装或更新个人目录。无法读取时说明未核对项，继续不依赖它的工作。
 
