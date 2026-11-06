@@ -43,6 +43,7 @@ export function PoolTable({
   onAccept,
   onDelete,
   onViewRaw,
+  fill = false,
 }: {
   rows: PoolEntry[];
   attributes: PoolAttribute[];
@@ -53,6 +54,8 @@ export function PoolTable({
   onAccept(row: PoolEntry): void;
   onDelete(row: PoolEntry): void;
   onViewRaw(row: PoolEntry): void;
+  /** Fill a flex parent and scroll the table body itself. */
+  fill?: boolean;
 }) {
   const { tr } = useI18n();
 
@@ -113,6 +116,7 @@ export function PoolTable({
 
   return (
     <DataTable
+      fill={fill}
       columns={columns}
       rows={rows}
       rowKey={(row) => row.id}

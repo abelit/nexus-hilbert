@@ -6,7 +6,6 @@ import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PaginationFooter } from '@/components/ui/PaginationFooter';
-import { Select } from '@/components/ui/Select';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
@@ -240,6 +239,13 @@ export default function DiscoveryPoolPage() {
     }
   };
 
+  const pending = counters ? Math.max(0, counters.instance_count - counters.accept_count) : null;
+  const statusOptions: Array<{ value: StatusFilter; zh: string; en: string; count: number | null }> = [
+    { value: 'pending', zh: '待接受', en: 'Pending', count: pending },
+    { value: 'accepted', zh: '已接受', en: 'Accepted', count: counters?.accept_count ?? null },
+    { value: 'all', zh: '全部', en: 'All', count: counters?.instance_count ?? null },
+  ];
+
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
       <PageHeader
@@ -248,9 +254,34 @@ export default function DiscoveryPoolPage() {
           '采集器上报的候选资源。接受后写入 CMDB；未接受的记录不会影响现有实例。',
           'Candidate resources reported by collectors. Accepting writes them into the CMDB; a pending row never touches an existing instance.',
         )}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              className="inline-flex items-center gap-1.5"
+            >
+              <ScrollText size={12} aria-hidden="true" />
+              {tr('执行日志', 'Discovery log')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={refresh}
+              disabled={loading || refreshing}
+              className="inline-flex items-center gap-1.5"
+            >
+              <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
+              {tr('刷新', 'Refresh')}
+            </Button>
+          </>
+        }
       />
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6 lg:flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6 lg:flex-row lg:overflow-hidden">
         <PoolTree
           types={types}
           selected={selected}
@@ -260,9 +291,9 @@ export default function DiscoveryPoolPage() {
           onRefresh={() => void loadTypes()}
         />
 
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-3 lg:min-h-0">
           {selectedType == null ? (
-            <Card>
+            <Card className="flex flex-1 items-center justify-center">
               <EmptyState
                 title={tr('选择一个模型', 'Choose a model')}
                 hint={tr(
@@ -279,62 +310,67 @@ export default function DiscoveryPoolPage() {
                 <p className="text-xs text-text-muted">{tr('加载统计…', 'Loading counters…')}</p>
               )}
 
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="min-w-0 text-xs text-text-muted">
-                  {tr(
-                    `「${labelOf(selectedType)}」的发现记录。`,
-                    `Sightings for “${labelOf(selectedType)}”.`,
-                  )}
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select
-                    label={tr('状态', 'Status')}
-                    value={status}
-                    onValueChange={(value) => setStatus(value as StatusFilter)}
-                    options={[
-                      { value: 'all', label: tr('全部', 'All') },
-                      { value: 'pending', label: tr('待接受', 'Pending') },
-                      { value: 'accepted', label: tr('已接受', 'Accepted') },
-                    ]}
-                    className="w-40"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    onClick={() => setHistoryOpen(true)}
-                    className="inline-flex items-center gap-1.5"
-                  >
-                    <ScrollText size={12} aria-hidden="true" />
-                    {tr('执行日志', 'Discovery log')}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    onClick={refresh}
-                    disabled={loading || refreshing}
-                    className="inline-flex items-center gap-1.5"
-                  >
-                    <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />
-                    {tr('刷新', 'Refresh')}
-                  </Button>
-                </div>
-              </div>
+              <section className="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h2 className="truncate text-sm font-medium text-text">
+                      {tr(`「${labelOf(selectedType)}」的发现记录`, `Sightings for “${labelOf(selectedType)}”`)}
+                    </h2>
+                    <span className="rounded-full bg-text/10 px-1.5 py-0.5 text-[10px] leading-none text-text-muted">
+                      {total}
+                    </span>
+                    {refreshing && (
+                      <RefreshCw size={12} className="animate-spin text-text-faint" aria-hidden="true" />
+                    )}
+                  </div>
 
-              <Card>
-                <PoolTable
-                  rows={entries}
-                  attributes={attributes}
-                  loading={loading}
-                  error={err}
-                  acceptingID={accepting}
-                  onRetry={refresh}
-                  onAccept={(row) => void accept(row)}
-                  onDelete={(row) => void remove(row)}
-                  onViewRaw={setRaw}
-                />
+                  <div
+                    role="group"
+                    aria-label={tr('状态', 'Status')}
+                    className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
+                  >
+                    {statusOptions.map((option) => {
+                      const active = status === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => setStatus(option.value)}
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500',
+                            active
+                              ? 'bg-text/10 font-medium text-text'
+                              : 'text-text-muted hover:bg-text/5 hover:text-text',
+                          )}
+                        >
+                          {tr(option.zh, option.en)}
+                          {option.count != null && (
+                            <span className="text-[10px] tabular-nums text-text-faint">{option.count}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex min-h-0 flex-1 flex-col px-4 pb-0 pt-2">
+                  <PoolTable
+                    fill
+                    rows={entries}
+                    attributes={attributes}
+                    loading={loading}
+                    error={err}
+                    acceptingID={accepting}
+                    onRetry={refresh}
+                    onAccept={(row) => void accept(row)}
+                    onDelete={(row) => void remove(row)}
+                    onViewRaw={setRaw}
+                  />
+                </div>
+
                 <PaginationFooter
+                  embedded
                   page={page - 1}
                   pageSize={PAGE_SIZE}
                   shown={entries.length}
@@ -347,7 +383,7 @@ export default function DiscoveryPoolPage() {
                     void loadEntries(selected, target, status, requestSeq.current);
                   }}
                 />
-              </Card>
+              </section>
             </>
           )}
         </div>

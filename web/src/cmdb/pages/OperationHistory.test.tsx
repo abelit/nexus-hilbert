@@ -145,6 +145,12 @@ describe('the operation history page', () => {
     expect(screen.getByRole('columnheader', { name: '第二端' })).toBeInTheDocument();
     expect(screen.getByText('web-01')).toBeInTheDocument();
     expect(screen.getByText('sw-01')).toBeInTheDocument();
+
+    // The timeline renders the same relation record as one event line.
+    await userEvent.click(screen.getByRole('button', { name: '时间线' }));
+    expect(screen.getByText('1 条')).toBeInTheDocument();
+    expect(screen.getByText('web-01')).toBeInTheDocument();
+    expect(screen.getByText('sw-01')).toBeInTheDocument();
   });
 
   it('passes the model filter to the server', async () => {
@@ -161,6 +167,59 @@ describe('the operation history page', () => {
     await screen.findByRole('tab', { name: '属性变更' });
     await selectOption(screen.getByLabelText('模型'), '主机');
     await waitFor(() => expect(query).toContain('type_id=1'));
+  });
+
+  it('applies a quick time range and marks it as the active filter', async () => {
+    const user = userEvent.setup();
+    let query = '';
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/history/attributes', ({ request }) => {
+        query = request.url;
+        return HttpResponse.json({ items: [attributeRecord], total: 1, page: 1, page_size: 20 });
+      }),
+    );
+    renderPage();
+
+    await screen.findByRole('tab', { name: '属性变更' });
+    await user.click(screen.getByRole('button', { name: '今天' }));
+
+    await waitFor(() => expect(query).toContain('start='));
+    const params = new URL(query).searchParams;
+    expect(params.get('start')).not.toBeNull();
+    expect(params.get('end')).not.toBeNull();
+    // The range begins at the operator's local midnight, not a UTC day.
+    expect(new Date(params.get('start')!).getHours()).toBe(0);
+    expect(screen.getByRole('button', { name: '今天' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('renders the same page as a timeline without refetching, and opens a record from it', async () => {
+    const user = userEvent.setup();
+    let reads = 0;
+    baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/history/attributes', () => {
+        reads += 1;
+        return HttpResponse.json({ items: [attributeRecord], total: 1, page: 1, page_size: 20 });
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText('主机名')).toBeInTheDocument();
+    expect(reads).toBe(1);
+
+    await user.click(screen.getByRole('button', { name: '时间线' }));
+
+    expect(screen.getByRole('button', { name: '时间线' })).toHaveAttribute('aria-pressed', 'true');
+    // The same change is grouped under a day with its count.
+    expect(screen.getByText('1 条')).toBeInTheDocument();
+    expect(screen.getByText('web-00')).toBeInTheDocument();
+    expect(screen.getByText('web-01')).toBeInTheDocument();
+    // Switching the view is a render change, not a new query.
+    expect(reads).toBe(1);
+
+    await user.click(screen.getByRole('button', { name: '查看详情 2' }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent('变更明细');
   });
 
   it('shows a record’s changes in a drawer', async () => {

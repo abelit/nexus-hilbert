@@ -93,6 +93,30 @@ describe('the discovery pool', () => {
     expect(screen.getByText('agent one')).toBeInTheDocument();
   });
 
+  it('filters by the status segments, which carry their counts', async () => {
+    const user = userEvent.setup();
+    const urls: string[] = [];
+    poolHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/discovery/adc', ({ request }) => {
+        urls.push(request.url);
+        return HttpResponse.json({ items: [pending], total: 1, page: 1, page_size: 20 });
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByLabelText('待接受数量')).toHaveTextContent('1');
+    const pendingSegment = screen.getByRole('button', { name: /待接受/ });
+    expect(pendingSegment).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(pendingSegment);
+    await waitFor(() => expect(urls.some((url) => url.includes('is_accept=false'))).toBe(true));
+    expect(pendingSegment).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: /已接受/ }));
+    await waitFor(() => expect(urls.some((url) => url.includes('is_accept=true'))).toBe(true));
+  });
+
   it('accepts a pending sighting and refreshes the counters', async () => {
     let puts = 0;
     let current = pending;

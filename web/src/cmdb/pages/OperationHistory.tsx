@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ShieldAlert } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { ListTree, Loader2, RefreshCw, ShieldAlert, Table2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -11,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
 import { fullDateTime } from '@/lib/format';
+import { cn } from '@/lib/cn';
 import { listUsers, type User } from '@/api/users';
 
 import { listCITypes, type CIType } from '../api/citype';
@@ -35,6 +37,7 @@ import {
   type OperateOption,
 } from '../components/history/HistoryFilters';
 import { HistoryRecordDrawer, type HistorySelection } from '../components/history/HistoryRecordDrawer';
+import { HistoryTimeline, type HistoryTimelineEntry } from '../components/history/HistoryTimeline';
 
 // 操作历史 — what changed, who changed it, and why.
 //
@@ -52,6 +55,9 @@ const PAGE_SIZE = 20;
 
 type Tab = 'attributes' | 'relations' | 'types' | 'triggers';
 
+/** Two renders of the same result page; the query does not depend on it. */
+type ResultView = 'table' | 'timeline';
+
 type RowCount = { shown: number; total: number };
 
 function idOrUndefined(value: string): number | undefined {
@@ -63,8 +69,18 @@ export default function OperationHistoryPage() {
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
 
+  const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>('attributes');
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
+  // The view is a reading preference, so it belongs in the URL: a shared or
+  // refreshed link keeps the timeline the sender was looking at.
+  const view: ResultView = params.get('view') === 'timeline' ? 'timeline' : 'table';
+  const setView = (next: ResultView) => {
+    const copy = new URLSearchParams(params);
+    if (next === 'timeline') copy.set('view', 'timeline');
+    else copy.delete('view');
+    setParams(copy, { replace: true });
+  };
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -177,6 +193,126 @@ export default function OperationHistoryPage() {
     }
   };
 
+  // Adds read as green and deletes as red in both views; the model types tab
+  // spells its actions with a wider code range than the other three.
+  const operateTone = (value?: string): 'default' | 'success' | 'danger' => {
+    if (!value) return 'default';
+    const adds = tab === 'types' ? ['0', '3', '6'] : ['0'];
+    const removes = tab === 'types' ? ['2', '5', '8'] : ['1'];
+    if (adds.includes(value)) return 'success';
+    if (removes.includes(value)) return 'danger';
+    return 'default';
+  };
+
+  const renderAttributeChanges = (row: AttributeRecord) => (
+    <>
+      {row.changes.slice(0, 3).map((change) => (
+        <div key={change.id} className="flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="font-medium text-text">{change.attr_alias || change.attr_name || `#${change.attr_id}`}</span>
+          <code className="rounded bg-zinc-900/60 px-1 py-0.5 font-mono text-text-muted">{change.old || '—'}</code>
+          <span className="text-text-faint">→</span>
+          <code className="rounded bg-zinc-900/60 px-1 py-0.5 font-mono text-emerald-300">{change.new || '—'}</code>
+          <span className="text-text-faint">#{change.ci_id}</span>
+        </div>
+      ))}
+      {row.changes.length > 3 && (
+        <span className="text-[11px] text-text-faint">
+          {tr(`另有 ${row.changes.length - 3} 项`, `${row.changes.length - 3} more`)}
+        </span>
+      )}
+    </>
+  );
+
+  const timelineEntries: HistoryTimelineEntry[] = (() => {
+    switch (tab) {
+      case 'attributes':
+        return attributeRows.map((row) => ({
+          key: row.record_id,
+          createdAt: row.created_at,
+          user: userLabel(row.uid),
+          entity: row.type_alias || row.type_name || `#${row.type_id ?? ''}`,
+          action: operateLabel(row.changes[0]?.operate_type),
+          actionTone: operateTone(row.changes[0]?.operate_type),
+          changes: renderAttributeChanges(row),
+          detailLabel: tr(`查看详情 ${row.record_id}`, `View details for ${row.record_id}`),
+          onOpen: () => setSelection({ kind: 'attributes', record: row }),
+        }));
+      case 'relations':
+        return relationRows.map((row) => {
+          const change = row.changes[0];
+          return {
+            key: row.record_id,
+            createdAt: row.created_at,
+            user: userLabel(row.uid),
+            entity: row.type_alias || row.type_name || `#${row.type_id ?? ''}`,
+            action: operateLabel(change?.operate_type),
+            actionTone: operateTone(change?.operate_type),
+            changes: change ? (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <code className="rounded bg-zinc-900/60 px-1 py-0.5 font-mono text-text-muted">
+                  {change.first_ci_name || `#${change.first_ci_id ?? ''}`}
+                </code>
+                <span className="text-text-faint">→</span>
+                <code className="rounded bg-zinc-900/60 px-1 py-0.5 font-mono text-text-muted">
+                  {change.second_ci_name || `#${change.second_ci_id ?? ''}`}
+                </code>
+                <Chip dense>{`#${change.relation_type_id ?? '—'}`}</Chip>
+              </div>
+            ) : '—',
+            detailLabel: tr(`查看详情 ${row.record_id}`, `View details for ${row.record_id}`),
+            onOpen: () => setSelection({ kind: 'relations', record: row }),
+          };
+        });
+      case 'types':
+        return typeRows.map((row) => ({
+          key: row.id,
+          createdAt: row.created_at,
+          user: userLabel(row.uid),
+          entity: row.type_alias || row.type_name || `#${row.type_id}`,
+          action: operateLabel(row.operate_type),
+          actionTone: operateTone(row.operate_type),
+          changes: (
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="font-medium text-text">{row.attr_alias || row.attr_name || '—'}</span>
+              <code className="block max-w-[28rem] truncate rounded bg-zinc-900/60 px-1 py-0.5 font-mono text-[10px] text-text-muted">
+                {row.change ? JSON.stringify(row.change) : '—'}
+              </code>
+            </div>
+          ),
+          detailLabel: tr(`查看详情 ${row.id}`, `View details for ${row.id}`),
+          onOpen: () => setSelection({ kind: 'types', item: row }),
+        }));
+      case 'triggers':
+        return triggerRows.map((row) => ({
+          key: row.id,
+          createdAt: row.created_at,
+          user: userLabel(row.uid),
+          entity: row.ci_name || `#${row.ci_id}`,
+          action: operateLabel(row.operate_type),
+          actionTone: operateTone(row.operate_type),
+          changes: (
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="font-medium text-text">{row.trigger_name || `#${row.trigger_id ?? ''}`}</span>
+              <Chip tone={row.is_ok ? 'success' : 'warning'} dense>
+                {row.is_ok ? tr('成功', 'Succeeded') : tr('失败', 'Failed')}
+              </Chip>
+            </div>
+          ),
+          detailLabel: tr(`查看详情 ${row.id}`, `View details for ${row.id}`),
+          onOpen: () => setSelection({ kind: 'triggers', item: row }),
+        }));
+    }
+  })();
+
+  const emptyMessage =
+    tab === 'attributes'
+      ? tr('没有匹配的属性变更', 'No attribute change matches')
+      : tab === 'relations'
+        ? tr('没有匹配的关系变更', 'No relation change matches')
+        : tab === 'types'
+          ? tr('没有匹配的模型变更', 'No model change matches')
+          : tr('没有匹配的触发器执行', 'No trigger firing matches');
+
   const operateOptions = useMemo<OperateOption[]>(() => {
     if (tab === 'types') {
       return [
@@ -200,33 +336,21 @@ export default function OperationHistoryPage() {
 
   const attributeColumns: Column<AttributeRecord>[] = [
     {
-      key: 'time', header: tr('时间', 'Time'),
+      key: 'time', header: tr('时间', 'Time'), width: 'w-[11rem]',
       cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{fullDateTime(row.created_at)}</code>,
     },
-    { key: 'user', header: tr('用户', 'User'), cell: (row) => userLabel(row.uid) },
-    { key: 'type', header: tr('模型', 'Model'), cell: (row) => row.type_alias || row.type_name || `#${row.type_id ?? ''}` },
+    { key: 'user', header: tr('用户', 'User'), width: 'w-[7rem]', cell: (row) => <span className="whitespace-nowrap">{userLabel(row.uid)}</span> },
+    { key: 'type', header: tr('模型', 'Model'), width: 'w-[9rem]', cell: (row) => <span className="whitespace-nowrap">{row.type_alias || row.type_name || `#${row.type_id ?? ''}`}</span> },
     {
       key: 'changes', header: tr('变更', 'Changes'), width: 'w-full',
-      cell: (row) => (
-        <div className="flex flex-col gap-0.5">
-          {row.changes.slice(0, 3).map((change) => (
-            <div key={change.id} className="flex flex-wrap items-center gap-1.5 text-[11px]">
-              <span className="font-medium text-text">{change.attr_alias || change.attr_name || `#${change.attr_id}`}</span>
-              <code className="rounded bg-zinc-900/60 px-1 py-0.5 font-mono text-text-muted">{change.old || '—'}</code>
-              <span className="text-text-faint">→</span>
-              <code className="rounded bg-zinc-900/60 px-1 py-0.5 font-mono text-emerald-300">{change.new || '—'}</code>
-              <span className="text-text-faint">#{change.ci_id}</span>
-            </div>
-          ))}
-          {row.changes.length > 3 && (
-            <span className="text-[11px] text-text-faint">{tr(`另有 ${row.changes.length - 3} 项`, `${row.changes.length - 3} more`)}</span>
-          )}
-        </div>
-      ),
+      cell: (row) => <div className="flex flex-col gap-0.5">{renderAttributeChanges(row)}</div>,
     },
-    { key: 'operate', header: tr('操作', 'Action'), cell: (row) => <Chip>{operateLabel(row.changes[0]?.operate_type)}</Chip> },
     {
-      key: 'detail', header: tr('详情', 'Details'),
+      key: 'operate', header: tr('操作', 'Action'), width: 'w-[6rem]',
+      cell: (row) => <Chip tone={operateTone(row.changes[0]?.operate_type)}>{operateLabel(row.changes[0]?.operate_type)}</Chip>,
+    },
+    {
+      key: 'detail', header: tr('详情', 'Details'), width: 'w-px',
       cell: (row) => (
         <Button
           variant="subtle" size="sm" type="button"
@@ -241,26 +365,29 @@ export default function OperationHistoryPage() {
 
   const relationColumns: Column<RelationRecord>[] = [
     {
-      key: 'time', header: tr('时间', 'Time'),
+      key: 'time', header: tr('时间', 'Time'), width: 'w-[11rem]',
       cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{fullDateTime(row.created_at)}</code>,
     },
-    { key: 'user', header: tr('用户', 'User'), cell: (row) => userLabel(row.uid) },
-    { key: 'type', header: tr('模型', 'Model'), cell: (row) => row.type_alias || row.type_name || `#${row.type_id ?? ''}` },
+    { key: 'user', header: tr('用户', 'User'), width: 'w-[7rem]', cell: (row) => <span className="whitespace-nowrap">{userLabel(row.uid)}</span> },
+    { key: 'type', header: tr('模型', 'Model'), width: 'w-[9rem]', cell: (row) => <span className="whitespace-nowrap">{row.type_alias || row.type_name || `#${row.type_id ?? ''}`}</span> },
     {
-      key: 'first', header: tr('第一端', 'First'),
+      key: 'first', header: tr('第一端', 'First'), width: 'w-[12rem]',
       cell: (row) => <span className="block max-w-[12rem] truncate">{row.changes[0]?.first_ci_name || `#${row.changes[0]?.first_ci_id ?? ''}`}</span>,
     },
     {
-      key: 'second', header: tr('第二端', 'Second'),
+      key: 'second', header: tr('第二端', 'Second'), width: 'w-[12rem]',
       cell: (row) => <span className="block max-w-[12rem] truncate">{row.changes[0]?.second_ci_name || `#${row.changes[0]?.second_ci_id ?? ''}`}</span>,
     },
     {
-      key: 'relation', header: tr('关系类型', 'Relation type'),
+      key: 'relation', header: tr('关系类型', 'Relation type'), width: 'w-[8rem]',
       cell: (row) => <Chip>{`#${row.changes[0]?.relation_type_id ?? '—'}`}</Chip>,
     },
-    { key: 'operate', header: tr('操作', 'Action'), cell: (row) => <Chip>{operateLabel(row.changes[0]?.operate_type)}</Chip> },
     {
-      key: 'detail', header: tr('详情', 'Details'),
+      key: 'operate', header: tr('操作', 'Action'), width: 'w-[6rem]',
+      cell: (row) => <Chip tone={operateTone(row.changes[0]?.operate_type)}>{operateLabel(row.changes[0]?.operate_type)}</Chip>,
+    },
+    {
+      key: 'detail', header: tr('详情', 'Details'), width: 'w-px',
       cell: (row) => (
         <Button
           variant="subtle" size="sm" type="button"
@@ -275,12 +402,12 @@ export default function OperationHistoryPage() {
 
   const typeColumns: Column<TypeHistoryItem>[] = [
     {
-      key: 'time', header: tr('时间', 'Time'),
+      key: 'time', header: tr('时间', 'Time'), width: 'w-[11rem]',
       cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{fullDateTime(row.created_at)}</code>,
     },
-    { key: 'user', header: tr('用户', 'User'), cell: (row) => userLabel(row.uid) },
-    { key: 'type', header: tr('模型', 'Model'), cell: (row) => row.type_alias || row.type_name || `#${row.type_id}` },
-    { key: 'attr', header: tr('属性', 'Attribute'), cell: (row) => row.attr_alias || row.attr_name || '—' },
+    { key: 'user', header: tr('用户', 'User'), width: 'w-[7rem]', cell: (row) => <span className="whitespace-nowrap">{userLabel(row.uid)}</span> },
+    { key: 'type', header: tr('模型', 'Model'), width: 'w-[9rem]', cell: (row) => <span className="whitespace-nowrap">{row.type_alias || row.type_name || `#${row.type_id}`}</span> },
+    { key: 'attr', header: tr('属性', 'Attribute'), width: 'w-[9rem]', cell: (row) => <span className="whitespace-nowrap">{row.attr_alias || row.attr_name || '—'}</span> },
     {
       key: 'change', header: tr('变更', 'Change'), width: 'w-full',
       cell: (row) => (
@@ -289,9 +416,12 @@ export default function OperationHistoryPage() {
         </code>
       ),
     },
-    { key: 'operate', header: tr('操作', 'Action'), cell: (row) => <Chip>{operateLabel(row.operate_type)}</Chip> },
     {
-      key: 'detail', header: tr('详情', 'Details'),
+      key: 'operate', header: tr('操作', 'Action'), width: 'w-[6rem]',
+      cell: (row) => <Chip tone={operateTone(row.operate_type)}>{operateLabel(row.operate_type)}</Chip>,
+    },
+    {
+      key: 'detail', header: tr('详情', 'Details'), width: 'w-px',
       cell: (row) => (
         <Button
           variant="subtle" size="sm" type="button"
@@ -306,19 +436,22 @@ export default function OperationHistoryPage() {
 
   const triggerColumns: Column<TriggerHistoryItem>[] = [
     {
-      key: 'time', header: tr('时间', 'Time'),
+      key: 'time', header: tr('时间', 'Time'), width: 'w-[11rem]',
       cell: (row) => <code className="whitespace-nowrap font-mono text-[11px] text-text-muted">{fullDateTime(row.created_at)}</code>,
     },
-    { key: 'user', header: tr('用户', 'User'), cell: (row) => userLabel(row.uid) },
-    { key: 'ci', header: tr('资源', 'Instance'), cell: (row) => row.ci_name || `#${row.ci_id}` },
-    { key: 'trigger', header: tr('触发器', 'Trigger'), cell: (row) => row.trigger_name || `#${row.trigger_id ?? ''}` },
+    { key: 'user', header: tr('用户', 'User'), width: 'w-[7rem]', cell: (row) => <span className="whitespace-nowrap">{userLabel(row.uid)}</span> },
+    { key: 'ci', header: tr('资源', 'Instance'), width: 'w-[12rem]', cell: (row) => <span className="block max-w-[12rem] truncate">{row.ci_name || `#${row.ci_id}`}</span> },
+    { key: 'trigger', header: tr('触发器', 'Trigger'), width: 'w-[12rem]', cell: (row) => <span className="block max-w-[12rem] truncate">{row.trigger_name || `#${row.trigger_id ?? ''}`}</span> },
     {
-      key: 'result', header: tr('结果', 'Result'),
+      key: 'result', header: tr('结果', 'Result'), width: 'w-[7rem]',
       cell: (row) => row.is_ok ? <Chip tone="success">{tr('成功', 'Succeeded')}</Chip> : <Chip tone="warning">{tr('失败', 'Failed')}</Chip>,
     },
-    { key: 'operate', header: tr('操作', 'Action'), cell: (row) => <Chip>{operateLabel(row.operate_type)}</Chip> },
     {
-      key: 'detail', header: tr('详情', 'Details'),
+      key: 'operate', header: tr('操作', 'Action'), width: 'w-[6rem]',
+      cell: (row) => <Chip tone={operateTone(row.operate_type)}>{operateLabel(row.operate_type)}</Chip>,
+    },
+    {
+      key: 'detail', header: tr('详情', 'Details'), width: 'w-px',
       cell: (row) => (
         <Button
           variant="subtle" size="sm" type="button"
@@ -365,83 +498,168 @@ export default function OperationHistoryPage() {
           '模型变更、属性变更、关系变更与触发器执行的记录。按时间、用户、模型和操作过滤。',
           'Model, attribute, relation and trigger changes, filtered by time, user, model and action.',
         )}
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() => setReloadKey((current) => current + 1)}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5"
+          >
+            <RefreshCw size={12} className={cn(loading && 'animate-spin')} aria-hidden="true" />
+            {tr('刷新', 'Refresh')}
+          </Button>
+        }
       />
 
-      <Tabs value={tab} onValueChange={(value) => changeTab(value as Tab)} className="min-h-0 flex-1">
-        <TabsList className="mx-6 mt-4">
+      <Tabs
+        value={tab}
+        onValueChange={(value) => changeTab(value as Tab)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList className="mx-6 mt-4 shrink-0">
           <TabsTrigger value="attributes">{tr('属性变更', 'Attributes')}</TabsTrigger>
           <TabsTrigger value="relations">{tr('关系变更', 'Relations')}</TabsTrigger>
           <TabsTrigger value="types">{tr('模型变更', 'Models')}</TabsTrigger>
           <TabsTrigger value="triggers">{tr('触发器', 'Triggers')}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value={tab} className="min-h-0 flex-1 overflow-y-auto p-6">
-          <div className="flex flex-col gap-3">
-            <HistoryFilters
-              value={filters}
-              models={models}
-              users={users}
-              operateOptions={operateOptions}
-              onChange={(next) => {
-                setFilters(next);
-                setPage(1);
-              }}
-              onReset={() => {
-                setFilters(EMPTY_FILTERS);
-                setPage(1);
-              }}
-            />
+        <TabsContent value={tab} className="flex min-h-0 flex-1 flex-col">
+          <HistoryFilters
+            value={filters}
+            models={models}
+            users={users}
+            operateOptions={operateOptions}
+            onChange={(next) => {
+              setFilters(next);
+              setPage(1);
+            }}
+            onReset={() => {
+              setFilters(EMPTY_FILTERS);
+              setPage(1);
+            }}
+          />
 
-            <Card>
-              {tab === 'attributes' && (
-                <DataTable
-                  columns={attributeColumns}
-                  rows={attributeRows}
-                  rowKey={(row) => row.record_id}
-                  loading={loading}
-                  error={err}
-                  onRetry={() => setReloadKey((current) => current + 1)}
-                  storageKey="history-attributes"
-                  empty={tr('没有匹配的属性变更', 'No attribute change matches')}
-                />
-              )}
-              {tab === 'relations' && (
-                <DataTable
-                  columns={relationColumns}
-                  rows={relationRows}
-                  rowKey={(row) => row.record_id}
-                  loading={loading}
-                  error={err}
-                  onRetry={() => setReloadKey((current) => current + 1)}
-                  storageKey="history-relations"
-                  empty={tr('没有匹配的关系变更', 'No relation change matches')}
-                />
-              )}
-              {tab === 'types' && (
-                <DataTable
-                  columns={typeColumns}
-                  rows={typeRows}
-                  rowKey={(row) => row.id}
-                  loading={loading}
-                  error={err}
-                  onRetry={() => setReloadKey((current) => current + 1)}
-                  storageKey="history-types"
-                  empty={tr('没有匹配的模型变更', 'No model change matches')}
-                />
-              )}
-              {tab === 'triggers' && (
-                <DataTable
-                  columns={triggerColumns}
-                  rows={triggerRows}
-                  rowKey={(row) => row.id}
-                  loading={loading}
-                  error={err}
-                  onRetry={() => setReloadKey((current) => current + 1)}
-                  storageKey="history-triggers"
-                  empty={tr('没有匹配的触发器执行', 'No trigger firing matches')}
-                />
-              )}
+          <div className="flex min-h-0 flex-1 flex-col p-4">
+            {err && (
+              <div
+                role="alert"
+                className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300"
+              >
+                <span className="min-w-0 flex-1 break-words">{err}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={() => setReloadKey((current) => current + 1)}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  {tr('重试', 'Retry')}
+                </Button>
+              </div>
+            )}
+
+            <section className="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-medium text-text">{tr('变更记录', 'Changes')}</h2>
+                  <span className="rounded-full bg-text/10 px-1.5 py-0.5 text-[10px] leading-none text-text-muted">
+                    {count.total}
+                  </span>
+                  {loading && <Loader2 size={12} className="animate-spin text-text-faint" aria-hidden="true" />}
+                </div>
+                <div
+                  role="group"
+                  aria-label={tr('结果视图', 'Result view')}
+                  className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={view === 'table'}
+                    onClick={() => setView('table')}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500',
+                      view === 'table'
+                        ? 'bg-text/10 font-medium text-text'
+                        : 'text-text-muted hover:bg-text/5 hover:text-text',
+                    )}
+                  >
+                    <Table2 size={12} aria-hidden="true" />
+                    {tr('表格', 'Table')}
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={view === 'timeline'}
+                    onClick={() => setView('timeline')}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500',
+                      view === 'timeline'
+                        ? 'bg-text/10 font-medium text-text'
+                        : 'text-text-muted hover:bg-text/5 hover:text-text',
+                    )}
+                  >
+                    <ListTree size={12} aria-hidden="true" />
+                    {tr('时间线', 'Timeline')}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col px-4 pb-0 pt-2">
+                {view === 'table' ? (
+                  <>
+                    {tab === 'attributes' && (
+                      <DataTable
+                        fill
+                        columns={attributeColumns}
+                        rows={attributeRows}
+                        rowKey={(row) => row.record_id}
+                        loading={loading}
+                        storageKey="history-attributes"
+                        empty={emptyMessage}
+                      />
+                    )}
+                    {tab === 'relations' && (
+                      <DataTable
+                        fill
+                        columns={relationColumns}
+                        rows={relationRows}
+                        rowKey={(row) => row.record_id}
+                        loading={loading}
+                        storageKey="history-relations"
+                        empty={emptyMessage}
+                      />
+                    )}
+                    {tab === 'types' && (
+                      <DataTable
+                        fill
+                        columns={typeColumns}
+                        rows={typeRows}
+                        rowKey={(row) => row.id}
+                        loading={loading}
+                        storageKey="history-types"
+                        empty={emptyMessage}
+                      />
+                    )}
+                    {tab === 'triggers' && (
+                      <DataTable
+                        fill
+                        columns={triggerColumns}
+                        rows={triggerRows}
+                        rowKey={(row) => row.id}
+                        loading={loading}
+                        storageKey="history-triggers"
+                        empty={emptyMessage}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <HistoryTimeline entries={timelineEntries} loading={loading} empty={emptyMessage} />
+                )}
+              </div>
+
               <PaginationFooter
+                embedded
                 page={page - 1}
                 pageSize={PAGE_SIZE}
                 shown={count.shown}
@@ -449,7 +667,7 @@ export default function OperationHistoryPage() {
                 loading={loading}
                 onPageChange={(next) => setPage(next + 1)}
               />
-            </Card>
+            </section>
           </div>
         </TabsContent>
       </Tabs>
