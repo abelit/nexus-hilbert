@@ -16,7 +16,6 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
-import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
@@ -26,6 +25,7 @@ import { PaginationFooter } from '@/components/ui/PaginationFooter';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Modal } from '@/components/Modal';
 import { useI18n } from '@/i18n/locale';
+import { cn } from '@/lib/cn';
 
 import { describeError } from '../api/http';
 import {
@@ -43,7 +43,12 @@ import {
   listSavedSearches,
   type SavedSearch,
 } from '../api/preferences';
-import { DataTable, type Column } from '../components/DataTable';
+import {
+  ColumnVisibilityMenu,
+  DataTable,
+  useColumnVisibility,
+  type Column,
+} from '../components/DataTable';
 import { ExportMenu } from '../components/ipam/ExportMenu';
 import { ModelMultiSelect } from '../components/ModelMultiSelect';
 import { QueryBar, type QueryAttribute } from '../components/QueryBar';
@@ -437,6 +442,13 @@ export default function SearchPage() {
     ];
   }, [attributeLabels, dynamicNames, tr]);
 
+  // The results header owns the column picker: a separate row above the table
+  // separated it from the controls it belongs to.
+  const columnVisibility = useColumnVisibility(columns, 'cmdb-resource-search');
+  const expressionCount = expression.trim()
+    ? expression.split(',').filter((part) => part.trim()).length
+    : 0;
+
   const effective = useMemo(
     () => buildQuery(selectedTypes, expression, keyword),
     [expression, keyword, selectedTypes],
@@ -531,124 +543,109 @@ export default function SearchPage() {
           'Search every resource by keyword, model, or precise conditions; keywords match any searchable attribute.',
         )}
         actions={
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={openSave}
-              disabled={!hasFilters || saving}
-              className="inline-flex items-center gap-1.5"
-            >
-              <BookmarkPlus size={12} aria-hidden="true" />
-              {tr('保存搜索', 'Save search')}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              type="button"
-              onClick={() => void run(1, { user: true })}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 font-medium text-accent-fg"
-            >
-              {loading ? <RefreshCw size={12} className="animate-spin" aria-hidden="true" /> : <SearchIcon size={12} aria-hidden="true" />}
-              {tr('搜索', 'Search')}
-            </Button>
-          </>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={openSave}
+            disabled={!hasFilters || saving}
+            className="inline-flex items-center gap-1.5"
+          >
+            <BookmarkPlus size={12} aria-hidden="true" />
+            {tr('保存搜索', 'Save search')}
+          </Button>
         }
         extra={
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-56 flex-1">
-              <SearchIcon size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint" aria-hidden="true" />
-              <Input
-                type="search"
-                aria-label={tr('搜索关键词', 'Search keyword')}
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    void run(1, { user: true });
-                  }
-                }}
-                placeholder={tr('搜索编号、名称或任意属性…', 'Search an id, name, or any attribute…')}
-                className="pl-8 [&::-webkit-search-cancel-button]:hidden"
-              />
+          <div className="flex flex-col gap-2">
+            {/* THE SEARCH BAND: keyword, scope and the action that runs them
+                are one row, so the operator's eyes never leave the query. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-56 flex-1">
+                <SearchIcon size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint" aria-hidden="true" />
+                <Input
+                  type="search"
+                  aria-label={tr('搜索关键词', 'Search keyword')}
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void run(1, { user: true });
+                    }
+                  }}
+                  placeholder={tr('搜索编号、名称或任意属性…', 'Search an id, name, or any attribute…')}
+                  className="pl-8 [&::-webkit-search-cancel-button]:hidden"
+                />
+              </div>
+              <ModelMultiSelect models={models} selected={selectedTypes} onChange={setSelectedTypes} />
+              <Button
+                variant="primary"
+                size="sm"
+                type="button"
+                onClick={() => void run(1, { user: true })}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 font-medium text-accent-fg"
+              >
+                {loading ? <RefreshCw size={12} className="animate-spin" aria-hidden="true" /> : <SearchIcon size={12} aria-hidden="true" />}
+                {tr('搜索', 'Search')}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={clearAll}
+                disabled={!hasFilters && !searched}
+                className="inline-flex items-center gap-1.5"
+              >
+                <X size={12} aria-hidden="true" />
+                {tr('清除', 'Clear')}
+              </Button>
+              <div className="flex min-w-0 items-center gap-1.5 sm:ms-auto">
+                <span className="shrink-0 text-[11px] text-text-faint">{tr('发送表达式', 'Sent as')}</span>
+                <code
+                  className="max-w-[38vw] truncate rounded bg-card px-1.5 py-0.5 font-mono text-[11px] text-text-muted"
+                  title={effective}
+                >
+                  {effective || tr('（空，匹配全部）', '(empty — matches everything)')}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  type="button"
+                  onClick={() => void copyEffective()}
+                  disabled={!effective}
+                  aria-label={tr('复制查询表达式', 'Copy query expression')}
+                  title={tr('复制查询表达式', 'Copy query expression')}
+                >
+                  <Copy size={12} aria-hidden="true" />
+                </Button>
+              </div>
             </div>
-            <ModelMultiSelect models={models} selected={selectedTypes} onChange={setSelectedTypes} />
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={clearAll}
-              disabled={!hasFilters && !searched}
-              className="inline-flex items-center gap-1.5"
-            >
-              <X size={12} aria-hidden="true" />
-              {tr('清除', 'Clear')}
-            </Button>
-          </div>
-        }
-      />
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
-        <Card className="mb-4">
-          <div className={advancedOpen ? 'mb-3 flex flex-wrap items-center justify-between gap-2' : 'flex flex-wrap items-center justify-between gap-2'}>
-            <div className="flex min-w-0 items-start gap-1.5">
+            {/* Below the band: the precise builder stays one click away, and
+                saved/recent searches are chips rather than a second card. */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <button
                 type="button"
                 onClick={() => setAdvancedOpen((value) => !value)}
                 aria-expanded={advancedOpen}
                 aria-label={advancedOpen ? tr('收起精确查询', 'Collapse precise query') : tr('展开精确查询', 'Expand precise query')}
                 title={advancedOpen ? tr('收起精确查询', 'Collapse precise query') : tr('展开精确查询', 'Expand precise query')}
-                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-text-faint transition-colors hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-card/40 px-2 py-1 text-[11px] text-text-muted transition-colors hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
               >
                 <ChevronDown
-                  size={14}
-                  className={advancedOpen ? 'rotate-180 transition-transform' : 'transition-transform'}
+                  size={12}
+                  className={cn('transition-transform', advancedOpen && 'rotate-180')}
                   aria-hidden="true"
                 />
+                {tr('精确查询', 'Precise query')}
+                {expressionCount > 0 && <span className="font-medium text-accent">{expressionCount}</span>}
               </button>
-              <div className="min-w-0">
-                <h2 className="text-sm font-medium text-text">{tr('精确查询', 'Precise query')}</h2>
-                {advancedOpen && (
-                  <p className="mt-0.5 text-[11px] text-text-faint">
-                    {tr('可选，与关键词和模型范围同时生效。', 'Optional; applied together with the keyword and model scope.')}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="shrink-0 text-[11px] text-text-faint">{tr('发送表达式', 'Sent as')}</span>
-              <code
-                className="max-w-[46vw] truncate rounded bg-card px-1.5 py-0.5 font-mono text-[11px] text-text-muted"
-                title={effective}
-              >
-                {effective || tr('（空，匹配全部）', '(empty — matches everything)')}
-              </code>
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                onClick={() => void copyEffective()}
-                disabled={!effective}
-                aria-label={tr('复制查询表达式', 'Copy query expression')}
-                title={tr('复制查询表达式', 'Copy query expression')}
-              >
-                <Copy size={12} aria-hidden="true" />
-              </Button>
-            </div>
-          </div>
-          {advancedOpen && <QueryBar attributes={attributes} value={expression} onChange={setExpression} />}
-        </Card>
 
-        {(saved.length > 0 || recentUnique.length > 0) && (
-          <Card className="mb-4">
-            <div className="flex flex-col gap-2">
               {saved.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <Bookmark size={12} className="shrink-0 text-text-faint" aria-hidden="true" />
-                  <span className="text-[11px] text-text-faint">{tr('保存搜索', 'Saved searches')}</span>
+                  <span className="text-[11px] text-text-faint">{tr('保存', 'Saved')}</span>
                   {saved.slice(0, 8).map((search) => (
                     <button
                       key={search.id}
@@ -665,10 +662,11 @@ export default function SearchPage() {
                   {saved.length > 8 && <span className="text-[11px] text-text-faint">+{saved.length - 8}</span>}
                 </div>
               )}
+
               {recentUnique.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <History size={12} className="shrink-0 text-text-faint" aria-hidden="true" />
-                  <span className="text-[11px] text-text-faint">{tr('最近搜索', 'Recent searches')}</span>
+                  <span className="text-[11px] text-text-faint">{tr('最近', 'Recent')}</span>
                   {recentUnique.map(({ search, option }) => (
                     <button
                       key={search.id}
@@ -695,8 +693,17 @@ export default function SearchPage() {
                 </div>
               )}
             </div>
-          </Card>
-        )}
+
+            {advancedOpen && (
+              <div className="rounded-lg border border-border/60 bg-card/40 p-2.5">
+                <QueryBar attributes={attributes} value={expression} onChange={setExpression} />
+              </div>
+            )}
+          </div>
+        }
+      />
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-6">
 
         {err && (
           <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300">
@@ -708,8 +715,8 @@ export default function SearchPage() {
           </div>
         )}
 
-        <Card>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <section className="flex min-h-[22rem] flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-medium text-text">{tr('结果', 'Results')}</h2>
               {searched && (
@@ -720,12 +727,12 @@ export default function SearchPage() {
               {loading && <Loader2 size={12} className="animate-spin text-text-faint" aria-hidden="true" />}
             </div>
             {searched && (
-              <div className="flex flex-wrap items-center gap-2">
-                {total > 0 && (
-                  <span className="text-[11px] text-text-faint">
-                    {tr(`第 ${page} 页`, `Page ${page}`)}
-                  </span>
-                )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ColumnVisibilityMenu
+                  columns={columns}
+                  hidden={columnVisibility.hidden}
+                  onToggle={columnVisibility.toggle}
+                />
                 <ExportMenu
                   filename="cmdb-resource-search"
                   columns={exportColumns}
@@ -740,64 +747,73 @@ export default function SearchPage() {
             )}
           </div>
 
-          {!searched ? (
-            <EmptyState
-              title={tr('输入关键词或选择模型开始搜索', 'Enter a keyword or choose models to start')}
-              hint={tr(
-                '关键词会匹配任意可检索属性；需要精确查询时使用下方的条件构造器。',
-                'Keywords match any searchable attribute; use the condition builder below for precise queries.',
-              )}
-              className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
-            />
-          ) : err && !result ? null : (
-            <DataTable
-              columns={columns}
-              rows={rows}
-              rowKey={(row) => row._id}
-              loading={loading && rows.length === 0}
-              storageKey="cmdb-resource-search"
-              empty={
+          <div className="flex min-h-0 flex-1 flex-col px-4 pb-0 pt-2">
+            {!searched ? (
+              <div className="flex flex-1 items-center justify-center">
                 <EmptyState
-                  title={tr('没有匹配的资源', 'No resources match')}
-                  hint={tr('换一个关键词，或清除搜索后重试。', 'Try another keyword, or clear the search.')}
-                  action={
-                    <Button variant="ghost" size="sm" type="button" onClick={clearAll}>
-                      {tr('清除搜索', 'Clear search')}
-                    </Button>
-                  }
+                  title={tr('输入关键词或选择模型开始搜索', 'Enter a keyword or choose models to start')}
+                  hint={tr(
+                    '关键词会匹配任意可检索属性；需要精确查询时展开上方的条件构造器。',
+                    'Keywords match any searchable attribute; expand the condition builder above for precise queries.',
+                  )}
+                  className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
                 />
-              }
-              actions={(row) => (
-                <span className="flex items-center gap-1">
-                  <Button
-                    variant="plain"
-                    size="sm"
-                    type="button"
-                    onClick={() => openDetail(row)}
-                    aria-label={tr(`查看资源 ${row.ci_id}`, `View resource ${row.ci_id}`)}
-                    title={tr('查看详情', 'View details')}
-                  >
-                    <Eye size={13} aria-hidden="true" />
-                  </Button>
-                  <Button
-                    variant="plain"
-                    size="sm"
-                    type="button"
-                    onClick={() =>
-                      navigate(`/cmdb/instances?type=${encodeURIComponent(String(row.ci_type))}&ci=${row.ci_id}`)
+              </div>
+            ) : err && !result ? null : (
+              <DataTable
+                fill
+                columns={columns}
+                rows={rows}
+                rowKey={(row) => row._id}
+                loading={loading && rows.length === 0}
+                storageKey="cmdb-resource-search"
+                hiddenColumns={columnVisibility.hidden}
+                onToggleColumn={columnVisibility.toggle}
+                hideColumnPicker
+                empty={
+                  <EmptyState
+                    title={tr('没有匹配的资源', 'No resources match')}
+                    hint={tr('换一个关键词，或清除搜索后重试。', 'Try another keyword, or clear the search.')}
+                    action={
+                      <Button variant="ghost" size="sm" type="button" onClick={clearAll}>
+                        {tr('清除搜索', 'Clear search')}
+                      </Button>
                     }
-                    aria-label={tr(`在资源数据中打开 ${row.ci_id}`, `Open resource ${row.ci_id} in resources`)}
-                    title={tr('在资源数据中打开', 'Open in resources')}
-                  >
-                    <ExternalLink size={13} aria-hidden="true" />
-                  </Button>
-                </span>
-              )}
-            />
-          )}
+                  />
+                }
+                actions={(row) => (
+                  <span className="flex items-center gap-1">
+                    <Button
+                      variant="plain"
+                      size="sm"
+                      type="button"
+                      onClick={() => openDetail(row)}
+                      aria-label={tr(`查看资源 ${row.ci_id}`, `View resource ${row.ci_id}`)}
+                      title={tr('查看详情', 'View details')}
+                    >
+                      <Eye size={13} aria-hidden="true" />
+                    </Button>
+                    <Button
+                      variant="plain"
+                      size="sm"
+                      type="button"
+                      onClick={() =>
+                        navigate(`/cmdb/instances?type=${encodeURIComponent(String(row.ci_type))}&ci=${row.ci_id}`)
+                      }
+                      aria-label={tr(`在资源数据中打开 ${row.ci_id}`, `Open resource ${row.ci_id} in resources`)}
+                      title={tr('在资源数据中打开', 'Open in resources')}
+                    >
+                      <ExternalLink size={13} aria-hidden="true" />
+                    </Button>
+                  </span>
+                )}
+              />
+            )}
+          </div>
 
           {searched && result && (
             <PaginationFooter
+              embedded
               page={page - 1}
               pageSize={PAGE_SIZE}
               shown={rows.length}
@@ -805,10 +821,9 @@ export default function SearchPage() {
               loading={loading}
               matchLabel
               onPageChange={(next) => void run(next + 1)}
-              className="mt-3"
             />
           )}
-        </Card>
+        </section>
       </div>
 
       {detail && (

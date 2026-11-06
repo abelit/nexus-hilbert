@@ -208,6 +208,30 @@ describe('the results', () => {
     expect(screen.queryByRole('columnheader', { name: '_type' })).not.toBeInTheDocument();
   });
 
+  it('keeps the column picker in the results header and hides a column from it', async () => {
+    const user = userEvent.setup();
+    handlers({
+      numfound: 1,
+      total: 1,
+      page: 1,
+      counter: { host: 1 },
+      result: [
+        { _id: 1, _type: 1, ci_id: 1, ci_type: 'host', hostname: 'web-01', _updated_at: '2026-10-27 09:00:00' },
+      ],
+    });
+    renderPage();
+
+    expect(await screen.findByText('web-01')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '最近修改' })).toBeInTheDocument();
+    // The picker sits with export in the results header, not on its own row
+    // above the table.
+    await user.click(screen.getByRole('button', { name: '列' }));
+    await user.click(await screen.findByRole('button', { name: '最近修改' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('columnheader', { name: '最近修改' })).not.toBeInTheDocument(),
+    );
+  });
+
   it('applies a saved search', async () => {
     const user = userEvent.setup();
     const sent: unknown[] = [];
