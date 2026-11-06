@@ -14,6 +14,10 @@
 `upstream` 的 push URL 已设为 `DISABLED`，防止误推上游。需要保留拉取能力时不要删除该远端；
 如需恢复推送（一般不需要），执行 `git remote set-url --push upstream git@github.com:ongridio/ongrid.git`。
 
+本地 `upstream-main` 跟踪 `upstream/main`（`branch.upstream-main.remote=upstream`，
+`merge=refs/heads/main`），同时设置 `branch.upstream-main.pushRemote=no-push`，避免在该分支
+误执行 `git push`。该远端配置生效后，`git pull --ff-only` 即可让镜像与上游 `main` 保持一致。
+
 ## 分支模型
 
 ```text
@@ -25,7 +29,7 @@ main ◄── merge --no-ff ── hilbert-dev  日常开发与验证
 
 | 分支 | 生命周期 | 职责 | 规则 |
 | --- | --- | --- | --- |
-| `upstream-main` | 长期 | 上游 `main` 的本地镜像 | 只允许 `--ff-only` 快进，禁止提交和开发 |
+| `upstream-main` | 长期 | 上游 `main` 的本地镜像 | 跟踪 `upstream/main`，只允许 `--ff-only` 快进，禁止提交和开发 |
 | `hilbert-dev` | 长期 | 二开开发、上游同步、验证 | 已推送到 `origin/hilbert-dev`，禁止 rebase 和 force push |
 | `main` | 长期 | 本地集成主干，只接收已验证的 `hilbert-dev` | 通过本地 `merge --no-ff` 更新 |
 | `feat/*`、`fix/*`、`chore/*` | 临时 | 单个变更或向上游提交的 PR 分支 | 一个分支一个逻辑变更，命名遵循 [AGENTS.md](../../AGENTS.md) |
@@ -38,6 +42,16 @@ main ◄── merge --no-ff ── hilbert-dev  日常开发与验证
 ### 1. 同步上游镜像
 
 每个上游 release 后执行一次：
+
+```bash
+git switch upstream-main
+git pull --ff-only
+```
+
+`upstream-main` 已跟踪 `upstream/main`，`git pull` 默认会 fetch 上游并做快进合并。必须保留
+`--ff-only`：如果上游改写了历史导致无法快进，`pull` 会报错而不是产生多余的合并提交。
+
+不使用 `pull` 时，等价的显式步骤如下：
 
 ```bash
 git fetch upstream --prune
@@ -113,7 +127,7 @@ git push origin main
 
 ## 护栏
 
-- 不在 `upstream-main` 上提交；只允许 `git merge --ff-only upstream/main`。
+- 不在 `upstream-main` 上提交；只允许 `git pull --ff-only` 或 `git merge --ff-only upstream/main`。
 - 不对 `hilbert-dev` 执行 rebase 或 force push，它已经推送到 `origin` 并被其他工作引用。
 - 不使用 `git push upstream`；该远端推送已被禁用。
 - 不把 `hilbert-dev` 直接作为上游 PR 的 head。向上游贡献时从 `upstream-main` 切
@@ -131,4 +145,5 @@ git push origin main
 | `main` | `33485bf9`（含 `node_modules` 清理） |
 | `hilbert-dev` 初始合并 | `2c6fb0c5`（`chore: merge upstream ongrid v0.20.0 into hilbert-dev`） |
 
-分支模型或远端配置变化时更新本节，不要只改命令示例。
+分支模型或远端配置变化时更新本节，不要只改命令示例。`upstream-main` 的跟踪配置
+（`remote=upstream`、`merge=refs/heads/main`、`pushRemote=no-push`）于同日设置。
