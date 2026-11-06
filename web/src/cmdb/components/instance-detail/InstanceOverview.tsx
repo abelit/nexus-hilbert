@@ -144,11 +144,6 @@ export function InstanceOverview({
                         {attribute.is_required && <span className="ml-1 text-rose-500" aria-hidden="true">*</span>}
                       </span>
                       <span className="mt-0.5 block truncate font-mono text-[10px] text-text-faint/80">{attribute.name}</span>
-                      {attribute.inherited && (
-                        <Chip tone="info" dense className="mt-1">
-                          {tr(`继承自 ${attribute.inherited_from || tr('父模型', 'a parent model')}`, `from ${attribute.inherited_from || 'a parent model'}`)}
-                        </Chip>
-                      )}
                     </dt>
                     <dd className="min-w-0 break-words text-xs text-text">
                       {attribute.is_file ? (

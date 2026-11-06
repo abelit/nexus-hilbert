@@ -1295,7 +1295,7 @@ export default function InstancesPage() {
             <span className="cmdb-liquid-blob cmdb-liquid-blob-c" />
           </div>
           <div ref={contentRef} className="cmdb-liquid-content relative flex min-h-0 flex-1 flex-col">
-            <div className="cmdb-model-config-body flex min-h-0 flex-1 flex-col p-4">
+            <div className="cmdb-model-config-body flex min-h-0 flex-1 flex-col p-2">
               {/* THE TABLE OWNS ITS SURFACE. The workspace is a full-height
                   liquid surface; the data band sits on it and ends after the
                   rows, so a two-row result does not leave a giant glass panel
@@ -1307,7 +1307,7 @@ export default function InstancesPage() {
                 )}
               >
                 {view === 'table' ? (
-                  <div className="flex min-h-0 flex-1 flex-col p-3">
+                  <div className="flex min-h-0 flex-1 flex-col p-2">
                     {!loading && !err && rows.length === 0 && (search || condition) ? (
                       <EmptyState
                         className="flex min-h-52 flex-col items-center justify-center gap-2 px-4 py-8 text-center"

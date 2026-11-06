@@ -301,6 +301,35 @@ describe('the detail header', () => {
   });
 });
 
+describe('the attribute list', () => {
+  it('does not label inherited attributes with their parent model', async () => {
+    mocks();
+    render(
+      <ToastProvider>
+        <InstanceDetailDrawer
+          model={host}
+          models={[host, switchModel]}
+          attributes={[
+            ...hostAttributes,
+            attribute(17, 'level', '等级', { inherited: true, inherited_from: '基础模型' }),
+          ]}
+          groups={[]}
+          instanceID={5}
+          initialTab="overview"
+          onClose={() => undefined}
+          onEdit={() => undefined}
+          onInstanceSaved={() => undefined}
+        />
+      </ToastProvider>,
+    );
+
+    const drawer = await screen.findByRole('dialog');
+    // The attribute is still listed; only the inheritance badge is gone.
+    expect(await within(drawer).findByText('等级')).toBeInTheDocument();
+    expect(within(drawer).queryByText(/继承自/)).toBeNull();
+  });
+});
+
 describe('editing a value in the detail view', () => {
   it('writes only the changed attribute and updates the drawer header', async () => {
     const user = userEvent.setup();

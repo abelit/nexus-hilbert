@@ -1,5 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
   ArrowDown,
   ArrowUp,
   ChevronLeft,
@@ -18,6 +35,9 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/Modal';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { useI18n } from '@/i18n/locale';
+import { cn } from '@/lib/cn';
+
+import { DragHandle } from '../DragHandle';
 
 import { listTypeAttributes, type CIType, type TypeAttribute } from '../../api/citype';
 import { describeError } from '../../api/http';
@@ -60,6 +80,12 @@ export function SubscriptionEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The grip is the drag activator and the keyboard sensor makes it usable
+  // without a pointer, so the old up/down buttons are not needed beside it.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   useEffect(() => {
     let live = true;
@@ -128,15 +154,10 @@ export function SubscriptionEditor({
     setChecked((current) => current.filter((key) => !keys.includes(key)));
   };
 
-  const moveWithin = (key: string, direction: -1 | 1) => {
-    setSelected((current) => {
-      const index = current.indexOf(key);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+  const reorderSelected = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+    setSelected((current) => reorderSelectedKeys(current, String(active.id), String(over.id)));
   };
 
   const toggleFixed = (key: string) =>
@@ -181,7 +202,7 @@ export function SubscriptionEditor({
     <Modal
       open
       onClose={onClose}
-      size="lg"
+      size="xl"
       title={tr(`订阅设置 · ${model.alias || model.name}`, `Subscription settings · ${model.alias || model.name}`)}
       footer={
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
@@ -326,7 +347,7 @@ export function SubscriptionEditor({
                   onToggleAll={() => toggleAll(rightItems.map((item) => item.key))}
                 />
                 <p className="mt-2 text-[11px] text-text-faint">
-                  {tr('顺序决定列表里的列顺序；锁定的列保持固定。', 'Order sets the column order; locked columns stay pinned.')}
+                  {tr('拖动调整列顺序；锁定的列保持固定。', 'Drag to reorder the columns; locked columns stay pinned.')}
                 </p>
                 <div className="mt-2 min-h-40 flex-1 overflow-y-auto rounded-md border border-border">
                   {rightItems.length === 0 ? (
@@ -334,73 +355,24 @@ export function SubscriptionEditor({
                       {tr('还没有选择属性', 'No attribute selected yet')}
                     </p>
                   ) : (
-                    rightItems.map((item) => {
-                      const index = selected.indexOf(item.key);
-                      const pinned = fixed.includes(item.key);
-                      return (
-                        <div
-                          key={item.key}
-                          className="flex items-center gap-1 border-b border-border px-2 py-1.5 text-xs last:border-0"
-                        >
-                          <Checkbox
-                            className="border-text-faint"
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderSelected}>
+                      <SortableContext
+                        items={rightItems.map((item) => item.key)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        {rightItems.map((item) => (
+                          <SortableSelectedRow
+                            key={item.key}
+                            item={item}
+                            pinned={fixed.includes(item.key)}
                             checked={checked.includes(item.key)}
                             onCheckedChange={() => toggleChecked(item.key)}
-                            aria-label={item.label}
+                            onToggleFixed={() => toggleFixed(item.key)}
+                            onRemove={() => moveLeft([item.key])}
                           />
-                          <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                          <span className="shrink-0 font-mono text-[11px] text-text-faint">{item.name}</span>
-                          <Button
-                            variant="subtle"
-                            size="sm"
-                            type="button"
-                            onClick={() => toggleFixed(item.key)}
-                            aria-label={
-                              pinned
-                                ? tr(`取消固定 ${item.label}`, `Unpin ${item.label}`)
-                                : tr(`固定 ${item.label}`, `Pin ${item.label}`)
-                            }
-                            title={pinned ? tr('取消固定', 'Unpin') : tr('固定列', 'Pin column')}
-                          >
-                            {pinned ? (
-                              <Lock size={12} className="text-accent" aria-hidden="true" />
-                            ) : (
-                              <LockOpen size={12} aria-hidden="true" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="subtle"
-                            size="sm"
-                            type="button"
-                            onClick={() => moveWithin(item.key, -1)}
-                            disabled={index <= 0}
-                            aria-label={tr(`上移 ${item.label}`, `Move ${item.label} up`)}
-                          >
-                            <ArrowUp size={12} aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="subtle"
-                            size="sm"
-                            type="button"
-                            onClick={() => moveWithin(item.key, 1)}
-                            disabled={index === selected.length - 1}
-                            aria-label={tr(`下移 ${item.label}`, `Move ${item.label} down`)}
-                          >
-                            <ArrowDown size={12} aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="subtle"
-                            size="sm"
-                            type="button"
-                            onClick={() => moveLeft([item.key])}
-                            aria-label={tr(`移除 ${item.label}`, `Remove ${item.label}`)}
-                            title={tr('移到未选', 'Move to unselected')}
-                          >
-                            <ChevronLeft size={12} aria-hidden="true" />
-                          </Button>
-                        </div>
-                      );
-                    })
+                        ))}
+                      </SortableContext>
+                    </DndContext>
                   )}
                 </div>
               </div>
@@ -519,6 +491,91 @@ export function SubscriptionEditor({
       </Tabs>
     </Modal>
   );
+}
+
+// One row of the selected list. The grip, not the row, starts the drag: the
+// checkbox and the row's buttons keep their own actions.
+function SortableSelectedRow({
+  item,
+  pinned,
+  checked,
+  onCheckedChange,
+  onToggleFixed,
+  onRemove,
+}: {
+  item: TransferItem;
+  pinned: boolean;
+  checked: boolean;
+  onCheckedChange(): void;
+  onToggleFixed(): void;
+  onRemove(): void;
+}) {
+  const { tr } = useI18n();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.key,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        'flex items-center gap-1 border-b border-border px-2 py-1.5 text-xs last:border-0',
+        isDragging && 'relative z-10 opacity-60',
+      )}
+    >
+      <DragHandle
+        handle={{ attributes, listeners, isDragging, draggable: true }}
+        label={tr(`拖动 ${item.label}`, `Drag ${item.label}`)}
+      />
+      <Checkbox
+        className="border-text-faint"
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        aria-label={item.label}
+      />
+      <span className="min-w-0 flex-1 truncate" title={item.label}>{item.label}</span>
+      <span className="max-w-[55%] shrink-0 truncate font-mono text-[11px] text-text-faint" title={item.name}>
+        {item.name}
+      </span>
+      <Button
+        variant="subtle"
+        size="sm"
+        type="button"
+        onClick={onToggleFixed}
+        aria-label={
+          pinned
+            ? tr(`取消固定 ${item.label}`, `Unpin ${item.label}`)
+            : tr(`固定 ${item.label}`, `Pin ${item.label}`)
+        }
+        title={pinned ? tr('取消固定', 'Unpin') : tr('固定列', 'Pin column')}
+      >
+        {pinned ? (
+          <Lock size={12} className="text-accent" aria-hidden="true" />
+        ) : (
+          <LockOpen size={12} aria-hidden="true" />
+        )}
+      </Button>
+      <Button
+        variant="subtle"
+        size="sm"
+        type="button"
+        onClick={onRemove}
+        aria-label={tr(`移除 ${item.label}`, `Remove ${item.label}`)}
+        title={tr('移到未选', 'Move to unselected')}
+      >
+        <ChevronLeft size={12} aria-hidden="true" />
+      </Button>
+    </div>
+  );
+}
+
+/** Move one selected field to another's slot; the array order is the column order. */
+export function reorderSelectedKeys(current: string[], activeKey: string, overKey: string): string[] {
+  const from = current.indexOf(activeKey);
+  const to = current.indexOf(overKey);
+  if (from < 0 || to < 0 || from === to) return current;
+  return arrayMove(current, from, to);
 }
 
 function ListHeader({

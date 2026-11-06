@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { server } from '@/test/msw-server';
 import { useAuth } from '@/store/auth';
 import SubscriptionsPage, { buildSubscriptionSections, subscriptionDragPlan } from './Subscriptions';
+import { reorderSelectedKeys } from '../components/preferences/SubscriptionEditor';
 import { ToastProvider } from '../components/Toast';
 
 const host = {
@@ -160,6 +161,10 @@ describe('the subscription page', () => {
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/订阅设置/)).toBeInTheDocument();
+    // The selected list is reordered by its grip; the old up/down buttons are
+    // gone (the keyboard sensor keeps the grip usable without a pointer).
+    expect(within(dialog).getByRole('button', { name: '拖动 hostname' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '上移 hostname' })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole('checkbox', { name: 'cpu' }));
     await user.click(within(dialog).getByRole('button', { name: '移入已选' }));
     await user.click(within(dialog).getByRole('button', { name: '保存' }));
@@ -398,5 +403,18 @@ describe('subscription grouping and drag persistence', () => {
       order: [1, 2, 3, 4],
       setMembers: { groupID: 2, typeIDs: [3, 4] },
     });
+  });
+});
+
+describe('reordering the selected columns', () => {
+  it('moves the dragged field into the dropped field’s slot', () => {
+    expect(reorderSelectedKeys(['a', 'b', 'c'], 'c', 'a')).toEqual(['c', 'a', 'b']);
+    expect(reorderSelectedKeys(['a', 'b', 'c'], 'a', 'c')).toEqual(['b', 'c', 'a']);
+  });
+
+  it('leaves the order alone when the drop target is the same or unknown', () => {
+    const keys = ['a', 'b', 'c'];
+    expect(reorderSelectedKeys(keys, 'b', 'b')).toBe(keys);
+    expect(reorderSelectedKeys(keys, 'missing', 'a')).toBe(keys);
   });
 });
