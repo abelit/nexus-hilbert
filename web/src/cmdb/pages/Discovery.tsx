@@ -36,15 +36,21 @@ export default function DiscoveryPage() {
         )}
       />
 
-      <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="min-h-0 flex-1">
-        <TabsList className="mx-6 mt-4">
+      <Tabs
+        value={tab}
+        onValueChange={(value) => setTab(value as Tab)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList className="mx-6 mt-4 shrink-0">
           <TabsTrigger value="rules">{tr('规则', 'Rules')}</TabsTrigger>
           <TabsTrigger value="targets">{tr('目标', 'Targets')}</TabsTrigger>
           <TabsTrigger value="catalog">{tr('目录', 'Catalog')}</TabsTrigger>
           <TabsTrigger value="templates">{tr('模板', 'Templates')}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="rules" className="min-h-0 flex-1 overflow-y-auto p-6">
+        {/* The rules catalogue keeps its search and category filter fixed and
+            scrolls only the cards; the other tabs are forms that scroll whole. */}
+        <TabsContent value="rules" className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
           <RulesPanel />
         </TabsContent>
         <TabsContent value="targets" className="min-h-0 flex-1 overflow-y-auto p-6">

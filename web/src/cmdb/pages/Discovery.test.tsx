@@ -77,6 +77,66 @@ describe('the discovery page', () => {
     expect(screen.getByText('内置')).toBeInTheDocument();
   });
 
+  it('groups rules into provider categories and filters them', async () => {
+    const vcenter = {
+      ...rule,
+      id: 2,
+      name: 'vCenter',
+      option: { en: 'vcenter', category: 'private_cloud' },
+    };
+    const nginx = { ...rule, id: 3, name: 'Nginx', type: 'components', is_inner: false };
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () =>
+        HttpResponse.json({ items: [rule, vcenter, nginx], total: 3 }),
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'HTTP 接口' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '私有云' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '组件' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /私有云/ }));
+    expect(screen.getByText('vCenter')).toBeInTheDocument();
+    expect(screen.queryByText('Nginx')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /全部/ }));
+    await userEvent.type(screen.getByLabelText('搜索规则'), 'nginx');
+    expect(screen.getByText('Nginx')).toBeInTheDocument();
+    expect(screen.queryByText('vCenter')).not.toBeInTheDocument();
+  });
+
+  it('shows a cloud rule’s resources on its card', async () => {
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () =>
+        HttpResponse.json({
+          items: [{ ...rule, categories: [{ category: '计算', items: ['ecs', 'rds', 'oss'] }] }],
+          total: 1,
+        }),
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByText('3 个资源')).toBeInTheDocument();
+    expect(screen.getByText('ecs')).toBeInTheDocument();
+    expect(screen.getByText('rds')).toBeInTheDocument();
+    // The card names two and counts the rest rather than growing unbounded.
+    expect(screen.queryByText('oss')).not.toBeInTheDocument();
+  });
+
+  it('opens the plugin form from the plugin section tile', async () => {
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () => HttpResponse.json({ items: [rule], total: 1 })),
+    );
+    renderPage();
+
+    await screen.findByText('阿里云');
+    await userEvent.click(screen.getByRole('button', { name: '添加插件规则' }));
+
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByRole('checkbox', { name: '插件规则' })).toBeChecked();
+  });
+
   it('creates a plugin rule with its script and identifying field', async () => {
     let posted: unknown;
     server.use(
@@ -110,6 +170,132 @@ describe('the discovery page', () => {
         }),
       ),
     );
+  });
+
+  it('shows a plugin rule’s declared fields in the editor', async () => {
+    const plugin = {
+      ...rule,
+      id: 9,
+      name: '机房巡检',
+      type: 'agent',
+      is_inner: false,
+      is_plugin: true,
+      unique_key: 'sn',
+      attribute_count: 1,
+      has_plugin_script: true,
+      attributes: [{ name: 'serial', type: 'String', desc: '序列号' }],
+    };
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () =>
+        HttpResponse.json({ items: [plugin], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/discovery/rules/9/accounts', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: '编辑 机房巡检' }));
+
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByText('采集字段')).toBeInTheDocument();
+    expect(within(drawer).getByLabelText('字段名称 1')).toHaveValue('serial');
+    expect(within(drawer).getByLabelText('字段说明 1')).toHaveValue('序列号');
+    expect(within(drawer).getByLabelText('字段类型 1')).toHaveTextContent('String');
+  });
+
+  it('saves an edited plugin field list', async () => {
+    const plugin = {
+      ...rule,
+      id: 9,
+      name: '机房巡检',
+      type: 'agent',
+      is_inner: false,
+      is_plugin: true,
+      unique_key: 'serial',
+      attribute_count: 1,
+      has_plugin_script: true,
+      attributes: [{ name: 'serial', type: 'String', desc: '序列号', example: 'SN-1' }],
+    };
+    let saved: unknown;
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () =>
+        HttpResponse.json({ items: [plugin], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/discovery/rules/9/accounts', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.put('/api/v1/cmdb/discovery/rules/9', async ({ request }) => {
+        saved = await request.json();
+        return HttpResponse.json(plugin);
+      }),
+      http.put('/api/v1/cmdb/discovery/rules/9/accounts', () =>
+        HttpResponse.json({ accounts: [] }),
+      ),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: '编辑 机房巡检' }));
+    const name = await screen.findByLabelText('字段名称 1');
+    await userEvent.clear(name);
+    await userEvent.type(name, 'serial_no');
+
+    await userEvent.click(screen.getByRole('button', { name: '添加字段' }));
+    await userEvent.type(screen.getByLabelText('字段名称 2'), 'rack');
+    await userEvent.type(screen.getByLabelText('字段说明 2'), '机柜');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() =>
+      expect(saved).toEqual(
+        expect.objectContaining({
+          is_plugin: true,
+          attributes: [
+            // The example survives an edit to the other columns.
+            { name: 'serial_no', type: 'String', desc: '序列号', example: 'SN-1' },
+            { name: 'rack', type: 'String', desc: '机柜' },
+          ],
+        }),
+      ),
+    );
+  });
+
+  it('refuses a plugin field with no name', async () => {
+    let writes = 0;
+    const plugin = {
+      ...rule,
+      id: 9,
+      name: '机房巡检',
+      type: 'agent',
+      is_inner: false,
+      is_plugin: true,
+      unique_key: 'serial',
+      attribute_count: 0,
+      has_plugin_script: true,
+    };
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () =>
+        HttpResponse.json({ items: [plugin], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/discovery/rules/9/accounts', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.put('/api/v1/cmdb/discovery/rules/9', () => {
+        writes += 1;
+        return HttpResponse.json(plugin);
+      }),
+      http.put('/api/v1/cmdb/discovery/rules/9/accounts', () =>
+        HttpResponse.json({ accounts: [] }),
+      ),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: '编辑 机房巡检' }));
+    await userEvent.click(screen.getByRole('button', { name: '添加字段' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    const drawer = screen.getByRole('dialog');
+    expect(await within(drawer).findByRole('alert')).toHaveTextContent('没有名称');
+    expect(writes).toBe(0);
   });
 
   it('loads a rule’s accounts and saves the whole set with the rule', async () => {
@@ -163,6 +349,86 @@ describe('the discovery page', () => {
       }),
     );
     expect(savedRule).toEqual(expect.objectContaining({ name: '阿里云', type: 'http' }));
+  });
+
+  it('edits a cloud account through the dedicated dialog', async () => {
+    const cloud = { ...rule, option: { en: 'aliyun', icon: { name: 'caise-aliyun' } } };
+    const account = {
+      id: 5,
+      name: '默认账号',
+      adr_id: 1,
+      config: { key: 'AK-1', region: 'cn-hangzhou' },
+      has_secret: true,
+      has_password: false,
+    };
+    let saved: unknown;
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () =>
+        HttpResponse.json({ items: [cloud], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/discovery/rules/1/accounts', () =>
+        HttpResponse.json({ items: [account], total: 1 }),
+      ),
+      http.put('/api/v1/cmdb/discovery/rules/1/accounts', async ({ request }) => {
+        saved = await request.json();
+        return HttpResponse.json({ accounts: [] });
+      }),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: '账号配置 阿里云' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('云访问密钥');
+
+    const secret = await within(dialog).findByLabelText('账号 secret 1');
+    expect(secret).toHaveValue('');
+    expect(secret).toHaveAttribute('placeholder', '已设置，留空保持原值');
+
+    await userEvent.type(secret, 'new-secret');
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+
+    await waitFor(() =>
+      expect(saved).toEqual({
+        accounts: [
+          {
+            id: 5,
+            name: '默认账号',
+            // The entries the form does not edit survive, and the blank secret
+            // is replaced by the one the operator typed.
+            config: { key: 'AK-1', region: 'cn-hangzhou', secret: 'new-secret' },
+          },
+        ],
+      }),
+    );
+  });
+
+  it('shows vCenter’s own account fields', async () => {
+    const vcenter = {
+      ...rule,
+      id: 2,
+      name: 'VCenter',
+      option: { en: 'vcenter', category: 'private_cloud' },
+    };
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () =>
+        HttpResponse.json({ items: [vcenter], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/discovery/rules/2/accounts', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: '账号配置 VCenter' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('私有云账号');
+    expect(await within(dialog).findByText('这条规则还没有账号。')).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '添加账号' }));
+    expect(within(dialog).getByLabelText('账号地址 1')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('账号用户名 1')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('账号密码 1')).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('账号 key 1')).not.toBeInTheDocument();
   });
 
   it('lists a model with no targets so its first target can be created', async () => {
