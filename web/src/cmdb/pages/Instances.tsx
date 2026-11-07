@@ -91,6 +91,39 @@ import { displayValue, isValueTypeCode } from '../lib/valuetype';
 
 const PAGE_SIZE = 20;
 
+type DeleteChallenge = { expression: string; answer: number };
+
+function randomInt(min: number, max: number): number {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+/**
+ * A fresh arithmetic question per batch-delete confirmation.
+ *
+ * This is a deliberate speed bump against a stray click, not a security
+ * control: every delete is still authorised server-side. The operator has to
+ * read the expression and work out the result instead of confirming on reflex.
+ */
+function makeDeleteChallenge(): DeleteChallenge {
+  switch (randomInt(0, 2)) {
+    case 0: {
+      const a = randomInt(10, 89);
+      const b = randomInt(10, 89);
+      return { expression: `${a} + ${b}`, answer: a + b };
+    }
+    case 1: {
+      const a = randomInt(30, 99);
+      const b = randomInt(11, 29);
+      return { expression: `${a} − ${b}`, answer: a - b };
+    }
+    default: {
+      const a = randomInt(3, 12);
+      const b = randomInt(3, 9);
+      return { expression: `${a} × ${b}`, answer: a * b };
+    }
+  }
+}
+
 // One export page is 500 because that is the instance/search endpoint's
 // ceiling. 全部 is therefore fetched in pages, with a bound: cantor asked for
 // 99,999 in one request, which this backend would clamp to one 500-row page.
@@ -230,6 +263,15 @@ export default function InstancesPage() {
   const [selected, setSelected] = useState<Set<string | number>>(() => new Set());
   const selectedCount = selected.size;
   const clearSelection = useCallback(() => setSelected(new Set()), []);
+  // BATCH DELETE IS DELIBERATE. The dialog asks the operator to solve an
+  // arithmetic expression; the challenge is regenerated on every open so a
+  // memorised number cannot stand in for reading the current one.
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [deleteChallenge, setDeleteChallenge] = useState<DeleteChallenge>(makeDeleteChallenge);
+  const [deleteAnswer, setDeleteAnswer] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
 
   const toggleSelected = useCallback((id: number) => {
     setSelected((current) => {
@@ -436,6 +478,87 @@ export default function InstancesPage() {
     } catch (error) {
       toast.error(describeError(error, tr('删除失败', 'Delete failed')));
     }
+  };
+
+  const openBatchDelete = () => {
+    setDeleteChallenge(makeDeleteChallenge());
+    setDeleteAnswer('');
+    setDeleteError(null);
+    setDeleteProgress(null);
+    setBatchDeleteOpen(true);
+  };
+
+  const closeBatchDelete = () => {
+    // The dialog must stay put while requests are in flight: closing it would
+    // hide which rows succeeded and which did not.
+    if (deleting) return;
+    setBatchDeleteOpen(false);
+  };
+
+  const confirmBatchDelete = async () => {
+    if (deleting) return;
+    const answer = Number(deleteAnswer.trim());
+    if (!deleteAnswer.trim() || !Number.isFinite(answer) || answer !== deleteChallenge.answer) {
+      setDeleteError(
+        tr(
+          '计算结果不正确，请输入表达式的值。',
+          'That is not the result of the expression. Enter the correct value to continue.',
+        ),
+      );
+      return;
+    }
+    const ids = [...selected]
+      .map((key) => Number(key))
+      .filter((id) => Number.isSafeInteger(id) && id > 0);
+    if (ids.length === 0) {
+      setBatchDeleteOpen(false);
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError(null);
+    setDeleteProgress({ done: 0, total: ids.length });
+    // Deletes run one at a time. Each one cascades the instance's values and
+    // relations, so firing the whole selection at once would multiply that
+    // work without shortening the operator's wait perceptibly.
+    const deleted = new Set<number>();
+    let firstError: unknown = null;
+    for (const [index, id] of ids.entries()) {
+      try {
+        await deleteInstance(id);
+        deleted.add(id);
+      } catch (error) {
+        if (firstError === null) firstError = error;
+      }
+      setDeleteProgress({ done: index + 1, total: ids.length });
+    }
+    setDeleting(false);
+    setDeleteProgress(null);
+
+    // Failed rows stay selected so the operator can retry them after fixing
+    // whatever the server reported.
+    setSelected((current) => {
+      if (deleted.size === 0) return current;
+      const next = new Set(current);
+      deleted.forEach((id) => next.delete(id));
+      return next;
+    });
+    setBatchDeleteOpen(false);
+
+    const failed = ids.length - deleted.size;
+    if (failed === 0) {
+      toast.success(tr(`已删除 ${deleted.size} 项`, `Deleted ${deleted.size}`));
+    } else if (deleted.size === 0) {
+      toast.error(describeError(firstError, tr('批量删除失败', 'Batch delete failed')));
+    } else {
+      toast.error(
+        tr(
+          `已删除 ${deleted.size} 项，${failed} 项失败`,
+          `Deleted ${deleted.size}; ${failed} failed`,
+        ),
+      );
+    }
+    await load(true);
   };
 
   // File uploads/deletes are immediate in the manager dialog. Persist the new
@@ -1330,15 +1453,27 @@ export default function InstancesPage() {
                         in this toolbar row so it does not become a second row of
                         controls when something is selected. */}
                     {selectedCount > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        type="button"
-                        onClick={clearSelection}
-                        className="text-text-muted hover:text-text"
-                      >
-                        {tr('清除选择', 'Clear selection')}
-                      </Button>
+                      <>
+                        <Button
+                          variant="dangerGhost"
+                          size="sm"
+                          type="button"
+                          onClick={openBatchDelete}
+                          className="inline-flex items-center gap-1.5"
+                        >
+                          <Trash2 size={12} aria-hidden="true" />
+                          {tr('批量删除', 'Delete selected')}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          type="button"
+                          onClick={clearSelection}
+                          className="text-text-muted hover:text-text"
+                        >
+                          {tr('清除选择', 'Clear selection')}
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1664,6 +1799,78 @@ export default function InstancesPage() {
           onInstanceSaved={() => void load(true)}
         />
       )}
+
+      <Modal
+        open={batchDeleteOpen}
+        onClose={closeBatchDelete}
+        title={tr('批量删除实例', 'Delete instances')}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" type="button" onClick={closeBatchDelete} disabled={deleting}>
+              {tr('取消', 'Cancel')}
+            </Button>
+            <Button
+              variant="danger"
+              type="button"
+              onClick={() => void confirmBatchDelete()}
+              disabled={deleting || deleteAnswer.trim() === ''}
+            >
+              {deleting
+                ? tr('删除中…', 'Deleting…')
+                : tr(`删除 ${selectedCount} 项`, `Delete ${selectedCount}`)}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-text-muted">
+          {tr(
+            `将永久删除已选的 ${selectedCount} 个实例，它们的属性值和关系会一起删除。`,
+            `This permanently deletes the ${selectedCount} selected instances, including their values and relations.`,
+          )}
+        </p>
+        <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2.5">
+          <Label htmlFor="cmdb-batch-delete-answer" className="text-xs">
+            {tr('请输入下面表达式的结果', 'Enter the result of the expression below')}
+          </Label>
+          <p id="cmdb-batch-delete-expression" className="mt-1 font-mono text-lg font-semibold text-text">
+            {deleteChallenge.expression} = ?
+          </p>
+          <Input
+            id="cmdb-batch-delete-answer"
+            inputMode="numeric"
+            autoComplete="off"
+            value={deleteAnswer}
+            onChange={(event) => {
+              setDeleteAnswer(event.target.value);
+              setDeleteError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void confirmBatchDelete();
+              }
+            }}
+            aria-invalid={deleteError ? true : undefined}
+            aria-describedby={`cmdb-batch-delete-expression${deleteError ? ' cmdb-batch-delete-error' : ''}`}
+            className="mt-2 w-full"
+            autoFocus
+          />
+          {deleteError && (
+            <p id="cmdb-batch-delete-error" role="alert" className="mt-2 text-xs text-red-500 dark:text-red-300">
+              {deleteError}
+            </p>
+          )}
+        </div>
+        {deleteProgress && (
+          <p role="status" className="mt-3 text-xs text-text-faint">
+            {tr(
+              `正在删除 ${deleteProgress.done} / ${deleteProgress.total} 项…`,
+              `Deleting ${deleteProgress.done} of ${deleteProgress.total}…`,
+            )}
+          </p>
+        )}
+      </Modal>
 
       <Modal
         open={conditionSaveOpen}

@@ -106,6 +106,16 @@ beforeEach(() => {
   useAuth.setState({ token: null, role: 'admin' });
 });
 
+/** Solve the arithmetic challenge the batch-delete dialog shows. */
+function solve(expression: string): number {
+  const [left, operator, right] = expression.replace(' = ?', '').split(' ');
+  const a = Number(left);
+  const b = Number(right);
+  if (operator === '+') return a + b;
+  if (operator === '−') return a - b;
+  return a * b;
+}
+
 describe('the list', () => {
   it('offers an export of the current query and the current page', async () => {
     handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } }]);
@@ -486,6 +496,50 @@ describe('the list', () => {
     expect(within(dialog).getByText(/web-01/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: '取消' }));
     expect(deleted).toBe(0);
+  });
+
+  it('batch-deletes selected rows only after the arithmetic answer is correct', async () => {
+    const user = userEvent.setup();
+    handlers([
+      { ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'hello' } },
+      { ci_id: 6, type_id: 1, values: { hostname: 'web-02', note: 'world' } },
+    ]);
+    const deleted: number[] = [];
+    server.use(
+      http.delete('/api/v1/cmdb/instances/:id', ({ params }) => {
+        deleted.push(Number(params.id));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPage();
+
+    await screen.findByText('web-01');
+    for (const box of screen.getAllByRole('checkbox', { name: '选择这一行' })) {
+      await user.click(box);
+    }
+    await user.click(screen.getByRole('button', { name: '批量删除' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByText(/将永久删除已选的 2 个实例/),
+    ).toBeInTheDocument();
+    const expression = within(dialog).getByText(/= \?$/).textContent ?? '';
+    const answer = solve(expression);
+
+    // A WRONG ANSWER IS THE POINT OF THE DIALOG: it must not delete anything.
+    const answerInput = within(dialog).getByLabelText('请输入下面表达式的结果');
+    await user.type(answerInput, String(answer + 1));
+    await user.click(within(dialog).getByRole('button', { name: '删除 2 项' }));
+    expect(deleted).toEqual([]);
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('计算结果不正确');
+
+    await user.clear(answerInput);
+    await user.type(answerInput, String(answer));
+    await user.click(within(dialog).getByRole('button', { name: '删除 2 项' }));
+
+    await waitFor(() => expect([...deleted].sort()).toEqual([5, 6]));
+    expect(await screen.findByText('已删除 2 项')).toBeInTheDocument();
+    expect(screen.queryByText(/已选 \d+ 项/)).not.toBeInTheDocument();
   });
 });
 

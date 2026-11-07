@@ -1113,6 +1113,94 @@ test('resource data uses the compact header, model rail and one vertical scrolle
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+test('resource data batch delete requires the arithmetic answer', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    localStorage.setItem('ongrid.auth', JSON.stringify({
+      state: { token: 'e2e-token', refreshToken: null, email: 'e2e@example.com', role: 'admin' },
+      version: 0,
+    }));
+  });
+  await mockAPI(page);
+  await mockInstanceData(page);
+  const deleted: string[] = [];
+  await page.route('**/api/v1/cmdb/instances/*', (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    deleted.push(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+    return route.fulfill({ status: 204, body: '' });
+  });
+
+  await page.goto('/cmdb/instances?type=host');
+  await expect(page.getByRole('heading', { name: /资源数据/ })).toBeVisible();
+  const rowBoxes = page.getByRole('checkbox', { name: '选择这一行' });
+  await rowBoxes.nth(0).click();
+  await rowBoxes.nth(1).click();
+  await page.getByRole('button', { name: '批量删除' }).click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('将永久删除已选的 2 个实例');
+  const expression = (await dialog.locator('p.font-mono').first().textContent()) ?? '';
+  const answer = solveExpression(expression);
+
+  // THE WRONG ANSWER IS THE REGRESSION: the dialog must block the deletes.
+  const input = dialog.getByLabel('请输入下面表达式的结果');
+  await input.fill(String(answer + 1));
+  await dialog.getByRole('button', { name: '删除 2 项' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('计算结果不正确');
+  expect(deleted).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('resource-data-batch-delete-1440-light-zh-CN.png') });
+
+  // The modal must stay legible in the dark theme too.
+  await page.evaluate(() => {
+    localStorage.setItem('ongrid-theme-preference', 'dark');
+    document.documentElement.dataset.theme = 'dark';
+    document.documentElement.classList.remove('light', 'theme-light');
+    document.documentElement.classList.add('dark', 'theme-dark');
+    document.documentElement.style.colorScheme = 'dark';
+  });
+  // Let the shared controls finish their colour transition before the shot.
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: testInfo.outputPath('resource-data-batch-delete-1440-dark-zh-CN.png') });
+
+  // The dialog must still fit a phone, with the expression and input readable.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    localStorage.setItem('ongrid-theme-preference', 'light');
+    document.documentElement.dataset.theme = 'light';
+    document.documentElement.classList.remove('dark', 'theme-dark');
+    document.documentElement.classList.add('light', 'theme-light');
+    document.documentElement.style.colorScheme = 'light';
+  });
+  await page.waitForTimeout(400);
+  await expect(dialog).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('resource-data-batch-delete-390-light-zh-CN.png') });
+  for (const width of [390, 768, 1280, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(dialog).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, `${width}px must not overflow horizontally`).toBeLessThanOrEqual(1);
+  }
+
+  await input.fill(String(answer));
+  await dialog.getByRole('button', { name: '删除 2 项' }).click();
+  await expect.poll(() => deleted.length).toBe(2);
+  await expect(dialog).toBeHidden();
+});
+
+function solveExpression(expression: string): number {
+  const [left, operator, right] = expression.replace(' = ?', '').split(' ');
+  const a = Number(left);
+  const b = Number(right);
+  if (operator === '+') return a + b;
+  if (operator === '−') return a - b;
+  return a * b;
+}
+
 test('the resource model rail follows the configured model groups', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => {
