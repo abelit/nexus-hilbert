@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -168,6 +170,9 @@ func TestToolInfoIsReadOnly(t *testing.T) {
 	want := map[string]bool{
 		ToolNameSearchCI: false, ToolNameGetCI: false,
 		ToolNameListCITypes: false, ToolNameGetCIType: false,
+		ToolNameGetCIRelations: false, ToolNameQueryRelationPath: false,
+		ToolNameFindCITypePath: false, ToolNameGetCIHistory: false,
+		ToolNameRelationGraph: false,
 	}
 	for _, tool := range Tools(c) {
 		info, err := tool.Info(context.Background())
@@ -195,5 +200,137 @@ func TestToolInfoIsReadOnly(t *testing.T) {
 func TestToolsNilClient(t *testing.T) {
 	if got := Tools(nil); got != nil {
 		t.Fatalf("Tools(nil) = %v, want nil", got)
+	}
+}
+
+func TestGetCIRelationsDirection(t *testing.T) {
+	for _, tc := range []struct {
+		direction string
+		path      string
+	}{
+		{"down", "/api/v1/cmdb/ci-relations/9/children"},
+		{"up", "/api/v1/cmdb/ci-relations/9/parents"},
+	} {
+		t.Run(tc.direction, func(t *testing.T) {
+			c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.path {
+					t.Errorf("path = %q, want %q", r.URL.Path, tc.path)
+				}
+				if r.URL.Query().Get("page") != "2" || r.URL.Query().Get("count") != "10" {
+					t.Errorf("query = %v", r.URL.Query())
+				}
+				if r.URL.Query().Get("relation_type_id") != "4" {
+					t.Errorf("relation_type_id = %q", r.URL.Query().Get("relation_type_id"))
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"items":    []map[string]any{{"relation_id": 1, "ci_id": 10, "type_id": 3, "relation_type_id": 4}},
+					"numfound": 1, "page": 2,
+				})
+			})
+			got := runTool(t, c, ToolNameGetCIRelations, `{"ci_id":9,"direction":"`+tc.direction+`","page":2,"count":10,"relation_type_id":4}`)
+			items, _ := got["items"].([]any)
+			if len(items) != 1 {
+				t.Fatalf("items = %v", got["items"])
+			}
+		})
+	}
+}
+
+func TestQueryRelationPathBody(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/cmdb/ci-relations/path/s" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		source, _ := body["source"].(map[string]any)
+		if source["type_id"] != float64(3) || source["q"] != "hostname:web-01" {
+			t.Errorf("source = %v", body["source"])
+		}
+		target, _ := body["target"].(map[string]any)
+		if fmt.Sprint(target["type_ids"]) != "[4 5]" {
+			t.Errorf("target = %v", body["target"])
+		}
+		_, _ = w.Write([]byte(`{"numfound":1,"total":1,"page":1,"paths":{"a":[[1,2]]},"id2ci":{}}`))
+	})
+	got := runTool(t, c, ToolNameQueryRelationPath, `{"source":{"type_id":3,"q":"hostname:web-01"},"target":{"type_ids":[4,5],"q":""},"path":[[3,4]],"count":5}`)
+	if got["numfound"] != float64(1) || got["paths"] == nil {
+		t.Fatalf("got = %v", got)
+	}
+}
+
+func TestFindCITypePathQuery(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/cmdb/ci-type-relations/path" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("source_type_id") != "3" || r.URL.Query().Get("target_type_ids") != "4,5" {
+			t.Errorf("query = %v", r.URL.Query())
+		}
+		_, _ = w.Write([]byte(`{"paths":[{"chain":[3,4]}]}`))
+	})
+	got := runTool(t, c, ToolNameFindCITypePath, `{"source_type_id":3,"target_type_ids":"4,5"}`)
+	if got["paths"] == nil {
+		t.Fatalf("got = %v", got)
+	}
+}
+
+func TestGetCIHistoryPaging(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/cmdb/history/ci/9" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("page") != "2" || r.URL.Query().Get("page_size") != "10" {
+			t.Errorf("query = %v", r.URL.Query())
+		}
+		_, _ = w.Write([]byte(`{"items":[{"attribute":"name"}],"total":1,"page":2,"page_size":10}`))
+	})
+	got := runTool(t, c, ToolNameGetCIHistory, `{"ci_id":9,"page":2,"page_size":10}`)
+	if got["total"] != float64(1) {
+		t.Fatalf("got = %v", got)
+	}
+}
+
+func TestRelationGraphBounds(t *testing.T) {
+	var childRequests int
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/children") {
+			childRequests++
+			id, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/ci-relations/"), "/children"))
+			items := []map[string]any{}
+			if id < 5 {
+				items = append(items, map[string]any{"relation_id": id, "ci_id": id + 1, "type_id": 3, "relation_type_id": 1})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "numfound": len(items), "page": 1})
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v1/cmdb/instances/") {
+			id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/instances/"))
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ci_id": id, "type_id": 3,
+				"values": map[string]any{"hostname": fmt.Sprintf("h-%d", id)},
+			})
+			return
+		}
+		t.Fatalf("unexpected path %q", r.URL.Path)
+	})
+
+	got := runTool(t, c, ToolNameRelationGraph, `{"ci_id":1,"direction":"down","depth":99,"max_nodes":999}`)
+	nodes, _ := got["nodes"].([]any)
+	if len(nodes) != 4 { // 1 → 2 → 3 → 4; depth clamped to 3
+		t.Fatalf("nodes = %d, want 4: %v", len(nodes), got)
+	}
+	if childRequests != 3 { // one request per level, not 99
+		t.Fatalf("children requests = %d, want 3", childRequests)
+	}
+
+	got = runTool(t, c, ToolNameRelationGraph, `{"ci_id":1,"direction":"down","depth":3,"max_nodes":2}`)
+	if got["truncated"] != true {
+		t.Fatalf("truncated = %v, want true", got["truncated"])
+	}
+	if nodes, _ := got["nodes"].([]any); len(nodes) > 2 {
+		t.Fatalf("nodes = %d, want <= 2", len(nodes))
 	}
 }
