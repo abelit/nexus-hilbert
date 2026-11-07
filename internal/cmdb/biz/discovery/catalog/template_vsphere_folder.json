@@ -1,0 +1,5 @@
+[
+ {"name":"folder","type":"string","desc":"文件夹 ID","example":"group-v1"},
+ {"name":"name","type":"string","desc":"文件夹名称","example":"Production"},
+ {"name":"type","type":"string","desc":"文件夹类型","example":"VIRTUAL_MACHINE"}
+]

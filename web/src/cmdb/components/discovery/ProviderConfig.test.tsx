@@ -65,6 +65,37 @@ describe('provider config', () => {
     rerender(<ProviderConfig {...initial} extra={{ category: 'ecs', _reference: '5' }} />);
     expect(await screen.findByLabelText('Access key')).toBeDisabled();
     expect(screen.getByLabelText('Secret')).toBeDisabled();
+    // Region is target-level and remains writable even when credentials come
+    // from an account; an account region, when present, wins at task compile.
+    expect(screen.getByLabelText('区域')).not.toBeDisabled();
+  });
+
+  it('renders the cloud region field', () => {
+    const initial = props(httpRule, { category: 'ecs', region: 'us-east-1' });
+    render(<ProviderConfig {...initial} />);
+    expect(screen.getByLabelText('区域')).toHaveValue('us-east-1');
+  });
+
+  it('renders the Huawei project id and the vCenter TLS option', () => {
+    const huawei: Rule = { ...httpRule, id: 8, name: '华为云', option: { en: 'huaweicloud' } };
+    const { rerender } = render(
+      <ProviderConfig {...props(huawei, { category: '云服务器 ECS', project_id: 'project-1' })} />,
+    );
+    expect(screen.getByLabelText('Project ID')).toHaveValue('project-1');
+
+    const vcenter: Rule = { ...httpRule, id: 9, name: 'VCenter', option: { en: 'vcenter' } };
+    rerender(<ProviderConfig {...props(vcenter, { category: '虚拟机' })} />);
+    expect(screen.getByLabelText('跳过 TLS 证书校验')).not.toBeChecked();
+
+    const kvm: Rule = {
+      ...httpRule,
+      id: 10,
+      name: 'KVM',
+      option: { en: 'kvm', category: 'private_cloud' },
+    };
+    rerender(<ProviderConfig {...props(kvm, { category: '虚拟机' })} />);
+    expect(screen.getByText('该私有云适配器尚未实现，目标不会下发。')).toBeInTheDocument();
+    expect(screen.queryByLabelText('地址')).toBeNull();
   });
 
   it('adds an SNMP node without losing the existing one', async () => {

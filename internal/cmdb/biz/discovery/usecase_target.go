@@ -993,6 +993,9 @@ func renderTarget(row discoverymodel.Target) Target {
 			view.HasKey = isSet(v)
 		case AccountCommunityKey:
 			view.HasCommunity = isSet(v)
+		case AccountSessionTokenKey:
+			// Reserved for temporary cloud credentials; stripped even though the
+			// console does not edit it yet.
 		case "nodes":
 			view.ExtraOption[k] = sanitizeNodesForRead(v)
 		case "reference", "_reference":

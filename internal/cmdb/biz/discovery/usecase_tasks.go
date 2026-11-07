@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ongridio/ongrid/internal/cmdb/biz/discovery/catalog"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	discoverymodel "github.com/ongridio/ongrid/internal/cmdb/model/discovery"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -34,7 +35,27 @@ var agentCollectKeyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 var agentSecretKeys = map[string]bool{
 	"key": true, "secret": true, "password": true, "community": true,
-	"reference": true, "_reference": true,
+	"session_token": true,
+	"reference":     true, "_reference": true,
+}
+
+// supportedCloudCollectors maps the collect_key the catalogue derives to the
+// provider field that identifies one resource. The value is the unique-key
+// fallback when the model's unique attribute is not part of the mapping.
+//
+// THE LIST IS A DEPLOYMENT FACT, NOT A CATALOGUE FACT: the catalogue describes
+// every resource cantor knows, while euler only ships the adapters in this
+// table. An unknown key is a configuration warning, not a task that silently
+// fails at the far end.
+var supportedCloudCollectors = map[string]string{
+	"ali.ecs":      "InstanceId",
+	"aws.ec2":      "instanceId",
+	"tencent.cvm":  "InstanceId",
+	"huawei.ecs":   "id",
+	"vsphere.vm":   "vm",
+	"vsphere.host": "host", "vsphere.cluster": "cluster", "vsphere.network": "network",
+	"vsphere.datastore": "datastore", "vsphere.datacenter": "datacenter",
+	"vsphere.folder": "folder", "vsphere.pool": "resource_pool",
 }
 
 // SyncAgentTasks computes the diff an euler needs.
@@ -97,6 +118,11 @@ func (u *Usecase) SyncAgentTasks(ctx context.Context, principal AgentPrincipalVi
 			warnings = append(warnings, warning)
 			continue
 		}
+		if !eulerAdvertises(*euler, task.CollectKey) {
+			warnings = append(warnings, fmt.Sprintf("target %d: collector %s does not advertise %s",
+				target.ID, euler.EulerID, task.CollectKey))
+			continue
+		}
 		current[task.TaskID] = task
 		assigned = append(assigned, target)
 	}
@@ -155,6 +181,17 @@ func (u *Usecase) SyncAgentTasks(ctx context.Context, principal AgentPrincipalVi
 		sort.Strings(removed)
 	}
 
+	sort.Strings(warnings)
+	if len(warnings) > 1 {
+		deduped := warnings[:1]
+		for _, warning := range warnings[1:] {
+			if warning != deduped[len(deduped)-1] {
+				deduped = append(deduped, warning)
+			}
+		}
+		warnings = deduped
+	}
+
 	all := make([]AgentTask, 0, len(current))
 	for _, task := range current {
 		all = append(all, task)
@@ -199,17 +236,59 @@ func (u *Usecase) targetAppliesToEuler(ctx context.Context, target discoverymode
 	}
 }
 
+// eulerAdvertises reports whether the collector named the task's collect key.
+// An empty capability list means "unknown" (an older collector), which is
+// allowed so a rollout does not turn every target into a warning.
+func eulerAdvertises(euler discoverymodel.Euler, collectKey string) bool {
+	caps := euler.Capabilities()
+	if len(caps) == 0 {
+		return true
+	}
+	raw, ok := caps["collect_keys"]
+	if !ok {
+		return true
+	}
+	list, ok := raw.([]any)
+	if !ok || len(list) == 0 {
+		return true
+	}
+	for _, item := range list {
+		if fmt.Sprint(item) == collectKey {
+			return true
+		}
+	}
+	return false
+}
+
 // buildAgentTask renders one target. A non-empty warning means the target is
-// visible to an operator but cannot run yet (cloud collection needs an
-// adapter; an SNMP target still needs a community and a collector).
+// visible to an operator but cannot run yet (an unsupported cloud resource or
+// an SNMP target without a community).
 func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Target, rule discoverymodel.Rule, euler discoverymodel.Euler) (AgentTask, string, error) {
 	typeID := derefID(target.TypeID)
-	kind := derefString(rule.Type)
+	ruleType := derefString(rule.Type)
+	kind := ruleType
 	if rule.IsPlugin {
 		kind = "plugin"
+	} else if ruleType == discoverymodel.TypeHTTP {
+		// The machine contract calls an API collector `cloud`; the console keeps
+		// calling the provider kind `http`.
+		kind = "cloud"
 	}
-	if kind == discoverymodel.TypeHTTP {
-		return AgentTask{}, fmt.Sprintf("target %d: %s collection requires a cloud adapter", target.ID, kind), nil
+
+	collectKey := agentCollectKey(rule, target)
+	if kind == "cloud" {
+		if strings.TrimSpace(collectKey) == "" {
+			return AgentTask{}, fmt.Sprintf("target %d: cloud target has no resource kind", target.ID), nil
+		}
+		if _, ok := supportedCloudCollectors[collectKey]; !ok {
+			return AgentTask{}, fmt.Sprintf("target %d: cloud collector %q is not implemented", target.ID, collectKey), nil
+		}
+		if problem := cloudConfigProblem(rule, target, collectKey); problem != "" {
+			return AgentTask{}, fmt.Sprintf("target %d: %s", target.ID, problem), nil
+		}
+	}
+	if !agentCollectKeyRE.MatchString(collectKey) || strings.Contains(collectKey, "..") {
+		return AgentTask{}, fmt.Sprintf("target %d: collect_key %q is not a safe agent name", target.ID, collectKey), nil
 	}
 
 	mapping := map[string]string{}
@@ -232,16 +311,29 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 			return AgentTask{}, "", err
 		}
 		if ref != nil && ref.UniqueKey != "" {
+			// Sort the candidates: two provider fields can map to the same model
+			// attribute, and a map-iteration winner would make the task revision
+			// drift between syncs.
+			matches := make([]string, 0, 1)
 			for provider, attr := range mapping {
 				if attr == ref.UniqueKey {
-					uniqueKey = provider
-					break
+					matches = append(matches, provider)
 				}
+			}
+			if len(matches) > 0 {
+				sort.Strings(matches)
+				uniqueKey = matches[0]
 			}
 		}
 	}
 	if uniqueKey == "" {
 		uniqueKey = derefString(rule.UniqueKey)
+	}
+	// A CLOUD RESOURCE ALWAYS HAS A PROVIDER ID, even when the model's unique
+	// attribute is not part of this mapping. The fallback is the ID field the
+	// shipped template uses (`InstanceId` / `instanceId`).
+	if uniqueKey == "" && kind == "cloud" {
+		uniqueKey = supportedCloudCollectors[collectKey]
 	}
 	// A NETWORK DEVICE ALWAYS HAS A MANAGEMENT ADDRESS, even when the model's
 	// unique attribute is not part of this mapping. The template reports it
@@ -257,6 +349,27 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 	opened, err := u.openCredentials(ctx, target)
 	if err != nil {
 		return AgentTask{}, "", err
+	}
+	if kind == "cloud" {
+		// AN ACCOUNT MAY SUPPLY CREDENTIALS AND REGION, NOT THE COLLECTOR.
+		// openCredentials merges the account over the target, so remove the
+		// routing keys there and restore the target's category. Otherwise a
+		// shared account could silently redirect a target to another provider.
+		delete(opened, "collect_key")
+		delete(opened, "provider")
+		delete(opened, "endpoint")
+		delete(opened, "insecure")
+		if raw, ok := target.ExtraOption["insecure"]; ok {
+			opened["insecure"] = raw
+		}
+		if raw, ok := target.ExtraOption["category"].(string); ok {
+			opened["category"] = raw
+		} else {
+			delete(opened, "category")
+		}
+		if raw, ok := target.ExtraOption["endpoint"].(string); ok && strings.TrimSpace(raw) != "" {
+			opened["endpoint"] = raw
+		}
 	}
 	secrets := map[string]string{}
 	snmpProblem := ""
@@ -283,9 +396,10 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 	if kind == discoverymodel.TypeSNMP && snmpProblem != "" {
 		return AgentTask{}, fmt.Sprintf("target %d: %s", target.ID, snmpProblem), nil
 	}
-	collectKey := agentCollectKey(rule)
-	if !agentCollectKeyRE.MatchString(collectKey) || strings.Contains(collectKey, "..") {
-		return AgentTask{}, fmt.Sprintf("target %d: collect_key %q is not a safe agent name", target.ID, collectKey), nil
+	if kind == "cloud" {
+		if problem := cloudCredentialProblem(rule, target, collectKey, opened, secrets); problem != "" {
+			return AgentTask{}, fmt.Sprintf("target %d: %s", target.ID, problem), nil
+		}
 	}
 	task := AgentTask{
 		TaskID:     fmt.Sprintf("t:%d", target.ID),
@@ -314,6 +428,8 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 		task.CapabilitiesRequired = []string{"plugin:python"}
 	} else if kind == discoverymodel.TypeSNMP {
 		task.CapabilitiesRequired = []string{"snmp"}
+	} else if kind == "cloud" {
+		task.CapabilitiesRequired = []string{"cloud"}
 	}
 	task.Revision = canonicalTaskRevision(task)
 	if len(secrets) > 0 {
@@ -339,7 +455,89 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 	return task, "", nil
 }
 
-func agentCollectKey(rule discoverymodel.Rule) string {
+// cloudCredentialProblem validates the fields each cloud family needs. A
+// vCenter target authenticates with host/account/password, while the public
+// clouds use region plus an access key; Huawei additionally needs the project
+// id that is part of its URL.
+func cloudCredentialProblem(rule discoverymodel.Rule, target discoverymodel.Target, collectKey string, opened map[string]any, secrets map[string]string) string {
+	provider := cloudProviderOf(rule, target)
+	if provider == "vcenter" || strings.HasPrefix(collectKey, "vsphere.") {
+		if plainTextValue(opened["host"]) == "" {
+			return "cloud target has no host"
+		}
+		if plainTextValue(opened["account"]) == "" {
+			return "cloud target has no account"
+		}
+		if plainTextValue(secrets["password"]) == "" {
+			return "cloud target has no password"
+		}
+		return ""
+	}
+	if plainTextValue(opened["region"]) == "" {
+		return "cloud target has no region"
+	}
+	if collectKey == "huawei.ecs" && plainTextValue(opened["project_id"]) == "" {
+		return "Huawei ECS target has no project_id"
+	}
+	accessKey := plainTextValue(secrets["key"])
+	if accessKey == "" {
+		// Imported accounts may spell the key id `access_key`; it is not a
+		// secret, so it stays in params and the adapter accepts either name.
+		accessKey = plainTextValue(opened["access_key"])
+	}
+	if accessKey == "" || plainTextValue(secrets["secret"]) == "" {
+		return "cloud target has no access key"
+	}
+	return ""
+}
+
+func cloudProviderOf(rule discoverymodel.Rule, target discoverymodel.Target) string {
+	if raw, ok := target.ExtraOption["provider"].(string); ok && strings.TrimSpace(raw) != "" {
+		return normalizeCloudProvider(raw)
+	}
+	return normalizeCloudProvider(providerENOf(rule))
+}
+
+// normalizeCloudProvider reconciles the few historical spellings that predate
+// the catalogue's stable provider keys. It deliberately does not guess a
+// mapping for a display name such as "阿里云"; built-in rules carry `option.en`.
+func normalizeCloudProvider(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.EqualFold(value, "vcenter") {
+		return "vcenter"
+	}
+	return value
+}
+
+// cloudConfigProblem catches a target that was saved under one resource kind
+// and still carries a stale collector/provider pair. It is a warning, not a
+// sync error: the operator can fix the target without stopping other targets.
+func cloudConfigProblem(rule discoverymodel.Rule, target discoverymodel.Target, collectKey string) string {
+	provider := normalizeCloudProvider(providerENOf(rule))
+	if raw, ok := target.ExtraOption["provider"].(string); ok {
+		raw = strings.TrimSpace(raw)
+		if raw != "" && provider != "" && normalizeCloudProvider(raw) != provider {
+			return fmt.Sprintf("target provider %q does not match rule provider %q", raw, provider)
+		}
+	}
+	category := ""
+	if raw, ok := target.ExtraOption["category"].(string); ok {
+		category = strings.TrimSpace(raw)
+	}
+	if category == "" {
+		return ""
+	}
+	derived, err := catalog.CollectKey(normalizeCloudProvider(cloudProviderOf(rule, target)), category)
+	if err != nil {
+		return fmt.Sprintf("cannot resolve cloud resource %q", category)
+	}
+	if derived != "" && derived != collectKey {
+		return fmt.Sprintf("resource kind %q resolves to collector %q, not %q", category, derived, collectKey)
+	}
+	return ""
+}
+
+func agentCollectKey(rule discoverymodel.Rule, target discoverymodel.Target) string {
 	// A PLUGIN'S SCRIPT IS INSTALLED UNDER ITS RULE NAME, so the task must name
 	// the same collector.
 	if rule.IsPlugin {
@@ -352,6 +550,27 @@ func agentCollectKey(rule discoverymodel.Rule) string {
 	// collector for a network device.
 	if derefString(rule.Type) == discoverymodel.TypeSNMP {
 		return "snmp"
+	}
+	if derefString(rule.Type) == discoverymodel.TypeHTTP {
+		// THE COLLECTOR IS A PROPERTY OF THE TARGET, because the category is.
+		// `applyProviderOptions` writes it on save; the rule-level option and
+		// catalogue are fallbacks for rows that predate that derivation.
+		if raw, ok := target.ExtraOption["collect_key"].(string); ok && strings.TrimSpace(raw) != "" {
+			return strings.TrimSpace(raw)
+		}
+		if raw, ok := rule.Option["collect_key"].(string); ok && strings.TrimSpace(raw) != "" {
+			return strings.TrimSpace(raw)
+		}
+		resource := ""
+		if raw, ok := target.ExtraOption["category"].(string); ok {
+			resource = strings.TrimSpace(raw)
+		}
+		if resource != "" {
+			if key, err := catalog.CollectKey(providerENOf(rule), resource); err == nil {
+				return key
+			}
+		}
+		return ""
 	}
 	if raw, ok := rule.Option["collect_key"].(string); ok && strings.TrimSpace(raw) != "" {
 		return strings.TrimSpace(raw)

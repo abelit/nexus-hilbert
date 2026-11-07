@@ -672,8 +672,11 @@ type TaskSnapshot struct {
 	Reset_         bool     `protobuf:"varint,3,opt,name=reset,proto3" json:"reset,omitempty"`
 	Changed        []*Task  `protobuf:"bytes,4,rep,name=changed,proto3" json:"changed,omitempty"`
 	RemovedTaskIds []string `protobuf:"bytes,5,rep,name=removed_task_ids,json=removedTaskIds,proto3" json:"removed_task_ids,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Configuration problems the relay should surface to an operator. Warnings
+	// do not prevent the other tasks in the snapshot from running.
+	Warnings      []string `protobuf:"bytes,6,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskSnapshot) Reset() {
@@ -737,6 +740,13 @@ func (x *TaskSnapshot) GetChanged() []*Task {
 func (x *TaskSnapshot) GetRemovedTaskIds() []string {
 	if x != nil {
 		return x.RemovedTaskIds
+	}
+	return nil
+}
+
+func (x *TaskSnapshot) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
 	}
 	return nil
 }
@@ -2186,13 +2196,14 @@ const file_control_v2_control_proto_rawDesc = "" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1a\n" +
 	"\brevision\x18\x02 \x01(\tR\brevision\x12\x1f\n" +
 	"\vneed_secret\x18\x03 \x01(\bR\n" +
-	"needSecret\"\xc2\x01\n" +
+	"needSecret\"\xde\x01\n" +
 	"\fTaskSnapshot\x12\x19\n" +
 	"\beuler_id\x18\x01 \x01(\tR\aeulerId\x12%\n" +
 	"\x0esnapshot_epoch\x18\x02 \x01(\tR\rsnapshotEpoch\x12\x14\n" +
 	"\x05reset\x18\x03 \x01(\bR\x05reset\x120\n" +
 	"\achanged\x18\x04 \x03(\v2\x16.nexus.control.v2.TaskR\achanged\x12(\n" +
-	"\x10removed_task_ids\x18\x05 \x03(\tR\x0eremovedTaskIds\"\xb0\x06\n" +
+	"\x10removed_task_ids\x18\x05 \x03(\tR\x0eremovedTaskIds\x12\x1a\n" +
+	"\bwarnings\x18\x06 \x03(\tR\bwarnings\"\xb0\x06\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x1a\n" +

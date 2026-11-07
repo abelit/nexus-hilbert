@@ -1,0 +1,5 @@
+[
+ {"name":"cluster","type":"string","desc":"集群 ID","example":"domain-c8"},
+ {"name":"name","type":"string","desc":"集群名称","example":"cluster-01"},
+ {"name":"resource_pool","type":"string","desc":"根资源池 ID","example":"resgroup-9"}
+]

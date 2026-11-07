@@ -1,0 +1,4 @@
+[
+ {"name":"resource_pool","type":"string","desc":"资源池 ID","example":"resgroup-1"},
+ {"name":"name","type":"string","desc":"资源池名称","example":"Resources"}
+]

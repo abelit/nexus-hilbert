@@ -1,0 +1,7 @@
+[
+ {"name":"datastore","type":"string","desc":"数据存储 ID","example":"datastore-123"},
+ {"name":"name","type":"string","desc":"数据存储名称","example":"ds-01"},
+ {"name":"type","type":"string","desc":"数据存储类型","example":"VMFS"},
+ {"name":"free_space","type":"integer","desc":"剩余空间(字节，可能为空)","example":107374182400},
+ {"name":"capacity","type":"integer","desc":"总容量(字节，可能为空)","example":536870912000}
+]

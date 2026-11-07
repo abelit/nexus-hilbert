@@ -409,34 +409,25 @@
   {
    "category": "网络",
    "collect_key_map": {
-    "分布式交换机": "vsphere.distributed_switch",
-    "标准交换机": "vsphere.standard_switch",
     "网络": "vsphere.network"
    },
    "items": [
-    "网络",
-    "标准交换机",
-    "分布式交换机"
+    "网络"
    ],
    "map": {
-    "分布式交换机": "templates/vsphere_distributed_switch.json",
-    "标准交换机": "templates/vsphere_standard_switch.json",
     "网络": "templates/vsphere_network.json"
    }
   },
   {
    "category": "存储",
    "collect_key_map": {
-    "数据存储": "vsphere.datastore",
-    "数据存储集群": "vsphere.storage_pod"
+    "数据存储": "vsphere.datastore"
    },
    "items": [
-    "数据存储",
-    "数据存储集群"
+    "数据存储"
    ],
    "map": {
-    "数据存储": "templates/vsphere_datastore.json",
-    "数据存储集群": "templates/vsphere_storage_pod.json"
+    "数据存储": "templates/vsphere_datastore.json"
    }
   },
   {

@@ -1,0 +1,7 @@
+[
+ {"name":"vm","type":"string","desc":"虚拟机 ID","example":"vm-123"},
+ {"name":"name","type":"string","desc":"虚拟机名称","example":"web-01"},
+ {"name":"power_state","type":"string","desc":"电源状态(POWERED_ON/OFF/SUSPENDED)","example":"POWERED_ON"},
+ {"name":"cpu_count","type":"integer","desc":"vCPU 数","example":2},
+ {"name":"memory_size_MiB","type":"integer","desc":"内存(MiB)","example":4096}
+]

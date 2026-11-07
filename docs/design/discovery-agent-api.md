@@ -48,7 +48,9 @@
 - `changed[]`：新增或 revision 变化的 `AgentTask`；
 - `removed_task_ids[]`：不再适用于该 euler 的任务；
 - `reset`：euler 丢失本地状态时先清空；
-- `warnings[]`：当前阶段无法下发的原因（如云/SNMP 需要 P2）。
+- `warnings[]`：逐目标配置问题（未实现的云采集器、缺失 region/凭据、采集器未声明该
+  `collect_key`、SNMP 缺节点或 community 等）。警告按字符串排序去重，不影响同一快照里的
+  其他任务。riemann 和 euler 都会记录警告。
 
 `AgentTask` 的关键字段：
 
@@ -59,6 +61,13 @@
 - `params`（非秘密参数）、`secret_envelope`（P2 起使用）；
 - `artifact`（插件脚本、sha256、签名；P1 已下发脚本，签名为 P2）；
 - `revision`：内容哈希，euler 用它判断是否需要重新应用。
+
+云目标的 `collect_key` 以 TARGET 的 `extra_option.collect_key` 为准（保存时由
+`applyProviderOptions` 从资源和 provider 推导）；只有旧数据才回退到规则 option 或
+`category` 现场推导。账号配置可以覆盖 region、credentials 和 endpoint，但不能参与
+采集器选择或 endpoint——编译器会在解封账号前固定 collect key，并删除账号注入的
+`collect_key`/`provider`/`endpoint`/`insecure`；目标自己的 endpoint 和 TLS 设置优先，账号只提供
+  region、project_id 和凭据。
 
 ## 上报
 
@@ -72,11 +81,17 @@
 
 `exec-logs[]` 的 `task_id` 用于反查模型 id，日志按模型归档；单条上限 64 KiB。
 
+CMDB 单批最多 1000 条 report。euler 按 `EnrollResponse.max_batch_items`（上限 1000）
+分块上报，聚合每块的 rejected 状态；失败块按块进入本地 spool，不会因为一个大账号
+超过单批上限而整任务失败。
+
 ## 凭据、引用与写权限
 
-- 目标与规则账号的 `secret`、`password`、`key`、`community` 以及 SNMP `nodes[].community`
-  在写入时密封存储；读取只返回 `has_secret`/`has_password`/`has_key`/`has_community`
-  标志，不返回明文。节点级 community 在读取时删除，并以 `has_community` 标记。
+- 目标与规则账号的 `secret`、`password`、`key`、`community`、`session_token` 以及 SNMP
+  `nodes[].community` 在写入时密封存储；读取只返回
+  `has_secret`/`has_password`/`has_key`/`has_community` 标志，不返回明文。节点级
+  community 在读取时删除，并以 `has_community` 标记。`session_token` 当前没有独立读取
+  标志，读取时直接剥离。
 - 凭据的“出现”与“非空”具有不同含义：字段缺省表示保持原值，显式空值表示清除。
   清除与替换都要求目标/账号的 owner 或管理员；ownerless 目标/账号按管理员对象处理。
 - `_reference` 只能指向目标同一规则下的账号；跨规则引用、指向不存在的账号或空字符串
@@ -86,7 +101,20 @@
   不会进入 host 采集器的 catch-all。`nodes[].community` 从 `params` 移除，以
   `{ip: community}` JSON 放入信封的 `node_communities`；顶层 `community` 同样只进入信封。
   当前 euler 采集器只遍历节点列表，CIDR 递归发现和 SNMPv3 尚未实现。
-- 云（HTTP）目标仍只保存参数，不下发；需要先实现云端适配器。
+- 云（HTTP）目标编译为 `kind=cloud`，并且必须显式绑定采集器。当前 euler 实现：
+  `ali.ecs`（阿里云 ECS）、`aws.ec2`（AWS EC2）、`tencent.cvm`（腾讯云 CVM）、
+  `huawei.ecs`（华为云 ECS），以及 vCenter 的 `vsphere.vm/host/cluster/network/
+  datastore/datacenter/folder/pool`；其他 `collect_key` 返回 warning，不会下发。
+- 公有云需要 `region`、access key 和 secret；华为云还需要 `project_id`。vCenter 使用
+  `host`、`account`、`password`，只接受 `https://`；可用 `insecure=true` 跳过自签名证书
+  校验（会降低 MITM 防护，仅限自签名 vCenter）。当前只提供有 vSphere Automation REST
+  端点的 8 类资源，分布式交换机/标准交换机/数据存储集群不在目录中。`endpoint` 可选（私有端点/测试，必须无
+  userinfo/query/fragment）；`session_token` 通过账户配置或 API 提供时会进入信封，
+  并用于各 provider 的临时凭证签名。控制台暂未单独提供 session token 输入框。
+- 云任务的唯一键优先使用模型中已映射的 unique 属性；没有映射时回退
+  `ali.ecs -> InstanceId`、`aws.ec2 -> instanceId`、`tencent.cvm -> InstanceId`、
+  `huawei.ecs -> id`，以及 vCenter 各资源的原生 ID 字段。采集器声明的 `collect_keys`
+  不包含该 key 时，CMDB 返回 warning 而不是把任务交给一个没有适配器的 collector。
 - 目标更新/删除要求目标 owner 或管理员；关系自动发现整组替换仅管理员。
 
 ### `extra_option` 键
@@ -94,11 +122,13 @@
 | 规则类型 | 键 |
 | --- | --- |
 | 通用 | `alias`、`_reference` |
-| HTTP / 私有云 | `category`、`key`、`secret`、`host`、`account`、`password`、`vcenterName` |
+| HTTP / 私有云 | `category`、`region`、`project_id`、`endpoint`、`insecure`、`key`、`secret`、`session_token`、`host`、`account`、`password` |
 | SNMP | `nodes[]`（`ip`、`community`、`version`）、`version`、`community`、`timeout`、`retries`、`initial_node`、`recursive_scan`、`max_depth`、`cidr[]` |
 | components | `cidr`、`ports`、`enable_cidr` |
 
 HTTP 的资源类型变更会在保存时重新推导 `collect_key`/`provider`；清空或未知资源类型会删除旧值。
+保存后如果 `provider`/`category` 与 `collect_key` 不一致，任务编译只产生 warning，不会下发；
+这能抓住规则编辑后未重新保存的旧目标。
 
 SNMP 的节点级 community 不进入 `extra_option` 之外的任何明文位置；任务信封中的
 `node_communities` 是 `{ip: community}` JSON 字符串，euler 解封后按 IP 合并回节点。
@@ -116,6 +146,12 @@ SNMP 的节点级 community 不进入 `extra_option` 之外的任何明文位置
   否则从 `ONGRID_SECRET_KEY`/`ONGRID_JWT_SECRET` 派生；同一部署重启保持同一公钥。
 - 当前只下发一个活动信任锚；轮换密钥后 euler 在重连的 `Enroll` 响应中取得新锚。
   多锚并存和证书签发/吊销在 P2 的 PKI 工作中继续。
+
+## 旧同步端点
+
+`/api/v1/cmdb/discovery/sync` 保留 cantor 的拉取形态，仍会对显式绑定的 HTTP 目标返回
+解密后的 key/secret（旧 agent 依赖它认证）。它不属于本 Agent API，计划随旧 agent 下线；
+新采集链路只能使用 `/agent/**` 和秘密信封。
 
 ## 健康与交接
 

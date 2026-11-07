@@ -733,7 +733,16 @@ function TargetEditor({
     // The non-secret extra_option is sent whole; credentials are sent only
     // when the operator typed a replacement. The backend merges absent
     // credentials with the stored ciphertext.
-    const extraForSave: Record<string, unknown> = { ...extra, alias: alias.trim() };
+    const extraForSave: Record<string, unknown> = { ...extra };
+    // An empty region/project_id is absence, not a value: sending "" would
+    // create a permanent task warning and could shadow an account-provided
+    // value.
+    for (const key of ['region', 'project_id'] as const) {
+      if (typeof extraForSave[key] === 'string' && (extraForSave[key] as string).trim() === '') {
+        delete extraForSave[key];
+      }
+    }
+    extraForSave.alias = alias.trim();
     for (const key of ['key', 'secret', 'password', 'community'] as const) {
       if (secrets[key].trim()) extraForSave[key] = secrets[key].trim();
     }

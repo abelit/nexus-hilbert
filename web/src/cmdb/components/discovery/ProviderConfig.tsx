@@ -61,7 +61,12 @@ export function ProviderConfig({
   onManageAccounts(): void;
 }) {
   const { tr } = useI18n();
-  const privateCloud = ruleCategory(rule) === 'private_cloud' || ruleProviderKey(rule) === 'vcenter';
+  const providerKey = ruleProviderKey(rule);
+  const privateCloud = providerKey === 'vcenter';
+  // KVM is also in the catalogue's private_cloud bucket, but it is not a
+  // vCenter host/account/password provider. Do not render the wrong form.
+  const unsupportedPrivateCloud = ruleCategory(rule) === 'private_cloud' && !privateCloud;
+  const isHuawei = providerKey === 'huaweicloud';
   const isHTTP = rule.type === 'http';
   const isSNMP = rule.type === 'snmp';
   const isComponents = rule.type === 'components';
@@ -122,8 +127,8 @@ export function ProviderConfig({
           <Info size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
           <span>
             {tr(
-              '当前阶段保存采集参数；云平台采集器尚未实现，目标不会下发执行。',
-              'Collection settings are saved here; cloud adapters are not implemented yet, so the target is not dispatched.',
+              '当前支持阿里云 ECS、腾讯云 CVM、华为云 ECS、AWS EC2，以及 vCenter 的虚拟机/主机/集群/网络/数据存储/数据中心/文件夹/资源池；未列出的资源类型不会下发。',
+              'Supported today: Aliyun ECS, Tencent CVM, Huawei ECS, AWS EC2, and vCenter VM/host/cluster/network/datastore/datacenter/folder/resource pool. Other resource kinds are not dispatched.',
             )}
           </span>
         </div>
@@ -205,7 +210,15 @@ export function ProviderConfig({
             </p>
           </div>
 
-          {privateCloud ? (
+          {unsupportedPrivateCloud ? (
+            <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-600 dark:text-amber-300">
+              {tr(
+                '该私有云适配器尚未实现，目标不会下发。',
+                'This private-cloud adapter is not implemented yet; the target will not be dispatched.',
+              )}
+            </p>
+          ) : privateCloud ? (
+            <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor={`cmdb-provider-host-${rule.id}`}>{tr('地址', 'Host')}</Label>
@@ -241,43 +254,90 @@ export function ProviderConfig({
                   className="mt-1 w-full"
                 />
               </div>
-              <div>
-                <Label htmlFor={`cmdb-provider-vcenter-name-${rule.id}`}>{tr('vCenter 名称', 'vCenter name')}</Label>
-                <Input
-                  id={`cmdb-provider-vcenter-name-${rule.id}`}
-                  value={scalarText(extra.vcenterName)}
-                  onChange={(event) => onExtraChange({ vcenterName: event.target.value })}
-                  className="mt-1 w-full"
-                />
-              </div>
             </div>
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border bg-card/40 px-3 py-2 text-xs text-text-muted">
+              <span>
+                {tr('跳过 TLS 证书校验', 'Skip TLS verification')}
+                <span className="ms-2 text-[11px] text-text-faint">
+                  {tr('仅用于自签名 vCenter', 'Self-signed vCenter only')}
+                </span>
+              </span>
+              <Switch
+                aria-label={tr('跳过 TLS 证书校验', 'Skip TLS verification')}
+                checked={boolValue(extra.insecure, false)}
+                onCheckedChange={(value) => onExtraChange({ insecure: value })}
+              />
+            </label>
+            <p className="text-[11px] leading-5 text-text-faint">
+              {tr(
+                '跳过校验会降低中间人防护；仅当 vCenter 使用自签名证书时开启。',
+                'Skipping verification weakens man-in-the-middle protection; enable it only for a self-signed vCenter.',
+              )}
+            </p>
+            </>
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <Label htmlFor={`cmdb-provider-key-${rule.id}`}>{tr('Access key', 'Access key')}</Label>
-                <Input
-                  id={`cmdb-provider-key-${rule.id}`}
-                  value={secrets.key}
-                  onChange={(event) => onSecretsChange({ key: event.target.value })}
-                  disabled={usingReference}
-                  placeholder={stored.hasKey ? tr('已设置，留空保持原值', 'Stored; leave blank to keep') : ''}
-                  className="mt-1 w-full font-mono"
-                />
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <Label htmlFor={`cmdb-provider-region-${rule.id}`}>{tr('区域', 'Region')}</Label>
+                  <Input
+                    id={`cmdb-provider-region-${rule.id}`}
+                    value={scalarText(extra.region)}
+                    onChange={(event) => onExtraChange({ region: event.target.value })}
+                    placeholder="cn-hangzhou / us-east-1"
+                    className="mt-1 w-full font-mono"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor={`cmdb-provider-key-${rule.id}`}>{tr('Access key', 'Access key')}</Label>
+                  <Input
+                    id={`cmdb-provider-key-${rule.id}`}
+                    value={secrets.key}
+                    onChange={(event) => onSecretsChange({ key: event.target.value })}
+                    disabled={usingReference}
+                    placeholder={stored.hasKey ? tr('已设置，留空保持原值', 'Stored; leave blank to keep') : ''}
+                    className="mt-1 w-full font-mono"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor={`cmdb-provider-secret-${rule.id}`}>{tr('Secret', 'Secret')}</Label>
+                  <Input
+                    id={`cmdb-provider-secret-${rule.id}`}
+                    type="password"
+                    autoComplete="new-password"
+                    value={secrets.secret}
+                    onChange={(event) => onSecretsChange({ secret: event.target.value })}
+                    disabled={usingReference}
+                    placeholder={stored.hasSecret ? tr('已设置，留空保持原值', 'Stored; leave blank to keep') : ''}
+                    className="mt-1 w-full"
+                  />
+                </div>
               </div>
-              <div>
-                <Label htmlFor={`cmdb-provider-secret-${rule.id}`}>{tr('Secret', 'Secret')}</Label>
-                <Input
-                  id={`cmdb-provider-secret-${rule.id}`}
-                  type="password"
-                  autoComplete="new-password"
-                  value={secrets.secret}
-                  onChange={(event) => onSecretsChange({ secret: event.target.value })}
-                  disabled={usingReference}
-                  placeholder={stored.hasSecret ? tr('已设置，留空保持原值', 'Stored; leave blank to keep') : ''}
-                  className="mt-1 w-full"
-                />
-              </div>
-            </div>
+              {isHuawei && (
+                <div>
+                  <Label htmlFor={`cmdb-provider-project-${rule.id}`}>{tr('Project ID', 'Project ID')}</Label>
+                  <Input
+                    id={`cmdb-provider-project-${rule.id}`}
+                    value={scalarText(extra.project_id)}
+                    onChange={(event) => onExtraChange({ project_id: event.target.value })}
+                    placeholder="项目 ID"
+                    className="mt-1 w-full font-mono"
+                  />
+                  <p className="mt-1 text-[11px] text-text-faint">
+                    {tr(
+                      '华为云 ECS 的 API 路径需要 project_id；账号配置中的值会优先。',
+                      'Huawei ECS puts project_id in the API path; an account value takes precedence.',
+                    )}
+                  </p>
+                </div>
+              )}
+              <p className="text-[11px] leading-5 text-text-faint">
+                {tr(
+                  '区域必填；账号引用中的 region 会优先于这里。',
+                  'Region is required; a region in the referenced account takes precedence.',
+                )}
+              </p>
+            </>
           )}
         </>
       )}

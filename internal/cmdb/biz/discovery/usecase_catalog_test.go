@@ -35,8 +35,13 @@ func TestCatalogueCoversCantorsProviders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The five templates cantor ships, plus nothing invented.
-	want := []string{"aliyun_ecs", "aws_ec2", "huaweicloud_ecs", "net_device", "tencent_cvm"}
+	// The five templates cantor ships, plus the vSphere field lists this port
+	// adds because cantor references those template paths without shipping them.
+	want := []string{
+		"aliyun_ecs", "aws_ec2", "huaweicloud_ecs", "net_device", "tencent_cvm",
+		"vsphere_cluster", "vsphere_datacenter", "vsphere_datastore", "vsphere_folder",
+		"vsphere_host", "vsphere_network", "vsphere_pool", "vsphere_vm",
+	}
 	if len(names) != len(want) {
 		t.Fatalf("extracted field lists = %v, want %v", names, want)
 	}

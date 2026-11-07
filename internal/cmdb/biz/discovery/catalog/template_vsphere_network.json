@@ -1,0 +1,5 @@
+[
+ {"name":"network","type":"string","desc":"网络 ID","example":"network-123"},
+ {"name":"name","type":"string","desc":"网络名称","example":"VM Network"},
+ {"name":"type","type":"string","desc":"网络类型","example":"STANDARD_PORTGROUP"}
+]

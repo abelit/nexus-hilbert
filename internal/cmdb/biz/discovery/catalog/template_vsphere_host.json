@@ -1,0 +1,6 @@
+[
+ {"name":"host","type":"string","desc":"主机 ID","example":"host-123"},
+ {"name":"name","type":"string","desc":"主机名称","example":"esxi-01"},
+ {"name":"connection_state","type":"string","desc":"连接状态","example":"CONNECTED"},
+ {"name":"power_state","type":"string","desc":"电源状态","example":"POWERED_ON"}
+]

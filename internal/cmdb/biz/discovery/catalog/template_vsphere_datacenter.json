@@ -1,0 +1,4 @@
+[
+ {"name":"datacenter","type":"string","desc":"数据中心 ID","example":"datacenter-1"},
+ {"name":"name","type":"string","desc":"数据中心名称","example":"dc-01"}
+]

@@ -43,10 +43,19 @@ const (
 	// AccountCommunityKey is an SNMP community string. Like `key`, it is
 	// credential material even though it is short enough to look harmless.
 	AccountCommunityKey = "community"
+
+	// AccountSessionTokenKey is reserved for temporary cloud credentials. The
+	// first cloud adapters use long-lived access keys, but imported data may
+	// already carry a token; sealing and stripping it here keeps that future
+	// field from becoming a plaintext read path.
+	AccountSessionTokenKey = "session_token"
 )
 
 // credentialKeys are the entries sealed at rest, in a stable order.
-var credentialKeys = []string{AccountPasswordKey, AccountSecretKey, AccountKeyKey, AccountCommunityKey}
+var credentialKeys = []string{
+	AccountPasswordKey, AccountSecretKey, AccountKeyKey, AccountCommunityKey,
+	AccountSessionTokenKey,
+}
 
 // Account is one credential as the API presents it.
 //
@@ -264,6 +273,10 @@ func renderAccount(row discoverymodel.Account) Account {
 			view.HasKey = isSet(v)
 		case AccountCommunityKey:
 			view.HasCommunity = isSet(v)
+		case AccountSessionTokenKey:
+			// Reserved for temporary cloud credentials; not editable yet, so it
+			// is stripped without a flag rather than leaked through the default
+			// branch.
 		case "nodes":
 			view.Config[k] = sanitizeNodesForRead(v)
 		default:
