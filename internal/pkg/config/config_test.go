@@ -395,3 +395,23 @@ func TestLoadDBPool(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadCMDBAPIURL(t *testing.T) {
+	t.Setenv("ONGRID_CMDB_API_URL", "http://ongrid-cmdb:8082")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CMDB.APIURL != "http://ongrid-cmdb:8082" {
+		t.Fatalf("CMDB.APIURL = %q, want http://ongrid-cmdb:8082", cfg.CMDB.APIURL)
+	}
+
+	t.Setenv("ONGRID_CMDB_API_URL", "")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CMDB.APIURL != "" {
+		t.Fatalf("CMDB.APIURL = %q, want empty", cfg.CMDB.APIURL)
+	}
+}
