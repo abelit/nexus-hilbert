@@ -205,6 +205,41 @@ func TestRecordSyncHistoriesUpsertsPerAgentPair(t *testing.T) {
 // The rows say "this agent collects this target"; after the binding moves that
 // is no longer what the target means, and leaving them would show an agent
 // collecting a target it will never be handed again.
+func TestUpdateTargetPersistsSerializedFields(t *testing.T) {
+	repo := newRepo(t)
+	ctx := context.Background()
+	ruleID := ruleFor(t, repo, "插件采集", "agent")
+	target, err := repo.CreateTarget(ctx, discoverybiz.TargetWrite{
+		TypeID: 7, AdrID: idp(ruleID), Enabled: boolp(true),
+		Attributes:  map[string]any{"ip": "ip"},
+		ExtraOption: map[string]any{"region": "cn-hangzhou"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A MAP UPDATE USED TO BYPASS THE JSON SERIALIZERS on these two columns and
+	// fail with "unsupported type map[string]interface {}". The partial struct
+	// update must still persist both after the fix.
+	if _, err := repo.UpdateTarget(ctx, target.ID, discoverybiz.TargetWrite{
+		SetAttributes:  true,
+		Attributes:     map[string]any{"ip": "ip", "uuid": "uuid"},
+		SetExtraOption: true,
+		ExtraOption:    map[string]any{"region": "cn-shanghai"},
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	after, err := repo.LoadTarget(ctx, target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Attributes["uuid"] != "uuid" || after.ExtraOption["region"] != "cn-shanghai" {
+		t.Fatalf("serialized fields were not persisted: attributes=%+v extra=%+v",
+			after.Attributes, after.ExtraOption)
+	}
+}
+
 func TestUpdateTargetClearsTheLogWhenTheBindingMoves(t *testing.T) {
 	repo := newRepo(t)
 	ctx := context.Background()

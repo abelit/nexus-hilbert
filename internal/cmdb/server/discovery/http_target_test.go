@@ -39,6 +39,7 @@ func TestTargetRoutesAreRegistered(t *testing.T) {
 		{http.MethodDelete, "/v1/cmdb/discovery/targets/55", "/v1/cmdb/discovery/targets/{id}"},
 		{http.MethodPost, "/v1/cmdb/discovery/targets/55/test", "/v1/cmdb/discovery/targets/{id}/test"},
 		{http.MethodGet, "/v1/cmdb/discovery/targets/55/sync-histories", "/v1/cmdb/discovery/targets/{id}/sync-histories"},
+		{http.MethodGet, "/v1/cmdb/discovery/targets/55/health", "/v1/cmdb/discovery/targets/{id}/health"},
 
 		// The two that must win over a parameter.
 		{http.MethodPost, "/v1/cmdb/discovery/rules/builtin", "/v1/cmdb/discovery/rules/builtin"},

@@ -155,6 +155,35 @@ type SyncHistoryPage struct {
 	PageSize int           `json:"page_size"`
 }
 
+// TargetHealth is one target's liveness view.
+//
+// IT IS READ-ONLY AND DERIVED. `last_handover_at` comes from the task handover
+// log (written when a task is actually sent), while `online` comes from the
+// collector registry's heartbeat. Keeping the two apart is what makes a
+// collector that is alive but has not been reconfigured distinguishable from
+// one that stopped syncing.
+type TargetHealth struct {
+	TargetID            model.ID            `json:"target_id"`
+	Enabled             bool                `json:"enabled"`
+	RuleType            string              `json:"rule_type,omitempty"`
+	CheckedAt           string              `json:"checked_at,omitempty"`
+	OnlineWindowSeconds int                 `json:"online_window_seconds"`
+	Agents              []TargetHealthAgent `json:"agents"`
+	Warnings            []string            `json:"warnings,omitempty"`
+}
+
+// TargetHealthAgent is one collector's view of a target.
+type TargetHealthAgent struct {
+	EulerID        string `json:"euler_id"`
+	EulerName      string `json:"euler_name,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Registered     bool   `json:"registered"`
+	Eligible       bool   `json:"eligible"`
+	Online         bool   `json:"online"`
+	LastSeenAt     string `json:"last_seen_at,omitempty"`
+	LastHandoverAt string `json:"last_handover_at,omitempty"`
+}
+
 // Bounds on the handover log.
 //
 // THE CONSOLE ASKS FOR TEN THOUSAND, and the honest ceiling is the number of
@@ -442,6 +471,143 @@ func (u *Usecase) ListSyncHistories(ctx context.Context, id model.ID, page, size
 		out.Items = append(out.Items, renderSyncHistory(row))
 	}
 	return out, nil
+}
+
+// DefaultTargetOnlineWindow is how long a collector may stay silent before the
+// target health view calls it offline. Collectors heartbeat every 30 seconds;
+// ten minutes tolerates a few missed beats without hiding a stopped process.
+const DefaultTargetOnlineWindow = 10 * time.Minute
+
+// TargetHealth answers "who should collect this target, who is alive, and when
+// was the task last handed to them".
+//
+// IT DOES NOT TOUCH THE COLLECTORS. The answer is derived from the registry's
+// heartbeat and the handover log; this is not a probe and never starts a
+// collection. That is deliberate: the console's health check must not become a
+// second execution path beside the scheduler.
+func (u *Usecase) TargetHealth(ctx context.Context, id model.ID) (*TargetHealth, error) {
+	if u.repo == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	target, err := u.repo.LoadTarget(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, fmt.Errorf("%w: %d", ErrTargetNotFound, id)
+	}
+	var rule *discoverymodel.Rule
+	if target.AdrID != nil && *target.AdrID != 0 {
+		rule, err = u.repo.LoadRule(ctx, *target.AdrID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	now := u.Now()
+	view := &TargetHealth{
+		TargetID:            id,
+		Enabled:             target.Enabled,
+		CheckedAt:           cmdbTime(now),
+		OnlineWindowSeconds: int(DefaultTargetOnlineWindow.Seconds()),
+		Agents:              []TargetHealthAgent{},
+	}
+	if rule != nil {
+		view.RuleType = derefString(rule.Type)
+	} else {
+		view.Warnings = append(view.Warnings, "the target's discovery rule is missing")
+	}
+	if rule != nil && (derefString(rule.Type) == discoverymodel.TypeHTTP || derefString(rule.Type) == discoverymodel.TypeSNMP) &&
+		strings.TrimSpace(derefString(target.AgentID)) == "" {
+		view.Warnings = append(view.Warnings, "cloud and SNMP targets need a named collector")
+	}
+
+	// The handover log is newest first, so the first row per collector is its
+	// latest handover.
+	histories, _, err := u.repo.ListSyncHistories(ctx, id, MaxSyncHistoryPageSize, 0)
+	if err != nil {
+		return nil, err
+	}
+	lastHandover := make(map[string]time.Time, len(histories))
+	for _, row := range histories {
+		agentID := strings.TrimSpace(derefString(row.OneagentID))
+		if agentID == "" || row.SyncAt == nil {
+			continue
+		}
+		if _, exists := lastHandover[agentID]; !exists {
+			lastHandover[agentID] = *row.SyncAt
+		}
+	}
+
+	if u.agents == nil {
+		return view, nil
+	}
+	eulers, err := u.agents.ListEulers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, euler := range eulers {
+		if euler.EulerID == "" {
+			continue
+		}
+		eligible := false
+		if rule != nil {
+			eligible, err = u.targetAppliesToEuler(ctx, *target, *rule, euler)
+			if err != nil {
+				view.Warnings = append(view.Warnings,
+					fmt.Sprintf("could not evaluate collector %s: %v", euler.EulerID, err))
+				continue
+			}
+		}
+		handoverAt, hasHandover := lastHandover[euler.EulerID]
+		if !eligible && !hasHandover {
+			continue
+		}
+		seen[euler.EulerID] = true
+		view.Agents = append(view.Agents, renderTargetHealthAgent(euler, eligible, hasHandover, handoverAt, now))
+	}
+
+	// An explicitly bound collector may not have registered yet. Reporting it
+	// is more useful than showing an empty list that looks like no binding.
+	explicit := strings.TrimSpace(derefString(target.AgentID))
+	if explicit != "" && !seen[explicit] {
+		handoverAt, hasHandover := lastHandover[explicit]
+		view.Agents = append(view.Agents, TargetHealthAgent{
+			EulerID: explicit, Registered: false, Eligible: true, Online: false,
+			LastHandoverAt: formatOptionalTime(handoverAt, hasHandover),
+		})
+	}
+
+	sort.Slice(view.Agents, func(i, j int) bool {
+		left, right := view.Agents[i], view.Agents[j]
+		if left.EulerName != right.EulerName {
+			return left.EulerName < right.EulerName
+		}
+		return left.EulerID < right.EulerID
+	})
+	return view, nil
+}
+
+func renderTargetHealthAgent(euler discoverymodel.Euler, eligible, hasHandover bool, handoverAt, now time.Time) TargetHealthAgent {
+	online := euler.Status != "revoked" && euler.LastSeenAt != nil &&
+		now.Sub(*euler.LastSeenAt) <= DefaultTargetOnlineWindow
+	view := TargetHealthAgent{
+		EulerID: euler.EulerID, EulerName: euler.Hostname, Status: euler.Status,
+		Registered: true, Eligible: eligible, Online: online,
+		LastHandoverAt: formatOptionalTime(handoverAt, hasHandover),
+	}
+	if euler.LastSeenAt != nil {
+		view.LastSeenAt = cmdbTime(*euler.LastSeenAt)
+	}
+	return view
+}
+
+func formatOptionalTime(at time.Time, present bool) string {
+	if !present {
+		return ""
+	}
+	return cmdbTime(at)
 }
 
 // EnsureBuiltinRules creates the discovery rules the product ships with.

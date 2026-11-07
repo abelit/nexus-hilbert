@@ -720,13 +720,24 @@ describe('the model definition', () => {
 });
 
 describe('the auto-discovery tab', () => {
-  it('links to the discovery configuration and the pool', async () => {
+  it('opens the model-level auto-discovery editor', async () => {
     baseHandlers();
+    server.use(
+      http.get('/api/v1/cmdb/discovery/rules', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/discovery/ci-types/1/targets', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/discovery/ci-types/1/discoverable-attributes', () => HttpResponse.json([])),
+      http.get('/api/v1/cmdb/discovery/ci-types/1/target-relations', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/ci-types/1/relation-parents', () => HttpResponse.json({ items: [], total: 0 })),
+    );
     renderPage();
 
     await userEvent.click(await screen.findByRole('tab', { name: '自动发现' }));
-    expect(await screen.findByRole('link', { name: '打开自动发现配置' })).toHaveAttribute('href', '/cmdb/discovery');
-    expect(screen.getByRole('link', { name: '打开发现池' })).toHaveAttribute('href', '/cmdb/adc');
+    expect(await screen.findByRole('tab', { name: '属性自动发现' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '关系自动发现' })).toBeInTheDocument();
+    expect(await screen.findByText('还没有可用的发现规则')).toBeInTheDocument();
   });
 });
 

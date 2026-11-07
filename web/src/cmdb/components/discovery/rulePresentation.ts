@@ -117,6 +117,17 @@ export function ruleProviderKey(rule: Rule): string {
 }
 
 /**
+ * The collector key a rule carries.
+ *
+ * A components rule stores the key its adapter answers to, which is not always
+ * the provider name; a cloud rule's `collect_key` is derived server-side from
+ * the chosen resource, so the stored fallback is the provider key.
+ */
+export function ruleCollectKey(rule: Rule): string {
+  return optionText(rule, 'collect_key') || ruleProviderKey(rule);
+}
+
+/**
  * The providers whose account takes a known shape.
  *
  * CANTOR SHOWED A KEY/SECRET FORM FOR THE FOUR PUBLIC CLOUDS and a

@@ -76,7 +76,8 @@ func buildHandlers(db *gorm.DB, log *slog.Logger, fileOpts cmdbfilebiz.Options) 
 		// importing each other's implementations.
 		WithPool(discoveryRepo).
 		WithWriter(cmdbcibiz.NewDiscoveryWriter(ciUC)).
-		WithAttributes(cmdbcitypebiz.NewDiscoveryAttributeResolver(citypeUC))
+		WithAttributes(cmdbcitypebiz.NewDiscoveryAttributeResolver(citypeUC)).
+		WithAgents(discoveryRepo)
 
 	historyUC := cmdbhistorybiz.NewUsecase(historyRepo).
 		WithTypeNames(cmdbcitypebiz.NewHistoryTypeNames(citypeUC)).
@@ -143,6 +144,12 @@ func newRouter(db *gorm.DB, signer *auth.Signer, h cmdbserver.Handlers, version 
 		h.File.RegisterPublic(mux)
 	}
 	mux.Route("/api", func(api chi.Router) {
+		// The machine realm is deliberately outside auth.Middleware: a riemann
+		// service token is not a user JWT and must not inherit Role/IsSuperuser.
+		api.Route("/v1/cmdb/discovery/agent", func(agent chi.Router) {
+			agent.Use(h.Discovery.AgentMiddleware())
+			h.Discovery.RegisterAgent(agent)
+		})
 		api.Group(func(protected chi.Router) {
 			protected.Use(auth.Middleware(signer))
 			cmdbserver.RegisterAll(protected, h)

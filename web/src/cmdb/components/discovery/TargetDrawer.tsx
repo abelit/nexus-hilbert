@@ -25,6 +25,7 @@ import {
   type TargetTypeCount,
 } from '../../api/discovery';
 import { listTypeAttributes, type TypeAttribute } from '../../api/citype';
+import { ruleCollectKey, ruleProviderKey } from './rulePresentation';
 import { Drawer } from '../Drawer';
 
 // The target form.
@@ -48,20 +49,6 @@ function modeOf(target: Target | null): Mode {
   return 'all';
 }
 
-function providerENOf(rule: Rule): string {
-  const en = rule.option?.en;
-  return typeof en === 'string' && en ? en : rule.name;
-}
-
-function collectKeyOf(rule: Rule): string {
-  const option = rule.option ?? {};
-  for (const key of ['collect_key', 'en']) {
-    const value = option[key];
-    if (typeof value === 'string' && value) return value;
-  }
-  return rule.name;
-}
-
 function selectedCategoryOf(target: Target | null): string {
   const value = target?.extra_option?.category;
   return typeof value === 'string' ? value : '';
@@ -78,11 +65,14 @@ function mappingOf(target: Target | null): Record<string, string> {
 export function TargetDrawer({
   type,
   target,
+  initialRuleID,
   onClose,
   onSaved,
 }: {
   type: TargetTypeCount;
   target: Target | null;
+  /** Pre-selects the rule a previous step chose; ignored when editing a target. */
+  initialRuleID?: number;
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
 }) {
@@ -96,7 +86,9 @@ export function TargetDrawer({
 
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [ruleID, setRuleID] = useState(target?.adr_id ? String(target.adr_id) : '');
+  const [ruleID, setRuleID] = useState(
+    target?.adr_id ? String(target.adr_id) : initialRuleID != null ? String(initialRuleID) : '',
+  );
   const [category, setCategory] = useState(selectedCategoryOf(target));
   const [mode, setMode] = useState<Mode>(modeOf(target));
   const [agentID, setAgentID] = useState(target?.agent_id ?? '');
@@ -126,7 +118,7 @@ export function TargetDrawer({
         setRules(gotRules);
         setAttributes(gotAttributes.attributes ?? []);
         setExistingKeys(gotKeys);
-        if (!target && gotRules.length > 0) {
+        if (!target && initialRuleID == null && gotRules.length > 0) {
           setRuleID((current) => current || String(gotRules[0].id));
         }
       })
@@ -141,7 +133,7 @@ export function TargetDrawer({
     return () => {
       live = false;
     };
-  }, [type.type_id, target, tr]);
+  }, [initialRuleID, type.type_id, target, tr]);
 
   const selectedRule = useMemo(
     () => rules.find((rule) => String(rule.id) === ruleID) ?? null,
@@ -172,11 +164,11 @@ export function TargetDrawer({
         .then((fields) => apply(fields.map((field) => field.name)))
         .catch(fail);
     } else if (selectedRule.type === 'components') {
-      void listComponentAttributes(collectKeyOf(selectedRule))
+      void listComponentAttributes(ruleCollectKey(selectedRule))
         .then((fields) => apply(fields.map((field) => field.name)))
         .catch(fail);
     } else if (selectedRule.type === 'http' && category) {
-      void listHTTPAttributes(providerENOf(selectedRule), category)
+      void listHTTPAttributes(ruleProviderKey(selectedRule), category)
         .then((fields) => apply(fields.map((field) => field.name)))
         .catch(fail);
     } else {
@@ -229,6 +221,10 @@ export function TargetDrawer({
     }
     if (mode === 'all' && !isAdmin) {
       setErr(tr('只有管理员可以创建对所有采集器生效的目标', 'Only an administrator may target every collector'));
+      return;
+    }
+    if (enabled && !cron.trim()) {
+      setErr(tr('启用目标需要填写 Cron 表达式', 'An enabled target needs a cron expression'));
       return;
     }
 

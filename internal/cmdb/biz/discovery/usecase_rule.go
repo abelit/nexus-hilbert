@@ -106,6 +106,17 @@ func (u *Usecase) UpdateRule(ctx context.Context, ref string, in RuleInput, acto
 	if existing == nil {
 		return nil, fmt.Errorf("%w: %s", ErrRuleNotFound, ref)
 	}
+	// A PLUGIN RULE CARRIES CODE, AND A BUILT-IN RULE IS SHARED PROVIDER DATA.
+	// Checking only the incoming `is_plugin` let a non-admin update an existing
+	// plugin rule's script by omitting that field; the rule's stored posture is
+	// what decides the authorization. An is_inner rule is shipped with the
+	// product and is likewise administrative.
+	if existing.IsPlugin && !actor.IsAdmin {
+		return nil, fmt.Errorf("%w: a plugin rule carries code, so it is an administrative write", errs.ErrForbidden)
+	}
+	if existing.IsInner && !actor.IsAdmin {
+		return nil, fmt.Errorf("%w: a built-in rule is an administrative write", errs.ErrForbidden)
+	}
 
 	write, err := u.ruleWrite(in, actor, true)
 	if err != nil {
@@ -150,6 +161,9 @@ func (u *Usecase) DeleteRule(ctx context.Context, ref string, actor Actor) error
 	}
 	if existing.IsPlugin && !actor.IsAdmin {
 		return fmt.Errorf("%w: a plugin rule", errs.ErrForbidden)
+	}
+	if existing.IsInner && !actor.IsAdmin {
+		return fmt.Errorf("%w: a built-in rule", errs.ErrForbidden)
 	}
 	return u.repo.DeleteRule(ctx, existing.ID)
 }

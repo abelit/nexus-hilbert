@@ -57,6 +57,10 @@ type Usecase struct {
 	// needs to keep its columns to the mapped subset.
 	attrs AttributeResolver
 
+	// agents is the machine side: principals, registered collectors, task ACKs
+	// and report receipts. Nillable so the console-only tests keep working.
+	agents AgentRepo
+
 	// Now is the clock, injectable so a test can reason about timestamps
 	// without sleeping.
 	Now func() time.Time

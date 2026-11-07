@@ -54,6 +54,13 @@ type PoolEntry struct {
 	// either.
 	AcceptBy   *string    `gorm:"column:accept_by;size:64;index:idx_c_ad_ci_accept_by"`
 	AcceptTime *time.Time `gorm:"column:accept_time"`
+
+	// LastSeenAt is refreshed on every report; StaleAt is set when the
+	// collector reports the resource gone (or a sweep decides it is old). A
+	// stale row is still a sighting: acceptance and the CI it became are not
+	// touched.
+	LastSeenAt *time.Time `gorm:"column:last_seen_at"`
+	StaleAt    *time.Time `gorm:"column:stale_at"`
 }
 
 func (PoolEntry) TableName() string { return "c_ad_ci" }

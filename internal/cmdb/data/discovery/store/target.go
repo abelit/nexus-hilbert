@@ -119,47 +119,70 @@ func (r *Repo) UpdateTarget(ctx context.Context, id model.ID, in discoverybiz.Ta
 			return err
 		}
 
-		updates := map[string]any{}
+		// THE BINDING CHECK RUNS BEFORE row IS MUTATED. A rebinding must clear
+		// the handover log, and comparing the new values with themselves would
+		// always say nothing moved.
+		bindingMoved := bindingChanged(row, in)
+
+		// A STRUCT UPDATE, NOT A MAP, because `attributes` and `extra_option`
+		// carry GORM JSON serializers. A map update bypasses the serializer and
+		// hands the driver a Go map, which fails with "unsupported type
+		// map[string]interface {}". Selecting the assigned columns keeps the
+		// write partial while still letting GORM serialize each field.
+		columns := make([]string, 0, 10)
 		if in.TypeID != 0 {
-			updates["type_id"] = in.TypeID
+			tid := in.TypeID
+			row.TypeID = &tid
+			columns = append(columns, "type_id")
 		}
 		if in.AdrID != nil {
-			updates["adr_id"] = *in.AdrID
+			row.AdrID = in.AdrID
+			columns = append(columns, "adr_id")
 		}
 		if in.SetAttributes {
-			updates["attributes"] = in.Attributes
+			row.Attributes = in.Attributes
+			columns = append(columns, "attributes")
 		}
 		if in.AutoAccept != nil {
-			updates["auto_accept"] = *in.AutoAccept
+			row.AutoAccept = *in.AutoAccept
+			columns = append(columns, "auto_accept")
 		}
 		if in.AgentID != nil {
-			updates["agent_id"] = *in.AgentID
+			row.AgentID = in.AgentID
+			columns = append(columns, "agent_id")
 		}
 		if in.QueryExpr != nil {
-			updates["query_expr"] = *in.QueryExpr
+			row.QueryExpr = in.QueryExpr
+			columns = append(columns, "query_expr")
 		}
 		if in.Interval != nil {
-			updates["interval"] = *in.Interval
+			row.Interval = in.Interval
+			columns = append(columns, "interval")
 		}
 		if in.Cron != nil {
-			updates["cron"] = *in.Cron
+			row.Cron = in.Cron
+			columns = append(columns, "cron")
 		}
 		if in.SetExtraOption {
-			updates["extra_option"] = in.ExtraOption
+			row.ExtraOption = in.ExtraOption
+			columns = append(columns, "extra_option")
 		}
 		if in.Enabled != nil {
-			updates["enabled"] = *in.Enabled
+			row.Enabled = *in.Enabled
+			columns = append(columns, "enabled")
 		}
 		if in.UID != 0 {
-			updates["uid"] = in.UID
+			uid := in.UID
+			row.UID = &uid
+			columns = append(columns, "uid")
 		}
-		if len(updates) > 0 {
-			if err := tx.Model(&discoverymodel.Target{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		if len(columns) > 0 {
+			if err := tx.Model(&row).Where("id = ?", id).Select(columns).Updates(&row).Error; err != nil {
 				return err
 			}
 		}
 
-		if bindingChanged(row, in) {
+		if bindingMoved {
 			if err := tx.Where("adt_id = ?", id).Delete(&discoverymodel.RuleSyncHistory{}).Error; err != nil {
 				return err
 			}

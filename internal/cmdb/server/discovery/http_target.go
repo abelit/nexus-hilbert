@@ -27,6 +27,7 @@ import (
 //	DELETE /v1/cmdb/discovery/targets/{id}                         (any authed)
 //	POST   /v1/cmdb/discovery/targets/{id}/test                    (any authed) — 501
 //	GET    /v1/cmdb/discovery/targets/{id}/sync-histories          (any authed)
+//	GET    /v1/cmdb/discovery/targets/{id}/health                  (any authed)
 //	POST   /v1/cmdb/discovery/rules/builtin                        (admin)
 //	GET    /v1/cmdb/discovery/sync                                 (admin) — the agent's poll
 //
@@ -56,6 +57,7 @@ func (h *Handler) registerTargets(r chi.Router) {
 	r.Delete("/v1/cmdb/discovery/targets/{id}", h.deleteTarget)
 	r.Post("/v1/cmdb/discovery/targets/{id}/test", h.testTarget)
 	r.Get("/v1/cmdb/discovery/targets/{id}/sync-histories", h.listSyncHistories)
+	r.Get("/v1/cmdb/discovery/targets/{id}/health", h.targetHealth)
 
 	r.Post("/v1/cmdb/discovery/rules/builtin", h.ensureBuiltinRules)
 	r.Get("/v1/cmdb/discovery/sync", h.sync)
@@ -279,6 +281,23 @@ func (h *Handler) listSyncHistories(w http.ResponseWriter, r *http.Request) {
 	}
 	page, size := pageParams(r)
 	got, err := h.uc.ListSyncHistories(r.Context(), id, page, size)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+// targetHealth reports which collectors should run a target, which are alive,
+// and when the task was last handed over. It is a read-only derived view: it
+// never dispatches a collection.
+func (h *Handler) targetHealth(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	got, err := h.uc.TargetHealth(r.Context(), id)
 	if err != nil {
 		writeErr(w, err)
 		return

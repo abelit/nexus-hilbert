@@ -44,6 +44,7 @@ import { AttributeForm } from '../components/AttributeForm';
 import { CMDBIcon } from '../components/CMDBIcon';
 import { ModelAttributesPanel } from '../components/ModelAttributesPanel';
 import { ModelDefinitionDrawer } from '../components/ModelDefinitionDrawer';
+import { ModelAutoDiscovery } from '../components/discovery/ModelAutoDiscovery';
 import { ModelForm } from './Models';
 import { ConstraintsTab, RelationsTab, TriggersTab } from '../components/ModelRuleTabs';
 import { useToast } from '../components/Toast';
@@ -330,31 +331,7 @@ export default function ModelDetailPage() {
           </TabsContent>
 
           <TabsContent value="discovery">
-            <Card>
-              <div className="flex flex-col gap-2 p-4">
-                <h2 className="text-sm font-medium text-text">{tr('自动发现', 'Auto discovery')}</h2>
-                <p className="text-xs text-text-muted">
-                  {tr(
-                    '规则、目标、账号和发现池都在「自动发现」与「自动发现池」页面维护。这里是模型的只读入口。',
-                    'Rules, targets, accounts and the pool are maintained on the Auto discovery and Discovery pool pages. This tab is the model’s read-only entry.',
-                  )}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Link
-                    to="/cmdb/discovery"
-                    className="inline-flex items-center rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
-                  >
-                    {tr('打开自动发现配置', 'Open discovery configuration')}
-                  </Link>
-                  <Link
-                    to="/cmdb/adc"
-                    className="inline-flex items-center rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted hover:bg-card hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
-                  >
-                    {tr('打开发现池', 'Open the discovery pool')}
-                  </Link>
-                </div>
-              </div>
-            </Card>
+            <ModelAutoDiscovery modelRef={ref} modelLabel={modelLabel} isAdmin={isAdmin} />
           </TabsContent>
 
           <TabsContent value="triggers" className="h-full min-h-0">

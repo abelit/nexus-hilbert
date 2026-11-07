@@ -84,6 +84,65 @@ func TestRuleRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUpdateRulePersistsSerializedFields(t *testing.T) {
+	repo := newRepo(t)
+	ctx := context.Background()
+	rule, err := repo.CreateRule(ctx, discoverybiz.RuleWrite{
+		Name:       "custom",
+		Type:       strp("agent"),
+		UniqueKey:  strp("hostname"),
+		Attributes: discoverymodel.AttributeList{{"name": "hostname", "type": "string"}},
+		Option:     map[string]any{"en": "custom"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A MAP UPDATE USED TO BYPASS THE JSON SERIALIZERS on these columns. The
+	// model tab edits exactly these fields, so the partial struct update must
+	// persist both and leave the name alone.
+	updated, err := repo.UpdateRule(ctx, rule.ID, discoverybiz.RuleWrite{
+		Attributes: discoverymodel.AttributeList{{"name": "ip", "type": "string"}},
+		Option:     map[string]any{"en": "custom", "icon": map[string]any{"name": "host"}},
+		UniqueKey:  strp("ip"),
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Name != "custom" || len(updated.Attributes) != 1 || updated.Attributes[0]["name"] != "ip" {
+		t.Fatalf("updated rule = %+v", updated)
+	}
+	if updated.Option["en"] != "custom" || updated.Option["icon"] == nil {
+		t.Fatalf("option = %+v", updated.Option)
+	}
+}
+
+func TestSaveAccountPersistsSerializedConfig(t *testing.T) {
+	repo := newRepo(t)
+	ctx := context.Background()
+	account, err := repo.SaveAccount(ctx, discoverybiz.AccountWrite{
+		Name: "cloud", Config: map[string]any{"secret": "v1:a"}, UID: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SaveAccount(ctx, discoverybiz.AccountWrite{
+		ID: account.ID, Name: "cloud-renamed", Config: map[string]any{"secret": "v1:b"}, UID: 7,
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	loaded, err := repo.LoadAccount(ctx, account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Name != "cloud-renamed" || loaded.Config["secret"] != "v1:b" {
+		t.Fatalf("account = %+v", loaded)
+	}
+	if loaded.UID == nil || *loaded.UID != 7 {
+		t.Fatalf("an update dropped the owner: %+v", loaded.UID)
+	}
+}
+
 func TestFindRuleByNameFoldsCase(t *testing.T) {
 	repo := newRepo(t)
 	if _, err := repo.CreateRule(context.Background(), discoverybiz.RuleWrite{Name: "aliyun"}); err != nil {

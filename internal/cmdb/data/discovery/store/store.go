@@ -42,6 +42,11 @@ func Migrate(db *gorm.DB) error {
 		&discoverymodel.RuleSyncHistory{},
 		&discoverymodel.PoolEntry{},
 		&discoverymodel.ExecHistory{},
+		&discoverymodel.AgentPrincipal{},
+		&discoverymodel.Euler{},
+		&discoverymodel.EnrollmentToken{},
+		&discoverymodel.EulerTaskState{},
+		&discoverymodel.ReportReceipt{},
 	)
 }
 
@@ -133,33 +138,8 @@ func (r *Repo) CreateRule(ctx context.Context, in discoverybiz.RuleWrite) (*disc
 // the struct would write every zero value over what is stored, which is how a
 // rename ends up clearing a rule's field list.
 func (r *Repo) UpdateRule(ctx context.Context, id model.ID, in discoverybiz.RuleWrite) (*discoverymodel.Rule, error) {
-	updates := map[string]any{}
-	if in.Name != "" {
-		updates["name"] = in.Name
-	}
-	if in.Type != nil {
-		updates["type"] = *in.Type
-	}
-	if in.IsPlugin != nil {
-		updates["is_plugin"] = *in.IsPlugin
-	}
-	if in.PluginScript != nil {
-		updates["plugin_script"] = *in.PluginScript
-	}
-	if in.UniqueKey != nil {
-		updates["unique_key"] = *in.UniqueKey
-	}
-	if in.Attributes != nil {
-		updates["attributes"] = in.Attributes
-	}
-	if in.Option != nil {
-		updates["option"] = in.Option
-	}
-	if len(updates) > 0 {
-		if err := r.db.WithContext(ctx).Model(&discoverymodel.Rule{}).
-			Where("id = ?", id).Updates(updates).Error; err != nil {
-			return nil, fmt.Errorf("cmdb discovery: update rule: %w", err)
-		}
+	if err := updateRuleColumns(r.db.WithContext(ctx), id, in, true); err != nil {
+		return nil, fmt.Errorf("cmdb discovery: update rule: %w", err)
 	}
 	return r.LoadRule(ctx, id)
 }
@@ -348,16 +328,19 @@ func (r *Repo) ReplaceAccountsForRule(ctx context.Context, adrID model.ID, keep 
 // saveAccountTx writes one account inside the caller's transaction.
 func saveAccountTx(tx *gorm.DB, in discoverybiz.AccountWrite, adrID model.ID) (*discoverymodel.Account, error) {
 	if in.ID != 0 {
-		updates := map[string]any{"name": in.Name, "config": in.Config}
-		if err := tx.Model(&discoverymodel.Account{}).Where("id = ?", in.ID).
-			Updates(updates).Error; err != nil {
+		// A STRUCT UPDATE, NOT A MAP: `config` carries a GORM JSON serializer.
+		// A map update would hand the driver a Go map and fail with
+		// "unsupported type map[string]interface {}".
+		row := discoverymodel.Account{Name: in.Name, Config: in.Config}
+		if err := tx.Model(&row).Where("id = ?", in.ID).
+			Select([]string{"name", "config"}).Updates(&row).Error; err != nil {
 			return nil, err
 		}
-		var row discoverymodel.Account
-		if err := tx.First(&row, in.ID).Error; err != nil {
+		var loaded discoverymodel.Account
+		if err := tx.First(&loaded, in.ID).Error; err != nil {
 			return nil, err
 		}
-		return &row, nil
+		return &loaded, nil
 	}
 
 	row := discoverymodel.Account{Name: in.Name, Config: in.Config}
@@ -399,27 +382,49 @@ func createRuleTx(tx *gorm.DB, in discoverybiz.RuleWrite) (*discoverymodel.Rule,
 }
 
 func updateRuleTx(tx *gorm.DB, id model.ID, in discoverybiz.RuleWrite) error {
-	updates := map[string]any{}
+	return updateRuleColumns(tx, id, in, false)
+}
+
+// updateRuleColumns applies the fields a RuleWrite mentions without turning
+// the omitted ones into zero values.
+//
+// THE COLUMNS ARE SELECTED EXPLICITLY because `attributes` and `option` carry
+// GORM JSON serializers; a map update bypasses them and fails in the driver.
+// A struct update also keeps cantor's partial-write semantics: a rename must
+// not clear a field list nobody touched.
+func updateRuleColumns(tx *gorm.DB, id model.ID, in discoverybiz.RuleWrite, includeName bool) error {
+	row := discoverymodel.Rule{}
+	columns := make([]string, 0, 7)
+	if includeName && in.Name != "" {
+		row.Name = in.Name
+		columns = append(columns, "name")
+	}
 	if in.Type != nil {
-		updates["type"] = *in.Type
+		row.Type = in.Type
+		columns = append(columns, "type")
 	}
 	if in.IsPlugin != nil {
-		updates["is_plugin"] = *in.IsPlugin
+		row.IsPlugin = *in.IsPlugin
+		columns = append(columns, "is_plugin")
 	}
 	if in.PluginScript != nil {
-		updates["plugin_script"] = *in.PluginScript
+		row.PluginScript = in.PluginScript
+		columns = append(columns, "plugin_script")
 	}
 	if in.UniqueKey != nil {
-		updates["unique_key"] = *in.UniqueKey
+		row.UniqueKey = in.UniqueKey
+		columns = append(columns, "unique_key")
 	}
 	if in.Attributes != nil {
-		updates["attributes"] = in.Attributes
+		row.Attributes = in.Attributes
+		columns = append(columns, "attributes")
 	}
 	if in.Option != nil {
-		updates["option"] = in.Option
+		row.Option = in.Option
+		columns = append(columns, "option")
 	}
-	if len(updates) == 0 {
+	if len(columns) == 0 {
 		return nil
 	}
-	return tx.Model(&discoverymodel.Rule{}).Where("id = ?", id).Updates(updates).Error
+	return tx.Model(&row).Where("id = ?", id).Select(columns).Updates(&row).Error
 }

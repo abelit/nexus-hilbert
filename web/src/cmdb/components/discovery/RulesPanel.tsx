@@ -565,7 +565,7 @@ type AttributeDraft = {
   example?: unknown;
 };
 
-function RuleDrawer({
+export function RuleDrawer({
   rule,
   defaultPlugin,
   onClose,

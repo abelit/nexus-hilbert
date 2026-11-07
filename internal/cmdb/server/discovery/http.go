@@ -84,6 +84,14 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/cmdb/discovery/catalog/snmp/attributes", h.snmpAttributes)
 	r.Get("/v1/cmdb/discovery/catalog/components/{name}/attributes", h.componentAttributes)
 
+	// The console issues and revokes the riemann service credentials, and reads
+	// the registered collector inventory. The agents themselves use the
+	// separate /discovery/agent/* realm mounted outside auth.Middleware.
+	r.Post("/v1/cmdb/discovery/agent-principals", h.createAgentPrincipal)
+	r.Get("/v1/cmdb/discovery/agent-principals", h.listAgentPrincipals)
+	r.Delete("/v1/cmdb/discovery/agent-principals/{id}", h.revokeAgentPrincipal)
+	r.Get("/v1/cmdb/discovery/eulers", h.listEulers)
+
 	h.registerTargets(r)
 	h.registerADC(r)
 }

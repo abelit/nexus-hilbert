@@ -211,6 +211,110 @@ export function listDiscoverableAttributes(typeRef: string | number): Promise<st
   );
 }
 
+// --- relations a discovery field can produce (`c_ad_relations`) ---
+
+/**
+ * One declared relation: the provider field on the left becomes a relation to
+ * `peer_type_id`, matching the peer instance whose `peer_attr_id` equals the
+ * field's value.
+ */
+export type TargetRelation = {
+  id?: number;
+  ad_key?: string;
+  peer_type_id?: number;
+  peer_attr_id?: number;
+};
+
+export type TargetRelationInput = {
+  ad_key: string;
+  peer_type_id: number;
+  peer_attr_id: number;
+};
+
+export type RelationReplaceResult = {
+  added: number;
+  removed: number;
+  relations: TargetRelation[];
+};
+
+export function listTargetRelations(typeRef: string | number): Promise<TargetRelation[]> {
+  return cmdbGet<ListResponse<TargetRelation>>(
+    `/discovery/ci-types/${encodeURIComponent(String(typeRef))}/target-relations`,
+  ).then((got) => got.items ?? []);
+}
+
+/** Replaces the model's whole relation set; removing one is its absence here. */
+export function replaceTargetRelations(
+  typeRef: string | number,
+  relations: TargetRelationInput[],
+): Promise<RelationReplaceResult> {
+  return cmdbPut<RelationReplaceResult>(
+    `/discovery/ci-types/${encodeURIComponent(String(typeRef))}/target-relations`,
+    { relations },
+  );
+}
+
+// --- a target's handover log (`c_ad_rule_sync_histories`) ---
+
+export type TargetSyncHistory = {
+  id: number;
+  adt_id?: number;
+  oneagent_id?: string;
+  oneagent_name?: string;
+  sync_at?: string;
+  created_at?: string;
+};
+
+export type TargetSyncHistoryPage = {
+  items: TargetSyncHistory[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export function listTargetSyncHistories(
+  id: number,
+  page = 1,
+  pageSize = 50,
+): Promise<TargetSyncHistoryPage> {
+  return cmdbGet<TargetSyncHistoryPage>(`/discovery/targets/${id}/sync-histories`, {
+    page,
+    page_size: pageSize,
+  });
+}
+
+// --- derived target health ---
+
+export type TargetHealthAgent = {
+  euler_id: string;
+  euler_name?: string;
+  status?: string;
+  registered: boolean;
+  eligible: boolean;
+  online: boolean;
+  last_seen_at?: string;
+  last_handover_at?: string;
+};
+
+export type TargetHealth = {
+  target_id: number;
+  enabled: boolean;
+  rule_type?: string;
+  checked_at?: string;
+  online_window_seconds: number;
+  agents: TargetHealthAgent[];
+  warnings?: string[];
+};
+
+/**
+ * Who should collect a target, who is alive, and when the task was last handed
+ * over. Read-only: the backend derives it from heartbeats and the handover
+ * log and never dispatches a collection.
+ */
+export function getTargetHealth(id: number): Promise<TargetHealth> {
+  return cmdbGet<TargetHealth>(`/discovery/targets/${id}/health`);
+}
+
 // --- the provider catalogue ---
 
 export type Provider = {

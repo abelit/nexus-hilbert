@@ -68,6 +68,54 @@ func TestPluginRuleIsAdministrative(t *testing.T) {
 	}
 }
 
+func TestPluginRuleUpdateIsAdministrative(t *testing.T) {
+	uc, _ := newStubUsecase(t)
+	ctx := context.Background()
+	admin := Actor{UserID: 1, IsAdmin: true}
+
+	created, err := uc.CreateRule(ctx, RuleInput{
+		Name: "plugin-rule", Type: strp("agent"), IsPlugin: boolp(true),
+		UniqueKey:  strp("hostname"),
+		Attributes: []AttributeField{{Name: "hostname", Type: "string"}},
+	}, admin)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Omitting is_plugin must not turn a plugin update into a non-admin write.
+	_, err = uc.UpdateRule(ctx, "plugin-rule", RuleInput{
+		Name: "plugin-rule", PluginScript: strp("class AutoDiscovery: ..."),
+	}, Actor{UserID: 9})
+	if !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("non-admin updated a plugin rule: %v", err)
+	}
+
+	if _, err := uc.UpdateRule(ctx, "plugin-rule", RuleInput{
+		Name: "plugin-rule", PluginScript: strp("class AutoDiscovery: ..."),
+	}, admin); err != nil {
+		t.Fatalf("admin update: %v", err)
+	}
+	_ = created
+}
+
+func TestBuiltinRuleWriteIsAdministrative(t *testing.T) {
+	uc, repo := newStubUsecase(t)
+	ctx := context.Background()
+	builtin := discoverymodel.Rule{Name: "builtin", IsInner: true}
+	builtin.ID = 1
+	repo.rules = append(repo.rules, builtin)
+
+	if _, err := uc.UpdateRule(ctx, "builtin", RuleInput{Name: "builtin"}, Actor{UserID: 9}); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("non-admin updated a built-in rule: %v", err)
+	}
+	if err := uc.DeleteRule(ctx, "builtin", Actor{UserID: 9}); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("non-admin deleted a built-in rule: %v", err)
+	}
+	if _, err := uc.UpdateRule(ctx, "builtin", RuleInput{Name: "builtin"}, Actor{UserID: 1, IsAdmin: true}); err != nil {
+		t.Fatalf("admin update: %v", err)
+	}
+}
+
 func TestRuleNameIsUnique(t *testing.T) {
 	uc, repo := newStubUsecase(t)
 	existing := discoverymodel.Rule{Name: "aliyun"}
