@@ -84,6 +84,10 @@ func run() (runErr error) {
 		return err
 	}
 	aiops := bootstrapAIOps(cfg, log, notifyRouter, storage, settings, models, devices, alerts, telemetry, tunnel)
+	// Read-only CMDB tools must be registered before bootstrapRuntime and the
+	// inventory bridge call BuildBaseTools. An unconfigured URL leaves the
+	// tools out of the bag. See ADR-037.
+	aiops.toolsReg.SetCMDB(newCMDBClient(cfg, iam.signer, log))
 	knowledge := bootstrapKnowledge(rootCtx, cfg, log, storage, settings, telemetry, aiops)
 	runtime := bootstrapRuntime(rootCtx, cfg, log, reg, tracing, models, devices, telemetry, tunnel, aiops, settings)
 	automation := bootstrapAutomation(rootCtx, cfg, log, reg, notifyRouter, &cleanup, storage, settings, models, alerts, telemetry, aiops, runtime)
