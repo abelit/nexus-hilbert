@@ -80,8 +80,16 @@ type Target struct {
 
 	ExtraOption map[string]any `json:"extra_option"`
 
-	HasSecret   bool `json:"has_secret"`
-	HasPassword bool `json:"has_password"`
+	HasSecret    bool `json:"has_secret"`
+	HasPassword  bool `json:"has_password"`
+	HasKey       bool `json:"has_key"`
+	HasCommunity bool `json:"has_community"`
+
+	// HasReference and ReferenceAccountID describe extra_option._reference
+	// without exposing any credential. The reference id itself is configuration,
+	// not a secret.
+	HasReference       bool     `json:"has_reference"`
+	ReferenceAccountID model.ID `json:"reference_account_id,omitempty"`
 
 	UID     *model.ID `json:"uid,omitempty"`
 	Enabled bool      `json:"enabled"`
@@ -342,6 +350,9 @@ func (u *Usecase) UpdateTarget(ctx context.Context, id model.ID, in TargetInput,
 	if existing == nil {
 		return nil, fmt.Errorf("%w: %d", ErrTargetNotFound, id)
 	}
+	if !ownsTarget(*existing, actor) {
+		return nil, fmt.Errorf("%w: target %d belongs to another operator", errs.ErrForbidden, id)
+	}
 	ref, err := u.refOf(ctx, *existing)
 	if err != nil {
 		return nil, err
@@ -375,13 +386,15 @@ func (u *Usecase) DeleteTarget(ctx context.Context, id model.ID, actor Actor) (*
 	if existing == nil {
 		return nil, fmt.Errorf("%w: %d", ErrTargetNotFound, id)
 	}
-	// DELETING A CREDENTIAL IS AN OWNERSHIP ACT, which cantor allowed anyone to
-	// do: its delete path checked nothing, so a second operator could remove the
-	// target holding the first operator's cloud key. A target that carries no
-	// credential is shared configuration and anybody may remove it, which keeps
-	// the common case exactly as cantor had it.
-	if targetHasCredential(*existing) && !ownsTarget(*existing, actor) {
-		return nil, fmt.Errorf("%w: target %d holds a credential", ErrAccountSecretNotYours, id)
+	// A TARGET IS THE CREATOR'S CONFIGURATION. Letting a second operator delete
+	// someone else's target removes their provider binding even when it carries
+	// no credential, and with a credential it is worse: the delete takes the
+	// secret with it. An ownerless target is administrative.
+	if !ownsTarget(*existing, actor) {
+		if targetHasCredential(*existing) {
+			return nil, fmt.Errorf("%w: target %d holds a credential", ErrAccountSecretNotYours, id)
+		}
+		return nil, fmt.Errorf("%w: target %d belongs to another operator", errs.ErrForbidden, id)
 	}
 	return u.repo.DeleteTarget(ctx, id)
 }
@@ -410,6 +423,11 @@ func (u *Usecase) ListTargetRelations(ctx context.Context, typeRef string) ([]Ta
 func (u *Usecase) ReplaceTargetRelations(ctx context.Context, typeRef string, in []TargetRelationWrite, actor Actor) (*RelationReplaceResult, error) {
 	if u.repo == nil {
 		return nil, errs.ErrNotWiredYet
+	}
+	// Relations describe the model, not one operator's target. They sit beside
+	// model relations, uniqueness and triggers, which are administrative.
+	if !actor.IsAdmin {
+		return nil, fmt.Errorf("%w: relation discovery is administrative", errs.ErrForbidden)
 	}
 	typeID, _, err := u.resolveType(ctx, typeRef)
 	if err != nil {
@@ -755,6 +773,9 @@ func (u *Usecase) prepareTarget(ctx context.Context, ref *CITypeRef, in TargetIn
 		if err != nil {
 			return TargetWrite{}, err
 		}
+		if err := u.validateTargetReference(ctx, sealed, rule); err != nil {
+			return TargetWrite{}, err
+		}
 		if rule != nil {
 			if err := applyProviderOptions(*rule, sealed); err != nil {
 				return TargetWrite{}, err
@@ -767,6 +788,42 @@ func (u *Usecase) prepareTarget(ctx context.Context, ref *CITypeRef, in TargetIn
 		write.UID = *existing.UID
 	}
 	return write, nil
+}
+
+// validateTargetReference refuses a reference that cannot be used.
+//
+// THE WRITE IS WHERE AN OPERATOR CAN SEE THE MISTAKE. A reference to a missing
+// account, or to an account of a different rule, used to save successfully and
+// fail later on every collector poll; it is now a 400 at the form.
+func (u *Usecase) validateTargetReference(ctx context.Context, option map[string]any, rule *discoverymodel.Rule) error {
+	raw, ok := option["_reference"]
+	if !ok || raw == nil {
+		return nil
+	}
+	id := toModelID(raw)
+	if id == 0 {
+		delete(option, "_reference")
+		return nil
+	}
+	if rule == nil || rule.ID == 0 {
+		return fmt.Errorf("%w: a reference needs the target's rule", ErrTargetIncomplete)
+	}
+	account, err := u.repo.LoadAccount(ctx, id)
+	if err != nil {
+		return err
+	}
+	if account == nil {
+		return fmt.Errorf("%w: account %d does not exist", ErrTargetIncomplete, id)
+	}
+	if account.AdrID == nil || *account.AdrID != rule.ID {
+		return fmt.Errorf("%w: account %d belongs to another rule", ErrTargetIncomplete, id)
+	}
+	// A reference REPLACES inline credentials. Leaving the old ciphertext in
+	// place would make it reappear if the reference were later removed.
+	for _, key := range credentialKeys {
+		delete(option, key)
+	}
+	return nil
 }
 
 // checkUniqueMapped refuses a mapping that does not say which attribute
@@ -804,7 +861,11 @@ func applyProviderOptions(rule discoverymodel.Rule, option map[string]any) error
 	if option == nil {
 		return nil
 	}
-	provider, found, err := catalog.ProviderByName(rule.Name)
+	providerKey := rule.Name
+	if en, ok := rule.Option["en"].(string); ok && strings.TrimSpace(en) != "" {
+		providerKey = strings.TrimSpace(en)
+	}
+	provider, found, err := catalog.ProviderByEN(providerKey)
 	if err != nil {
 		return err
 	}
@@ -818,17 +879,25 @@ func applyProviderOptions(rule discoverymodel.Rule, option map[string]any) error
 			resource = strings.TrimSpace(raw)
 		}
 		if resource == "" {
+			// A cleared category must not leave the previous resource's collector
+			// in place, or the agent runs the wrong provider.
+			delete(option, "collect_key")
+			delete(option, "provider")
 			return nil
 		}
 		key, err := catalog.CollectKey(provider.ProviderEN(), resource)
 		if err != nil {
 			return err
 		}
-		// ONLY WHEN THE PROVIDER OFFERS THAT RESOURCE. An unknown category leaves
-		// both keys alone rather than writing half a pair.
+		// ONLY WHEN THE PROVIDER OFFERS THAT RESOURCE. An unknown category removes
+		// the stale pair rather than leaving a collector for a resource the target
+		// no longer names.
 		if key != "" {
 			option["collect_key"] = key
 			option["provider"] = provider.ProviderEN()
+		} else {
+			delete(option, "collect_key")
+			delete(option, "provider")
 		}
 	case discoverymodel.TypeComponents:
 		if key, ok := provider.Option["collect_key"].(string); ok && strings.TrimSpace(key) != "" {
@@ -920,6 +989,18 @@ func renderTarget(row discoverymodel.Target) Target {
 			view.HasSecret = isSet(v)
 		case AccountPasswordKey:
 			view.HasPassword = isSet(v)
+		case AccountKeyKey:
+			view.HasKey = isSet(v)
+		case AccountCommunityKey:
+			view.HasCommunity = isSet(v)
+		case "nodes":
+			view.ExtraOption[k] = sanitizeNodesForRead(v)
+		case "reference", "_reference":
+			if id := toModelID(v); id != 0 {
+				view.HasReference = true
+				view.ReferenceAccountID = id
+				view.ExtraOption["_reference"] = id
+			}
 		default:
 			view.ExtraOption[k] = v
 		}
@@ -966,6 +1047,16 @@ func targetHasCredential(row discoverymodel.Target) bool {
 			return true
 		}
 	}
+	if toModelID(row.ExtraOption["_reference"]) != 0 || toModelID(row.ExtraOption["reference"]) != 0 {
+		return true
+	}
+	if nodes, ok := nodeMaps(row.ExtraOption["nodes"]); ok {
+		for _, node := range nodes {
+			if isSet(node[AccountCommunityKey]) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -976,13 +1067,7 @@ func mayWriteCredentialOf(existing discoverymodel.Target, incoming map[string]an
 	if incoming == nil {
 		return true
 	}
-	touches := false
-	for _, key := range credentialKeys {
-		if v, ok := incoming[key]; ok && strings.TrimSpace(fmt.Sprint(v)) != "" {
-			touches = true
-		}
-	}
-	if !touches {
+	if !mentionsCredential(incoming) {
 		return true
 	}
 	return ownsTarget(existing, actor)

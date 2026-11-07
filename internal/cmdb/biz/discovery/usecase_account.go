@@ -34,10 +34,19 @@ const (
 
 	// AccountPasswordKey is a login password.
 	AccountPasswordKey = "password"
+
+	// AccountKeyKey is a cloud access-key id. The agent compiler already treats
+	// it as secret material; sealing it keeps the console from handing a whole
+	// cloud credential back on a read.
+	AccountKeyKey = "key"
+
+	// AccountCommunityKey is an SNMP community string. Like `key`, it is
+	// credential material even though it is short enough to look harmless.
+	AccountCommunityKey = "community"
 )
 
 // credentialKeys are the entries sealed at rest, in a stable order.
-var credentialKeys = []string{AccountPasswordKey, AccountSecretKey}
+var credentialKeys = []string{AccountPasswordKey, AccountSecretKey, AccountKeyKey, AccountCommunityKey}
 
 // Account is one credential as the API presents it.
 //
@@ -53,8 +62,10 @@ type Account struct {
 
 	Config map[string]any `json:"config"`
 
-	HasSecret   bool `json:"has_secret"`
-	HasPassword bool `json:"has_password"`
+	HasSecret    bool `json:"has_secret"`
+	HasPassword  bool `json:"has_password"`
+	HasKey       bool `json:"has_key"`
+	HasCommunity bool `json:"has_community"`
 }
 
 // AccountInput is one write of an account.
@@ -249,11 +260,156 @@ func renderAccount(row discoverymodel.Account) Account {
 			view.HasSecret = isSet(v)
 		case AccountPasswordKey:
 			view.HasPassword = isSet(v)
+		case AccountKeyKey:
+			view.HasKey = isSet(v)
+		case AccountCommunityKey:
+			view.HasCommunity = isSet(v)
+		case "nodes":
+			view.Config[k] = sanitizeNodesForRead(v)
 		default:
 			view.Config[k] = v
 		}
 	}
 	return view
+}
+
+// nodeMaps accepts the two shapes a decoded `nodes` array takes: []any from
+// JSON, or []map[string]any from a caller building a write in Go.
+func nodeMaps(raw any) ([]map[string]any, bool) {
+	switch value := raw.(type) {
+	case []map[string]any:
+		return value, true
+	case []any:
+		out := make([]map[string]any, 0, len(value))
+		for _, item := range value {
+			node, ok := item.(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, node)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func nodeIP(node map[string]any) string {
+	ip, _ := node["ip"].(string)
+	return strings.TrimSpace(ip)
+}
+
+// sanitizeNodesForRead removes every node-level community and says whether one
+// was set. The console needs to know a credential exists, never what it is.
+func sanitizeNodesForRead(raw any) any {
+	nodes, ok := nodeMaps(raw)
+	if !ok {
+		return raw
+	}
+	out := make([]any, 0, len(nodes))
+	for _, node := range nodes {
+		copy := make(map[string]any, len(node))
+		for key, value := range node {
+			if key == AccountCommunityKey {
+				continue
+			}
+			copy[key] = value
+		}
+		if isSet(node[AccountCommunityKey]) {
+			copy["has_community"] = true
+		}
+		out = append(out, copy)
+	}
+	return out
+}
+
+// mentionsCredential reports whether a write touches credential material.
+//
+// PRESENCE, NOT NON-EMPTINESS. Sending `secret: ""` is how the console clears a
+// credential, so it must require the same ownership as replacing one.
+func mentionsCredential(incoming map[string]any) bool {
+	if incoming == nil {
+		return false
+	}
+	for _, key := range credentialKeys {
+		if _, present := incoming[key]; present {
+			return true
+		}
+	}
+	if _, present := incoming["_reference"]; present {
+		return true
+	}
+	if _, present := incoming["reference"]; present {
+		return true
+	}
+	if nodes, ok := nodeMaps(incoming["nodes"]); ok {
+		for _, node := range nodes {
+			if _, present := node[AccountCommunityKey]; present {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sealNodeCommunities applies the same absent/empty/value rules as a top-level
+// credential, keyed by node IP so a round-tripped read does not erase an
+// untouched community.
+func sealNodeCommunities(incoming, stored map[string]any) (any, bool, error) {
+	raw, present := incoming["nodes"]
+	if !present {
+		return nil, false, nil
+	}
+	if raw == nil {
+		return []any{}, true, nil
+	}
+	nodes, ok := nodeMaps(raw)
+	if !ok {
+		return nil, false, fmt.Errorf("%w: nodes must be a list", errs.ErrInvalid)
+	}
+	prior := map[string]string{}
+	if storedNodes, ok := nodeMaps(stored["nodes"]); ok {
+		for _, node := range storedNodes {
+			if isSet(node[AccountCommunityKey]) {
+				prior[nodeIP(node)] = fmt.Sprint(node[AccountCommunityKey])
+			}
+		}
+	}
+	out := make([]any, 0, len(nodes))
+	for _, node := range nodes {
+		copy := make(map[string]any, len(node))
+		for key, value := range node {
+			if key == "has_community" {
+				continue
+			}
+			copy[key] = value
+		}
+		ip := nodeIP(copy)
+		text := ""
+		if rawCommunity, has := copy[AccountCommunityKey]; has && rawCommunity != nil {
+			text = strings.TrimSpace(fmt.Sprint(rawCommunity))
+		}
+		switch {
+		case text != "":
+			if prior[ip] == text {
+				copy[AccountCommunityKey] = text
+				break
+			}
+			sealed, err := secretbox.Encrypt(text)
+			if err != nil {
+				return nil, false, fmt.Errorf("cmdb discovery: seal node community: %w", err)
+			}
+			copy[AccountCommunityKey] = sealed
+		case prior[ip] != "":
+			// Absent or empty means "leave the stored community alone", because
+			// a read never returned it and a round-tripped form cannot resend it.
+			copy[AccountCommunityKey] = prior[ip]
+		default:
+			delete(copy, AccountCommunityKey)
+		}
+		out = append(out, copy)
+	}
+	return out, true, nil
 }
 
 // sealAccountConfig encrypts the credential entries of a config.
@@ -279,6 +435,34 @@ func sealAccountConfig(incoming, stored map[string]any) (map[string]any, error) 
 	for k, v := range incoming {
 		out[k] = v
 	}
+	// READ-ONLY FLAGS ARE NOT CONFIGURATION. A console that round-trips a
+	// rendered node must not turn `has_community` into a stored key.
+	for _, key := range []string{"has_secret", "has_password", "has_key", "has_community", "reference_account_id"} {
+		delete(out, key)
+	}
+
+	// One reference key, and an empty one means "no reference". An empty string
+	// used to reach openCredentials as id 0 and break the collector's poll.
+	if raw, ok := incoming["reference"]; ok {
+		if _, has := incoming["_reference"]; !has {
+			out["_reference"] = raw
+		}
+		delete(out, "reference")
+	}
+	if raw, ok := out["reference"]; ok {
+		if _, has := out["_reference"]; !has {
+			out["_reference"] = raw
+		}
+		delete(out, "reference")
+	}
+	if raw, ok := out["_reference"]; ok {
+		if id := toModelID(raw); id == 0 {
+			delete(out, "_reference")
+		} else {
+			out["_reference"] = fmt.Sprint(id)
+		}
+	}
+
 	for _, key := range credentialKeys {
 		raw, mentioned := incoming[key]
 		if !mentioned {
@@ -305,6 +489,11 @@ func sealAccountConfig(incoming, stored map[string]any) (map[string]any, error) 
 		}
 		out[key] = sealed
 	}
+	if nodes, present, err := sealNodeCommunities(incoming, stored); err != nil {
+		return nil, err
+	} else if present {
+		out["nodes"] = nodes
+	}
 	return out, nil
 }
 
@@ -313,13 +502,7 @@ func mayWriteCredential(prior discoverymodel.Account, incoming map[string]any, a
 	if incoming == nil {
 		return true
 	}
-	touches := false
-	for _, key := range credentialKeys {
-		if v, ok := incoming[key]; ok && strings.TrimSpace(fmt.Sprint(v)) != "" {
-			touches = true
-		}
-	}
-	if !touches {
+	if !mentionsCredential(incoming) {
 		return true
 	}
 	return ownsAccount(prior, actor)

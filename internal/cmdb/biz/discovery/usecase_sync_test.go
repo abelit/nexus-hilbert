@@ -292,6 +292,8 @@ func TestSyncResolvesAnAccountReference(t *testing.T) {
 	repo.rules = []discoverymodel.Rule{providerRule(1, "自研采集", "agent", "")}
 	repo.accounts = []discoverymodel.Account{{Config: map[string]any{"secret": sealed, "region": "cn-north"}}}
 	repo.accounts[0].ID = 9
+	ruleID := model.ID(1)
+	repo.accounts[0].AdrID = &ruleID
 
 	bound := targetOf(7, 1, map[string]any{"_reference": float64(9), "secret": "stale"})
 	bound.AgentID = strp("0xabc")

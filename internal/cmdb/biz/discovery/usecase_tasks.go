@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -82,6 +83,14 @@ func (u *Usecase) SyncAgentTasks(ctx context.Context, principal AgentPrincipalVi
 		}
 		task, warning, err := u.buildAgentTask(ctx, target, rule, *euler)
 		if err != nil {
+			// A BAD TARGET MUST NOT STOP THE OTHER TARGETS. A dangling account
+			// reference or an unreadable credential is configuration the
+			// operator can fix; the healthy tasks still go out, and the warning
+			// names the broken one. Database and envelope failures remain fatal.
+			if errors.Is(err, ErrTargetIncomplete) || errors.Is(err, ErrCredentialUnreadable) {
+				warnings = append(warnings, fmt.Sprintf("target %d: %v", target.ID, err))
+				continue
+			}
 			return nil, err
 		}
 		if warning != "" {
@@ -191,15 +200,16 @@ func (u *Usecase) targetAppliesToEuler(ctx context.Context, target discoverymode
 }
 
 // buildAgentTask renders one target. A non-empty warning means the target is
-// visible to an operator but cannot run in P1 (credentials, cloud, SNMP).
+// visible to an operator but cannot run yet (cloud collection needs an
+// adapter; an SNMP target still needs a community and a collector).
 func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Target, rule discoverymodel.Rule, euler discoverymodel.Euler) (AgentTask, string, error) {
 	typeID := derefID(target.TypeID)
 	kind := derefString(rule.Type)
 	if rule.IsPlugin {
 		kind = "plugin"
 	}
-	if kind == discoverymodel.TypeHTTP || kind == discoverymodel.TypeSNMP {
-		return AgentTask{}, fmt.Sprintf("target %d: %s collection requires P2", target.ID, kind), nil
+	if kind == discoverymodel.TypeHTTP {
+		return AgentTask{}, fmt.Sprintf("target %d: %s collection requires a cloud adapter", target.ID, kind), nil
 	}
 
 	mapping := map[string]string{}
@@ -233,6 +243,13 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 	if uniqueKey == "" {
 		uniqueKey = derefString(rule.UniqueKey)
 	}
+	// A NETWORK DEVICE ALWAYS HAS A MANAGEMENT ADDRESS, even when the model's
+	// unique attribute is not part of this mapping. The template reports it
+	// under `manager_ip`, so it is a deterministic fallback that cannot collide
+	// with another device on the same collector.
+	if uniqueKey == "" && kind == discoverymodel.TypeSNMP {
+		uniqueKey = "manager_ip"
+	}
 	if uniqueKey == "" {
 		return AgentTask{}, fmt.Sprintf("target %d: no deterministic unique key", target.ID), nil
 	}
@@ -241,8 +258,19 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 	if err != nil {
 		return AgentTask{}, "", err
 	}
-	params := map[string]any{}
 	secrets := map[string]string{}
+	snmpProblem := ""
+	if kind == discoverymodel.TypeSNMP {
+		// NODE COMMUNITIES ARE CREDENTIALS TOO. They live inside `nodes[]`,
+		// which is not a top-level secret key, so they are moved into their own
+		// envelope entry and removed from the task parameters before the task
+		// is signed or sent.
+		snmpProblem, err = extractSNMPCommunities(opened, secrets)
+		if err != nil {
+			return AgentTask{}, "", err
+		}
+	}
+	params := map[string]any{}
 	for key, value := range opened {
 		if agentSecretKeys[key] {
 			if key != "reference" && key != "_reference" {
@@ -251,6 +279,9 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 			continue
 		}
 		params[key] = value
+	}
+	if kind == discoverymodel.TypeSNMP && snmpProblem != "" {
+		return AgentTask{}, fmt.Sprintf("target %d: %s", target.ID, snmpProblem), nil
 	}
 	collectKey := agentCollectKey(rule)
 	if !agentCollectKeyRE.MatchString(collectKey) || strings.Contains(collectKey, "..") {
@@ -281,6 +312,8 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 			Language: "python", SHA256: hex.EncodeToString(sum[:]), Script: []byte(script),
 		}
 		task.CapabilitiesRequired = []string{"plugin:python"}
+	} else if kind == discoverymodel.TypeSNMP {
+		task.CapabilitiesRequired = []string{"snmp"}
 	}
 	task.Revision = canonicalTaskRevision(task)
 	if len(secrets) > 0 {
@@ -300,14 +333,30 @@ func (u *Usecase) buildAgentTask(ctx context.Context, target discoverymodel.Targ
 		task.SecretKeyID = keyID
 		task.SecretAlg = alg
 	}
+	if err := u.signTask(&task); err != nil {
+		return AgentTask{}, "", fmt.Errorf("sign target %d: %w", target.ID, err)
+	}
 	return task, "", nil
 }
 
 func agentCollectKey(rule discoverymodel.Rule) string {
+	// A PLUGIN'S SCRIPT IS INSTALLED UNDER ITS RULE NAME, so the task must name
+	// the same collector.
+	if rule.IsPlugin {
+		return rule.Name
+	}
+	// SNMP IS ONE COLLECTOR FOR EVERY DEVICE KIND. A rule's display name is a
+	// Chinese device label ("交换机"), which is neither a safe file name nor the
+	// euler plugin that knows how to walk the device. This check comes before
+	// `option.collect_key` so a stale cloud key cannot select the wrong
+	// collector for a network device.
+	if derefString(rule.Type) == discoverymodel.TypeSNMP {
+		return "snmp"
+	}
 	if raw, ok := rule.Option["collect_key"].(string); ok && strings.TrimSpace(raw) != "" {
 		return strings.TrimSpace(raw)
 	}
-	if rule.IsPlugin || derefString(rule.Type) == discoverymodel.TypeComponents {
+	if derefString(rule.Type) == discoverymodel.TypeComponents {
 		return rule.Name
 	}
 	if derefString(rule.Type) == discoverymodel.TypeAgent {

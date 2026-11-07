@@ -72,6 +72,51 @@
 
 `exec-logs[]` 的 `task_id` 用于反查模型 id，日志按模型归档；单条上限 64 KiB。
 
+## 凭据、引用与写权限
+
+- 目标与规则账号的 `secret`、`password`、`key`、`community` 以及 SNMP `nodes[].community`
+  在写入时密封存储；读取只返回 `has_secret`/`has_password`/`has_key`/`has_community`
+  标志，不返回明文。节点级 community 在读取时删除，并以 `has_community` 标记。
+- 凭据的“出现”与“非空”具有不同含义：字段缺省表示保持原值，显式空值表示清除。
+  清除与替换都要求目标/账号的 owner 或管理员；ownerless 目标/账号按管理员对象处理。
+- `_reference` 只能指向目标同一规则下的账号；跨规则引用、指向不存在的账号或空字符串
+  都会在保存时被拒绝。写入引用会删除目标自身的凭据，避免以后移除引用时旧凭据复活。
+  读取目标时 `has_reference`/`reference_account_id` 描述引用，引用 id 本身不是秘密。
+- SNMP 目标会编译为 `kind=snmp`、`collect_key=snmp` 的任务，并且必须显式绑定采集器；
+  不会进入 host 采集器的 catch-all。`nodes[].community` 从 `params` 移除，以
+  `{ip: community}` JSON 放入信封的 `node_communities`；顶层 `community` 同样只进入信封。
+  当前 euler 采集器只遍历节点列表，CIDR 递归发现和 SNMPv3 尚未实现。
+- 云（HTTP）目标仍只保存参数，不下发；需要先实现云端适配器。
+- 目标更新/删除要求目标 owner 或管理员；关系自动发现整组替换仅管理员。
+
+### `extra_option` 键
+
+| 规则类型 | 键 |
+| --- | --- |
+| 通用 | `alias`、`_reference` |
+| HTTP / 私有云 | `category`、`key`、`secret`、`host`、`account`、`password`、`vcenterName` |
+| SNMP | `nodes[]`（`ip`、`community`、`version`）、`version`、`community`、`timeout`、`retries`、`initial_node`、`recursive_scan`、`max_depth`、`cidr[]` |
+| components | `cidr`、`ports`、`enable_cidr` |
+
+HTTP 的资源类型变更会在保存时重新推导 `collect_key`/`provider`；清空或未知资源类型会删除旧值。
+
+SNMP 的节点级 community 不进入 `extra_option` 之外的任何明文位置；任务信封中的
+`node_communities` 是 `{ip: community}` JSON 字符串，euler 解封后按 IP 合并回节点。
+
+## 任务与制品签名
+
+- CMDB 用 ed25519 对任务和插件制品签名：
+  - 任务签名覆盖任务 id、revision、kind、type/rule、collect_key、unique_key、
+    mapping、params、schedule、artifact SHA、secret envelope 摘要和凭据字段 id；
+  - 制品签名覆盖 task/revision/collect_key/language/script SHA。
+- euler 在 `Enroll` 响应中取得 `task_signing_public_key` 与 `task_signing_key_id`；
+  收到 snapshot 时先验签，插件制品还要求 `sha256(script)` 与制品摘要一致。
+  已取得信任锚后，未签名或签名不匹配的任务/制品不会进入调度器。
+- CMDB 签名私钥优先取 `ONGRID_CMDB_DISCOVERY_SIGNING_KEY`（base64 32 字节 seed），
+  否则从 `ONGRID_SECRET_KEY`/`ONGRID_JWT_SECRET` 派生；同一部署重启保持同一公钥。
+- 当前只下发一个活动信任锚；轮换密钥后 euler 在重连的 `Enroll` 响应中取得新锚。
+  多锚并存和证书签发/吊销在 P2 的 PKI 工作中继续。
+
 ## 健康与交接
 
 - `c_ad_rule_sync_histories` 只在任务真正下发（新增或 revision 变化）时写入，不在每次

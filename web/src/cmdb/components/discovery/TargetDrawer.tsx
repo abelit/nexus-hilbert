@@ -485,10 +485,10 @@ export function TargetDrawer({
               className="mt-1 min-h-[8rem] w-full font-mono text-xs"
             />
             <p className="mt-1 text-[11px] text-text-faint">
-              {target?.has_secret || target?.has_password
+              {target?.has_secret || target?.has_password || target?.has_key || target?.has_community
                 ? tr(
-                    '已存有凭据。这里不会显示 secret / password；不填写表示保持原值。',
-                    'A credential is stored. secret / password are never shown here; leaving them out keeps them.',
+                    '已存有凭据。这里不会显示 secret / password / key / community；不填写表示保持原值。',
+                    'A credential is stored. secret, password, key and community are never shown here; leaving them out keeps them.',
                   )
                 : tr(
                     '提供方自己的配置，例如区域或账号。凭据一旦保存就不会回显。',

@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -298,7 +299,8 @@ func TestTargetCredentialBelongsToItsOwner(t *testing.T) {
 	if _, err := uc.DeleteTarget(ctx, created.ID, other); err == nil {
 		t.Fatal("a second operator deleted a target holding somebody else's credential")
 	}
-	// A target with no credential is shared configuration and anybody may remove it.
+	// A credential-less target is still the creator's configuration; the owner
+	// may remove it (a second operator is covered by the test above).
 	plain, err := uc.CreateTarget(ctx, "7", TargetInput{
 		AgentID: strp("0xabc"), Attributes: hostMapping(), SetAttributes: true,
 	}, other)
@@ -307,6 +309,157 @@ func TestTargetCredentialBelongsToItsOwner(t *testing.T) {
 	}
 	if _, err := uc.DeleteTarget(ctx, plain.ID, other); err != nil {
 		t.Fatalf("a credential-less target was not removable: %v", err)
+	}
+}
+
+func TestTargetWritesAreOwnerOrAdministrative(t *testing.T) {
+	uc, _ := targetFixture(t)
+	ctx := context.Background()
+	created, err := uc.CreateTarget(ctx, "7", TargetInput{
+		AgentID: strp("0xabc"), Attributes: hostMapping(), SetAttributes: true,
+	}, Actor{UserID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uc.UpdateTarget(ctx, created.ID, TargetInput{AutoAccept: boolp(true)}, Actor{UserID: 2}); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("a second operator updated the target: %v", err)
+	}
+	if _, err := uc.DeleteTarget(ctx, created.ID, Actor{UserID: 2}); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("a second operator deleted a credential-less target: %v", err)
+	}
+	if _, err := uc.UpdateTarget(ctx, created.ID, TargetInput{AutoAccept: boolp(true)}, Actor{UserID: 1}); err != nil {
+		t.Fatalf("the owner could not update: %v", err)
+	}
+	if _, err := uc.UpdateTarget(ctx, created.ID, TargetInput{AutoAccept: boolp(false)}, Actor{UserID: 9, IsAdmin: true}); err != nil {
+		t.Fatalf("an administrator could not update: %v", err)
+	}
+}
+
+func TestRelationReplaceIsAdministrative(t *testing.T) {
+	uc, _ := targetFixture(t)
+	_, err := uc.ReplaceTargetRelations(context.Background(), "7", []TargetRelationWrite{
+		{AdKey: "owner", PeerTypeID: 3, PeerAttrID: 9},
+	}, actor(false))
+	if !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("a non-administrator replaced relations: %v", err)
+	}
+}
+
+func TestTargetReferenceMustBelongToItsRule(t *testing.T) {
+	uc, repo := targetFixture(t)
+	ctx := context.Background()
+	ruleID := model.ID(1)
+	account := discoverymodel.Account{Name: "account", AdrID: &ruleID, Config: map[string]any{"secret": "sealed"}}
+	account.ID = 5
+	repo.accounts = []discoverymodel.Account{account}
+	// A target on the fixture's rule may use the account.
+	if _, err := uc.CreateTarget(ctx, "7", TargetInput{
+		AdrID:          idp(1),
+		AgentID:        strp("0xabc"),
+		Attributes:     hostMapping(),
+		SetAttributes:  true,
+		ExtraOption:    map[string]any{"_reference": "5", "secret": "inline"},
+		SetExtraOption: true,
+	}, Actor{UserID: 1}); err != nil {
+		t.Fatalf("a reference to the target's own rule was refused: %v", err)
+	}
+
+	// An account attached to another rule is refused as a write, not left to
+	// fail on every collector poll.
+	otherRule := model.ID(2)
+	other := discoverymodel.Account{Name: "other", AdrID: &otherRule, Config: map[string]any{"secret": "sealed"}}
+	other.ID = 6
+	repo.accounts = append(repo.accounts, other)
+	_, err := uc.CreateTarget(ctx, "7", TargetInput{
+		AdrID:          idp(1),
+		AgentID:        strp("0xabc"),
+		Attributes:     hostMapping(),
+		SetAttributes:  true,
+		ExtraOption:    map[string]any{"_reference": "6"},
+		SetExtraOption: true,
+	}, Actor{UserID: 1})
+	if !errors.Is(err, ErrTargetIncomplete) {
+		t.Fatalf("a cross-rule account reference was accepted: %v", err)
+	}
+}
+
+func TestReferenceDropsInlineCredentialAndIsNotReturned(t *testing.T) {
+	uc, repo := targetFixture(t)
+	ctx := context.Background()
+	ruleID := model.ID(1)
+	account := discoverymodel.Account{Name: "account", AdrID: &ruleID, Config: map[string]any{"secret": "sealed"}}
+	account.ID = 5
+	repo.accounts = []discoverymodel.Account{account}
+	created, err := uc.CreateTarget(ctx, "7", TargetInput{
+		AdrID:          idp(1),
+		AgentID:        strp("0xabc"),
+		Attributes:     hostMapping(),
+		SetAttributes:  true,
+		ExtraOption:    map[string]any{"key": "inline-key", "community": "public", "secret": "inline-secret"},
+		SetExtraOption: true,
+	}, Actor{UserID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created.HasKey || !created.HasCommunity || !created.HasSecret {
+		t.Fatalf("credential flags = %+v", created)
+	}
+	if _, ok := created.ExtraOption["key"]; ok {
+		t.Fatalf("an access key was returned: %+v", created.ExtraOption)
+	}
+
+	updated, err := uc.UpdateTarget(ctx, created.ID, TargetInput{
+		ExtraOption:    map[string]any{"_reference": "5"},
+		SetExtraOption: true,
+	}, Actor{UserID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.HasReference || updated.ReferenceAccountID != 5 {
+		t.Fatalf("reference flags = %+v", updated)
+	}
+	if updated.HasSecret || updated.HasKey || updated.HasCommunity {
+		t.Fatalf("an inline credential survived the reference: %+v", updated)
+	}
+	if _, ok := updated.ExtraOption["secret"]; ok {
+		t.Fatalf("the inline secret was returned: %+v", updated.ExtraOption)
+	}
+}
+
+func TestSnmpNodeCommunityIsSealedAndNotReturned(t *testing.T) {
+	stored, err := sealAccountConfig(map[string]any{
+		"nodes": []any{
+			map[string]any{"ip": "10.0.0.1", "version": "2c", "community": "s3cret"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, ok := nodeMaps(stored["nodes"])
+	if !ok || len(nodes) != 1 || !strings.HasPrefix(fmt.Sprint(nodes[0]["community"]), "v1:") {
+		t.Fatalf("node community was not sealed: %+v", stored)
+	}
+
+	view := renderTarget(discoverymodel.Target{ExtraOption: stored})
+	viewNodes, ok := nodeMaps(view.ExtraOption["nodes"])
+	if !ok || len(viewNodes) != 1 {
+		t.Fatalf("view nodes = %+v", view.ExtraOption["nodes"])
+	}
+	if _, present := viewNodes[0]["community"]; present {
+		t.Fatalf("the node community was returned: %+v", viewNodes[0])
+	}
+	if viewNodes[0]["has_community"] != true {
+		t.Fatalf("the view does not report the community: %+v", viewNodes[0])
+	}
+
+	opened, err := openCredentialEntries(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openedNodes, _ := nodeMaps(opened["nodes"])
+	if openedNodes[0]["community"] != "s3cret" {
+		t.Fatalf("the node community did not decrypt: %+v", openedNodes[0])
 	}
 }
 

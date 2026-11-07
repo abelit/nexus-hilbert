@@ -110,12 +110,10 @@ func (u *Usecase) UpdateRule(ctx context.Context, ref string, in RuleInput, acto
 	// Checking only the incoming `is_plugin` let a non-admin update an existing
 	// plugin rule's script by omitting that field; the rule's stored posture is
 	// what decides the authorization. An is_inner rule is shipped with the
-	// product and is likewise administrative.
-	if existing.IsPlugin && !actor.IsAdmin {
-		return nil, fmt.Errorf("%w: a plugin rule carries code, so it is an administrative write", errs.ErrForbidden)
-	}
-	if existing.IsInner && !actor.IsAdmin {
-		return nil, fmt.Errorf("%w: a built-in rule is an administrative write", errs.ErrForbidden)
+	// product and is likewise administrative. A custom plain rule belongs to its
+	// creator.
+	if !mayWriteRule(existing, actor) {
+		return nil, fmt.Errorf("%w: rule belongs to another operator or is administrative", errs.ErrForbidden)
 	}
 
 	write, err := u.ruleWrite(in, actor, true)
@@ -159,13 +157,27 @@ func (u *Usecase) DeleteRule(ctx context.Context, ref string, actor Actor) error
 	if existing == nil {
 		return fmt.Errorf("%w: %s", ErrRuleNotFound, ref)
 	}
-	if existing.IsPlugin && !actor.IsAdmin {
-		return fmt.Errorf("%w: a plugin rule", errs.ErrForbidden)
-	}
-	if existing.IsInner && !actor.IsAdmin {
-		return fmt.Errorf("%w: a built-in rule", errs.ErrForbidden)
+	if !mayWriteRule(existing, actor) {
+		return fmt.Errorf("%w: rule belongs to another operator or is administrative", errs.ErrForbidden)
 	}
 	return u.repo.DeleteRule(ctx, existing.ID)
+}
+
+// mayWriteRule is the one authorization answer for rule writes.
+func mayWriteRule(row *discoverymodel.Rule, actor Actor) bool {
+	if row == nil {
+		return false
+	}
+	// A plugin carries code; a built-in rule affects every target built on it.
+	if row.IsPlugin || row.IsInner {
+		return actor.IsAdmin
+	}
+	if row.Owner == nil {
+		// An ownerless custom rule came from an import or an adopted database;
+		// nobody can claim it, so only an administrator may change it.
+		return actor.IsAdmin
+	}
+	return *row.Owner == actor.UserID || actor.IsAdmin
 }
 
 // TemplateImportResult is what a template import did.

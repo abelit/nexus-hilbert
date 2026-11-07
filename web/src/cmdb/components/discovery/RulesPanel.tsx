@@ -916,66 +916,67 @@ export function RuleDrawer({
                 {tr('还没有字段。脚本返回的属性可以从这里声明。', 'No fields yet. Declare the attributes the script returns here.')}
               </p>
             ) : (
-              <div className="mt-3 flex flex-col gap-2">
-                {attributes.map((attribute, index) => (
-                  <div key={attribute.key} className="rounded-md border border-border/60 p-2">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="text-[11px] text-text-faint">
-                        {tr(`字段 ${index + 1}`, `Field ${index + 1}`)}
-                      </span>
-                      <Button
-                        variant="dangerGhost"
-                        size="sm"
-                        type="button"
-                        onClick={() => removeAttribute(attribute.key)}
-                        aria-label={tr(`删除字段 ${index + 1}`, `Remove field ${index + 1}`)}
-                        className="inline-flex size-7 items-center justify-center p-0"
-                      >
-                        <Trash2 size={12} aria-hidden="true" />
-                      </Button>
-                    </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_7.5rem]">
-                      <div className="min-w-0">
-                        <Label htmlFor={`cmdb-discovery-attribute-name-${attribute.key}`}>
-                          {tr('名称', 'Name')}
-                        </Label>
-                        <Input
-                          id={`cmdb-discovery-attribute-name-${attribute.key}`}
-                          aria-label={tr(`字段名称 ${index + 1}`, `Field name ${index + 1}`)}
-                          value={attribute.name}
-                          onChange={(event) => updateAttribute(attribute.key, { name: event.target.value })}
-                          placeholder="hostname"
-                          className="mt-1 w-full font-mono"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <Label htmlFor={`cmdb-discovery-attribute-type-${attribute.key}`}>
-                          {tr('类型', 'Type')}
-                        </Label>
-                        <Select
-                          id={`cmdb-discovery-attribute-type-${attribute.key}`}
-                          aria-label={tr(`字段类型 ${index + 1}`, `Field type ${index + 1}`)}
-                          value={attribute.type}
-                          onValueChange={(next) => updateAttribute(attribute.key, { type: next })}
-                          options={PLUGIN_ATTRIBUTE_TYPES.map((kind) => ({ value: kind, label: kind }))}
-                          className="mt-1 w-full"
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-2">
-                      <Label htmlFor={`cmdb-discovery-attribute-desc-${attribute.key}`}>
-                        {tr('说明', 'Description')}
-                      </Label>
-                      <Input
-                        id={`cmdb-discovery-attribute-desc-${attribute.key}`}
-                        aria-label={tr(`字段说明 ${index + 1}`, `Field description ${index + 1}`)}
-                        value={attribute.desc}
-                        onChange={(event) => updateAttribute(attribute.key, { desc: event.target.value })}
-                        className="mt-1 w-full"
-                      />
-                    </div>
-                  </div>
-                ))}
+              // THE FIELD LIST IS A TABLE, NOT A STACK OF CARDS. Three short
+              // columns read across as one definition per row; the per-field
+              // card made a five-field script feel like five separate forms.
+              <div className="mt-3 overflow-x-auto rounded-md border border-border/60">
+                <table className="w-full min-w-[30rem] border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-card text-left text-[11px] font-medium text-text-muted">
+                      <th scope="col" className="px-2 py-2">{tr('名称', 'Name')}</th>
+                      <th scope="col" className="w-28 px-2 py-2">{tr('类型', 'Type')}</th>
+                      <th scope="col" className="px-2 py-2">{tr('描述', 'Description')}</th>
+                      <th scope="col" className="w-px px-2 py-2">
+                        <span className="sr-only">{tr('操作', 'Actions')}</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attributes.map((attribute, index) => (
+                      <tr key={attribute.key} className="border-b border-border/60 last:border-b-0">
+                        <td className="px-2 py-2">
+                          <Input
+                            aria-label={tr(`字段名称 ${index + 1}`, `Field name ${index + 1}`)}
+                            value={attribute.name}
+                            onChange={(event) => updateAttribute(attribute.key, { name: event.target.value })}
+                            placeholder="hostname"
+                            className="w-full font-mono"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Select
+                            aria-label={tr(`字段类型 ${index + 1}`, `Field type ${index + 1}`)}
+                            value={attribute.type}
+                            onValueChange={(next) => updateAttribute(attribute.key, { type: next })}
+                            options={PLUGIN_ATTRIBUTE_TYPES.map((kind) => ({ value: kind, label: kind }))}
+                            className="w-full"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            aria-label={tr(`字段说明 ${index + 1}`, `Field description ${index + 1}`)}
+                            value={attribute.desc}
+                            onChange={(event) => updateAttribute(attribute.key, { desc: event.target.value })}
+                            className="w-full"
+                          />
+                        </td>
+                        <td className="w-px px-2 py-2">
+                          <Button
+                            variant="dangerGhost"
+                            size="sm"
+                            type="button"
+                            onClick={() => removeAttribute(attribute.key)}
+                            aria-label={tr(`删除字段 ${index + 1}`, `Remove field ${index + 1}`)}
+                            title={tr(`删除字段 ${index + 1}`, `Remove field ${index + 1}`)}
+                            className="inline-flex size-7 items-center justify-center p-0"
+                          >
+                            <Trash2 size={12} aria-hidden="true" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>

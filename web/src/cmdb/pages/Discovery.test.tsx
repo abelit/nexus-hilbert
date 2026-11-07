@@ -357,9 +357,12 @@ describe('the discovery page', () => {
       id: 5,
       name: '默认账号',
       adr_id: 1,
-      config: { key: 'AK-1', region: 'cn-hangzhou' },
+      // `key` is credential material and is stripped by the read path; the
+      // server reports has_key instead.
+      config: { region: 'cn-hangzhou' },
       has_secret: true,
       has_password: false,
+      has_key: true,
     };
     let saved: unknown;
     server.use(
@@ -394,8 +397,9 @@ describe('the discovery page', () => {
             id: 5,
             name: '默认账号',
             // The entries the form does not edit survive, and the blank secret
-            // is replaced by the one the operator typed.
-            config: { key: 'AK-1', region: 'cn-hangzhou', secret: 'new-secret' },
+            // is replaced by the one the operator typed. The access key is not
+            // sent back, so sealAccountConfig keeps the stored one.
+            config: { region: 'cn-hangzhou', secret: 'new-secret' },
           },
         ],
       }),

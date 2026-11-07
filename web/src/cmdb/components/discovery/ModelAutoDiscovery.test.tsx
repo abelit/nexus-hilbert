@@ -148,11 +148,11 @@ function baseHandlers(gotTargets: Target[]) {
   );
 }
 
-function renderPanel() {
+function renderPanel(isAdmin = true) {
   return render(
     <MemoryRouter>
       <ToastProvider>
-        <ModelAutoDiscovery modelRef="1" modelLabel="主机" isAdmin />
+        <ModelAutoDiscovery modelRef="1" modelLabel="主机" isAdmin={isAdmin} />
       </ToastProvider>
     </MemoryRouter>,
   );
@@ -226,6 +226,33 @@ describe('model auto discovery', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('启用目标需要填写 Cron 表达式。');
+  });
+
+  it('keeps a target read-only for a non-owner without an administrator role', async () => {
+    baseHandlers([target]);
+    renderPanel(false);
+
+    expect(await screen.findByText('只有目标创建者或管理员可以修改这个目标。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  });
+
+  it('keeps relation discovery read-only for a non-administrator', async () => {
+    baseHandlers([target]);
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/1/relation-children', () => HttpResponse.json({ items: [peer], total: 1 })),
+      http.get('/api/v1/cmdb/discovery/ci-types/1/target-relations', () =>
+        HttpResponse.json({
+          items: [{ id: 5, ad_key: 'rack', peer_type_id: 9, peer_attr_id: 12 }],
+          total: 1,
+        }),
+      ),
+    );
+    renderPanel(false);
+
+    await screen.findByRole('heading', { name: 'server' });
+    await userEvent.click(screen.getByRole('tab', { name: '关系自动发现' }));
+    expect(await screen.findByText('关系自动发现是模型级配置，只有管理员可以修改。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存关系' })).toBeDisabled();
   });
 
   it('invites the operator to add the first target', async () => {

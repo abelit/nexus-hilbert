@@ -80,11 +80,16 @@ func (h *Handler) agentRegister(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"api_version":     "agent.v1",
 		"max_batch_items": 1000,
 		"euler":           got,
-	})
+	}
+	if publicKey, keyID := h.uc.TaskSigningKey(); len(publicKey) > 0 {
+		response["task_signing_public_key"] = publicKey
+		response["task_signing_key_id"] = keyID
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) agentHeartbeat(w http.ResponseWriter, r *http.Request) {

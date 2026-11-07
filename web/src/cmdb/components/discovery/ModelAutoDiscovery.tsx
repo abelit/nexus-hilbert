@@ -31,6 +31,7 @@ import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 import { relativeTime } from '@/lib/format';
+import { useMe } from '@/store/me';
 
 import { describeError } from '../../api/http';
 import {
@@ -66,6 +67,8 @@ import { DataTable, type Column } from '../DataTable';
 import { useToast } from '../Toast';
 import { TargetDrawer } from './TargetDrawer';
 import { CronField } from './CronField';
+import { ProviderConfig, providerTitle } from './ProviderConfig';
+import { scalarText, type ProviderSecrets } from './providerConfig';
 import { RuleDrawer } from './RulesPanel';
 import {
   ruleCategory,
@@ -139,6 +142,7 @@ export function ModelAutoDiscovery({
 }) {
   const { tr } = useI18n();
   const toast = useToast();
+  const { me } = useMe();
   const { confirmAction, dialog } = useDialogs();
 
   const [view, setView] = useState<View>('attributes');
@@ -216,7 +220,21 @@ export function ModelAutoDiscovery({
     target_count: targets.length,
   };
 
+  const canManage = (target: Target) =>
+    isAdmin || (target.uid != null && me?.id != null && target.uid === me.id);
+  const canEditRule = (rule: Rule | undefined) =>
+    Boolean(
+      rule &&
+        !rule.is_inner &&
+        (isAdmin ||
+          (!rule.is_plugin && rule.owner != null && me?.id != null && rule.owner === me.id)),
+    );
+
   const remove = async (target: Target) => {
+    if (!canManage(target)) {
+      toast.error(tr('只有目标创建者或管理员可以删除。', 'Only the target owner or an administrator may delete it.'));
+      return;
+    }
     const label = targetLabel(target, ruleByID.get(target.adr_id));
     const ok = await confirmAction(
       tr(
@@ -358,6 +376,8 @@ export function ModelAutoDiscovery({
                 discoverableErr={discoverableErr}
                 refreshKey={refreshNonce}
                 isAdmin={isAdmin}
+                canManage={canManage(selected)}
+                canEditRule={canEditRule(selectedRule)}
                 onEdit={() => setEditing(selected)}
                 onEditRule={() => setEditingRule(selectedRule ?? null)}
                 onDelete={() => void remove(selected)}
@@ -409,6 +429,7 @@ export function ModelAutoDiscovery({
             sourceKeys={discoverable}
             sourceErr={discoverableErr}
             refreshKey={refreshNonce}
+            isAdmin={isAdmin}
           />
         </TabsContent>
       </Tabs>
@@ -462,6 +483,7 @@ export function ModelAutoDiscovery({
           onSaved={async (message) => {
             setEditingRule(null);
             toast.success(message);
+            setRefreshNonce((current) => current + 1);
             await load(true);
           }}
         />
@@ -474,6 +496,7 @@ export function ModelAutoDiscovery({
           onSaved={async (message) => {
             setCreatingRule(false);
             toast.success(message);
+            setRefreshNonce((current) => current + 1);
             await load(true);
           }}
         />
@@ -519,6 +542,8 @@ function TargetEditor({
   discoverableErr,
   refreshKey,
   isAdmin,
+  canManage,
+  canEditRule,
   onEdit,
   onEditRule,
   onDelete,
@@ -531,6 +556,8 @@ function TargetEditor({
   discoverableErr: string | null;
   refreshKey: number;
   isAdmin: boolean;
+  canManage: boolean;
+  canEditRule: boolean;
   onEdit(): void;
   onEditRule(): void;
   onDelete(): void;
@@ -538,11 +565,20 @@ function TargetEditor({
 }) {
   const { tr } = useI18n();
   const [mapping, setMapping] = useState<Record<string, string>>(() => targetMapping(target));
+  const [extra, setExtra] = useState<Record<string, unknown>>(() => ({ ...(target.extra_option ?? {}) }));
+  const [alias, setAlias] = useState(() => targetAlias(target));
+  const [secrets, setSecrets] = useState<ProviderSecrets>({
+    key: '',
+    secret: '',
+    password: '',
+    community: '',
+  });
   const [catalogFields, setCatalogFields] = useState<FieldMeta[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogErr, setCatalogErr] = useState<string | null>(null);
   const [extraKeys, setExtraKeys] = useState<string[]>([]);
   const [customKey, setCustomKey] = useState('');
+  const [mappedOnly, setMappedOnly] = useState(false);
   const [mode, setMode] = useState<Mode>(() => modeOf(target));
   const [agentID, setAgentID] = useState(target.agent_id ?? '');
   const [queryExpr, setQueryExpr] = useState(target.query_expr ?? '');
@@ -552,7 +588,7 @@ function TargetEditor({
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
 
-  const category = typeof target.extra_option?.category === 'string' ? target.extra_option.category : '';
+  const category = scalarText(extra.category);
 
   useEffect(() => {
     let live = true;
@@ -603,16 +639,26 @@ function TargetEditor({
   );
   const payload = mappingPayload(mapping);
   const matchedCount = keys.filter((key) => (mapping[key] ?? '').trim() !== '').length;
+  const visibleKeys = mappedOnly
+    ? keys.filter((key) => (mapping[key] ?? '').trim() !== '')
+    : keys;
   const missingUnique = Boolean(uniqueKey) && !uniqueMapped(payload, uniqueKey);
   const usesCollector = rule?.type === 'http' || rule?.type === 'snmp';
   const dirty =
     !sameMapping(mapping, targetMapping(target)) ||
+    alias.trim() !== targetAlias(target) ||
+    JSON.stringify(extra) !== JSON.stringify(target.extra_option ?? {}) ||
+    Object.values(secrets).some((value) => value.trim() !== '') ||
     mode !== modeOf(target) ||
     (mode === 'agent' && agentID.trim() !== (target.agent_id ?? '').trim()) ||
     (mode === 'query' && queryExpr.trim() !== (target.query_expr ?? '').trim()) ||
     cron.trim() !== (target.cron ?? '').trim() ||
     autoAccept !== target.auto_accept ||
     enabled !== target.enabled;
+
+  const patchExtra = (patch: Record<string, unknown>) => {
+    setExtra((current) => ({ ...current, ...patch }));
+  };
 
   const addCustomKey = () => {
     const key = customKey.trim();
@@ -623,6 +669,9 @@ function TargetEditor({
 
   const reset = () => {
     setMapping(targetMapping(target));
+    setExtra({ ...(target.extra_option ?? {}) });
+    setAlias(targetAlias(target));
+    setSecrets({ key: '', secret: '', password: '', community: '' });
     setExtraKeys([]);
     setCustomKey('');
     setMode(modeOf(target));
@@ -636,7 +685,26 @@ function TargetEditor({
 
   const save = async () => {
     setFormErr(null);
-    if (missingUnique) {
+    const categoryChanged = category !== scalarText(target.extra_option?.category);
+    if (categoryChanged && (catalogLoading || catalogErr)) {
+      setFormErr(
+        catalogLoading
+          ? tr('资源类型字段仍在加载，请稍后保存。', 'The resource fields are still loading; save again in a moment.')
+          : catalogErr || tr('无法读取资源类型字段。', 'Could not load the resource fields.'),
+      );
+      return;
+    }
+    // Switching a cloud resource must not carry the previous resource's
+    // mappings into the new one; the catalogue is the visible field set.
+    const allowedKeys = new Set<string>([
+      ...(rule?.attributes ?? []).map((field) => field.name),
+      ...catalogFields.map((field) => field.name),
+      ...extraKeys,
+    ]);
+    const attributesForSave = categoryChanged
+      ? Object.fromEntries(Object.entries(payload).filter(([key]) => allowedKeys.has(key)))
+      : payload;
+    if (uniqueKey && !uniqueMapped(attributesForSave, uniqueKey)) {
       setFormErr(
         tr(
           `模型的标识属性「${uniqueKey}」必须出现在映射里。`,
@@ -662,12 +730,21 @@ function TargetEditor({
       return;
     }
 
+    // The non-secret extra_option is sent whole; credentials are sent only
+    // when the operator typed a replacement. The backend merges absent
+    // credentials with the stored ciphertext.
+    const extraForSave: Record<string, unknown> = { ...extra, alias: alias.trim() };
+    for (const key of ['key', 'secret', 'password', 'community'] as const) {
+      if (secrets[key].trim()) extraForSave[key] = secrets[key].trim();
+    }
+
     const input: TargetInput = {
-      attributes: payload,
+      attributes: attributesForSave,
       auto_accept: autoAccept,
       agent_id: mode === 'agent' ? agentID.trim() : '',
       query_expr: mode === 'query' ? queryExpr.trim() : '',
       cron: cron.trim(),
+      extra_option: extraForSave,
       enabled,
     };
 
@@ -675,6 +752,9 @@ function TargetEditor({
     try {
       const saved = await updateTarget(target.id, input);
       setMapping(targetMapping(saved));
+      setExtra({ ...(saved.extra_option ?? {}) });
+      setAlias(targetAlias(saved));
+      setSecrets({ key: '', secret: '', password: '', community: '' });
       setMode(modeOf(saved));
       setAgentID(saved.agent_id ?? '');
       setQueryExpr(saved.query_expr ?? '');
@@ -690,6 +770,11 @@ function TargetEditor({
   };
 
   const label = targetLabel(target, rule);
+  const providerMeta =
+    rule && (rule.type === 'http' || rule.type === 'snmp' || rule.type === 'components')
+      ? providerTitle(rule, tr)
+      : null;
+  const ProviderIcon = providerMeta?.icon;
   const modeOptions: Array<{ value: Mode; label: string; hint: string; disabled?: boolean }> = [
     {
       value: 'all',
@@ -717,6 +802,13 @@ function TargetEditor({
         </div>
       )}
 
+      {!canManage && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-300">
+          {tr('只有目标创建者或管理员可以修改这个目标。', 'Only the target owner or an administrator may modify this target.')}
+        </div>
+      )}
+
+      <fieldset disabled={!canManage} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 p-4">
           <div className="flex min-w-0 items-start gap-2.5">
@@ -737,7 +829,7 @@ function TargetEditor({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" type="button" onClick={onEdit} className="inline-flex items-center gap-1">
+            <Button variant="outline" size="sm" type="button" onClick={onEdit} disabled={!canManage} className="inline-flex items-center gap-1">
               <Pencil size={12} aria-hidden="true" />
               {tr('编辑目标', 'Edit target')}
             </Button>
@@ -746,6 +838,7 @@ function TargetEditor({
               size="sm"
               type="button"
               onClick={onDelete}
+              disabled={!canManage}
               aria-label={tr('删除发现目标', 'Delete discovery target')}
               title={tr('删除发现目标', 'Delete discovery target')}
               className="size-7 px-0"
@@ -777,7 +870,16 @@ function TargetEditor({
               <Chip tone={keys.length > 0 && matchedCount === keys.length ? 'success' : 'warning'}>
                 {tr(`${matchedCount}/${keys.length} 已匹配`, `${matchedCount}/${keys.length} mapped`)}
               </Chip>
-              {rule && !rule.is_inner && (
+              <Button
+                variant="subtle"
+                size="sm"
+                type="button"
+                aria-pressed={mappedOnly}
+                onClick={() => setMappedOnly((current) => !current)}
+              >
+                {mappedOnly ? tr('显示全部', 'Show all') : tr('仅显示已映射', 'Mapped only')}
+              </Button>
+              {canEditRule && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -818,7 +920,11 @@ function TargetEditor({
                 <span aria-hidden="true" />
                 <span>{tr('自动发现', 'Discovered field')}</span>
               </div>
-              {keys.map((key) => {
+              {visibleKeys.length === 0 ? (
+                <p className="px-3 py-4 text-xs text-text-muted">
+                  {tr('还没有已映射的字段。', 'No mapped fields yet.')}
+                </p>
+              ) : visibleKeys.map((key) => {
                 const field = fieldByKey.get(key);
                 const identity = uniqueKey !== '' && (mapping[key] ?? '').trim() === uniqueKey;
                 const detail =
@@ -915,6 +1021,34 @@ function TargetEditor({
         </div>
       </Card>
 
+      {providerMeta && rule && ProviderIcon && (
+        <Card>
+          <div className="flex flex-col gap-4 p-4">
+            <SectionHeading
+              icon={<ProviderIcon size={15} aria-hidden="true" />}
+              title={providerMeta.title}
+              hint={providerMeta.hint}
+            />
+            <ProviderConfig
+              rule={rule}
+              extra={extra}
+              secrets={secrets}
+              stored={{
+                hasKey: Boolean(target.has_key),
+                hasSecret: target.has_secret,
+                hasPassword: target.has_password,
+                hasCommunity: Boolean(target.has_community),
+              }}
+              refreshKey={refreshKey}
+              canEditRule={canEditRule}
+              onExtraChange={patchExtra}
+              onSecretsChange={(patch) => setSecrets((current) => ({ ...current, ...patch }))}
+              onManageAccounts={onEditRule}
+            />
+          </div>
+        </Card>
+      )}
+
       <Card>
         <div className="flex flex-col gap-4 p-4">
           <SectionHeading
@@ -925,6 +1059,20 @@ function TargetEditor({
               'Which collectors pull this target, and how often.',
             )}
           />
+
+          <div>
+            <Label htmlFor={`cmdb-model-discovery-alias-${target.id}`}>{tr('目标别名', 'Target alias')}</Label>
+            <Input
+              id={`cmdb-model-discovery-alias-${target.id}`}
+              value={alias}
+              onChange={(event) => setAlias(event.target.value)}
+              placeholder={rule?.name ?? label}
+              className="mt-1 w-full"
+            />
+            <p className="mt-1 text-[11px] text-text-faint">
+              {tr('显示在目标切换条；留空使用规则名。', 'Shown in the target tabs; blank uses the rule name.')}
+            </p>
+          </div>
 
           <div role="radiogroup" aria-label={tr('执行目标', 'Execution scope')} className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {modeOptions.map((option) => {
@@ -1031,6 +1179,8 @@ function TargetEditor({
         </div>
       </Card>
 
+      </fieldset>
+
       <TargetHealth target={target} refreshKey={refreshKey} dirty={dirty} />
 
       <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 bg-bg/95 px-1 py-3 backdrop-blur">
@@ -1038,7 +1188,7 @@ function TargetEditor({
           {tr('保存后，采集器在下一次同步时拿到新配置。', 'After saving, a collector receives the new configuration on its next sync.')}
         </p>
         <div className="flex flex-wrap items-center gap-2 pe-32">
-          <Button variant="outline" size="sm" type="button" onClick={reset} disabled={saving}>
+          <Button variant="outline" size="sm" type="button" onClick={reset} disabled={!canManage || saving}>
             {tr('重置', 'Reset')}
           </Button>
           <Button
@@ -1046,7 +1196,7 @@ function TargetEditor({
             size="sm"
             type="button"
             onClick={() => void save()}
-            disabled={saving || missingUnique}
+            disabled={!canManage || saving || missingUnique}
           >
             {saving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
           </Button>
@@ -1409,12 +1559,14 @@ function RelationEditor({
   sourceKeys,
   sourceErr,
   refreshKey,
+  isAdmin,
 }: {
   modelRef: string;
   modelLabel: string;
   sourceKeys: string[];
   sourceErr: string | null;
   refreshKey: number;
+  isAdmin: boolean;
 }) {
   const { tr } = useI18n();
   const toast = useToast();
@@ -1500,6 +1652,10 @@ function RelationEditor({
 
   const save = async () => {
     setFormErr(null);
+    if (!isAdmin) {
+      setFormErr(tr('只有管理员可以修改关系自动发现。', 'Only an administrator may change relation discovery.'));
+      return;
+    }
     const got = relationPayload(rows);
     if (got.error === 'incomplete') {
       setFormErr(tr('每一行都要选好发现字段、对端模型和对端属性。', 'Every row needs a discovery field, peer model and peer attribute.'));
@@ -1594,6 +1750,13 @@ function RelationEditor({
           </span>
         </div>
 
+        {!isAdmin && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-300">
+            {tr('关系自动发现是模型级配置，只有管理员可以修改。', 'Relation discovery is model-level configuration; only an administrator may change it.')}
+          </div>
+        )}
+
+        <fieldset disabled={!isAdmin} className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
         {formErr && (
           <div role="alert" className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300">
             {formErr}
@@ -1702,10 +1865,11 @@ function RelationEditor({
             <Plus size={12} aria-hidden="true" />
             {tr('添加关系', 'Add relation')}
           </Button>
-          <Button variant="primary" size="sm" type="button" onClick={() => void save()} disabled={saving}>
+          <Button variant="primary" size="sm" type="button" onClick={() => void save()} disabled={!isAdmin || saving}>
             {saving ? tr('保存中…', 'Saving…') : tr('保存关系', 'Save relations')}
           </Button>
         </div>
+        </fieldset>
       </div>
     </Card>
   );

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	discoverymodel "github.com/ongridio/ongrid/internal/cmdb/model/discovery"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
@@ -118,8 +119,10 @@ func TestBuiltinRuleWriteIsAdministrative(t *testing.T) {
 
 func TestRuleNameIsUnique(t *testing.T) {
 	uc, repo := newStubUsecase(t)
+	owner := model.ID(1)
 	existing := discoverymodel.Rule{Name: "aliyun"}
 	existing.ID = 1
+	existing.Owner = &owner
 	repo.rules = append(repo.rules, existing)
 
 	_, err := uc.CreateRule(context.Background(), RuleInput{Name: "aliyun"}, Actor{UserID: 1})

@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -309,6 +310,16 @@ type ReportReceiptWrite struct {
 // WithAgents supplies the agent persistence.
 func (u *Usecase) WithAgents(repo AgentRepo) *Usecase {
 	u.agents = repo
+	return u
+}
+
+// WithSigningKey enables task/artifact signatures.
+func (u *Usecase) WithSigningKey(key ed25519.PrivateKey) *Usecase {
+	u.signingKey = key
+	u.signingKeyID = ""
+	if key != nil {
+		u.signingKeyID = signingKeyID(key.Public().(ed25519.PublicKey))
+	}
 	return u
 }
 

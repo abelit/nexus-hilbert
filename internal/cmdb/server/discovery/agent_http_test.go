@@ -3,6 +3,9 @@ package discovery
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,10 +42,15 @@ func TestAgentHTTPRegisterSyncReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := discoverystore.NewRepo(db)
+	signingPublic, signingPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	uc := discoverybiz.NewUsecase(repo).
 		WithAgents(repo).
 		WithPool(repo).
-		WithModels(agentTestModels{})
+		WithModels(agentTestModels{}).
+		WithSigningKey(signingPrivate)
 	ctx := context.Background()
 
 	rule, err := repo.CreateRule(ctx, discoverybiz.RuleWrite{
@@ -92,11 +100,16 @@ func TestAgentHTTPRegisterSyncReport(t *testing.T) {
 		return resp.StatusCode, out
 	}
 
-	if status, body := post("/api/v1/cmdb/discovery/agent/register", map[string]any{
+	status, registered := post("/api/v1/cmdb/discovery/agent/register", map[string]any{
 		"euler_id": "0xabc", "riemann_id": "riemann-1", "hostname": "host-1",
 		"capabilities": map[string]any{"roles": []string{"host"}},
-	}); status != http.StatusOK {
-		t.Fatalf("register status=%d body=%v", status, body)
+	})
+	if status != http.StatusOK {
+		t.Fatalf("register status=%d body=%v", status, registered)
+	}
+	anchor, _ := base64.StdEncoding.DecodeString(fmt.Sprint(registered["task_signing_public_key"]))
+	if !bytes.Equal(anchor, signingPublic) || registered["task_signing_key_id"] == "" {
+		t.Fatalf("register did not return the task signing anchor: %v", registered)
 	}
 
 	status, body := post("/api/v1/cmdb/discovery/agent/tasks/sync", map[string]any{
@@ -115,6 +128,9 @@ func TestAgentHTTPRegisterSyncReport(t *testing.T) {
 	}
 	if task["collect_key"] != "server" || task["unique_key"] != "machine_uuid" {
 		t.Fatalf("task = %v", task)
+	}
+	if task["signature"] == "" || task["signing_key_id"] != registered["task_signing_key_id"] {
+		t.Fatalf("task is not signed with the registered key: %v", task)
 	}
 
 	instance := []byte(`{"machine_uuid":"m-1","hostname":"host-1"}`)

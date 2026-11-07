@@ -226,6 +226,21 @@ func Providers() ([]Provider, error) {
 	return out, nil
 }
 
+// ProviderByEN finds a provider by its catalogue key. The catalog's own
+// lookups take this key; a rule's display name is not it.
+func ProviderByEN(key string) (Provider, bool, error) {
+	all, err := Providers()
+	if err != nil {
+		return Provider{}, false, err
+	}
+	for _, p := range all {
+		if p.ProviderEN() == key {
+			return p, true, nil
+		}
+	}
+	return Provider{}, false, nil
+}
+
 // ProviderByName finds a provider by its display name.
 //
 // CANTOR MATCHED ON THE DISPLAY NAME, which is what the console's URL carries,

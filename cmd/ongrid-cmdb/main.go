@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/errgroup"
 
+	cmdbdiscoverybiz "github.com/ongridio/ongrid/internal/cmdb/biz/discovery"
 	cmdbfilebiz "github.com/ongridio/ongrid/internal/cmdb/biz/file"
 	cmdbdata "github.com/ongridio/ongrid/internal/cmdb/data"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
@@ -127,6 +128,12 @@ func main() {
 	// two processes from AutoMigrating the same schema at once.
 	if err := dbx.RunMigrationsLocked(rootCtx, db, 60*time.Second, log, cmdbdata.Migrate); err != nil {
 		fatal(log, "run cmdb migrations", err)
+	}
+
+	// A malformed dedicated signing seed must stop the process: continuing
+	// without a trust anchor would silently downgrade task verification.
+	if _, _, err := cmdbdiscoverybiz.SigningKeyFromEnv(); err != nil {
+		fatal(log, "discovery task signing key", err)
 	}
 
 	s3UseSSL := cfg.FileStorage.S3UseSSL

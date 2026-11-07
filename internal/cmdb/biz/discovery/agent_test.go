@@ -3,8 +3,10 @@ package discovery
 import (
 	"context"
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -263,6 +265,77 @@ func TestCollectorInventoryIsAdminOnly(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].EulerID != "0xabc" {
 		t.Fatalf("inventory = %+v", got)
+	}
+}
+
+func TestAgentTaskSigningCoversFieldsAndArtifact(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc, repo, _, _ := agentFixture(t)
+	uc.WithSigningKey(private)
+	repo.rules[0].IsPlugin = true
+	repo.rules[0].UniqueKey = strp("ip")
+	repo.rules[0].PluginScript = strp("def collect(params):\n    return []\n")
+	repo.targets[0].Attributes = map[string]any{"ip": "ip", "hostname": "hostname"}
+
+	snapshot, err := uc.SyncAgentTasks(context.Background(), agentPrincipal(), AgentTaskSyncRequest{EulerID: "0xabc"})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(snapshot.Changed) != 1 {
+		t.Fatalf("changed = %+v", snapshot.Changed)
+	}
+	task := snapshot.Changed[0]
+	if task.SigningKeyID == "" || len(task.Signature) == 0 {
+		t.Fatalf("task was not signed: %+v", task)
+	}
+	if !ed25519.Verify(public, canonicalTaskSigningPayload(task), task.Signature) {
+		t.Fatal("task signature does not verify")
+	}
+	if task.Artifact == nil || len(task.Artifact.Signature) == 0 {
+		t.Fatalf("artifact was not signed: %+v", task.Artifact)
+	}
+	if !ed25519.Verify(public, canonicalArtifactSigningPayload(task), task.Artifact.Signature) {
+		t.Fatal("artifact signature does not verify")
+	}
+
+	// A modified field is no longer the task CMDB signed.
+	tampered := task
+	tampered.Params = map[string]any{"injected": true}
+	if ed25519.Verify(public, canonicalTaskSigningPayload(tampered), task.Signature) {
+		t.Fatal("a tampered task still verifies")
+	}
+}
+
+func TestAgentTaskSyncSkipsATargetWithABadReference(t *testing.T) {
+	uc, repo, _, _ := agentFixture(t)
+	bad := discoverymodel.Target{
+		AdrID: idp(1), TypeID: idp(1), AgentID: strp("0xabc"),
+		Cron:        strp("*/5 * * * *"),
+		Attributes:  map[string]any{"machine_uuid": "hostname"},
+		ExtraOption: map[string]any{"_reference": "999"},
+	}
+	bad.ID = 11
+	bad.Enabled = true
+	repo.targets = append(repo.targets, bad)
+
+	snapshot, err := uc.SyncAgentTasks(context.Background(), agentPrincipal(), AgentTaskSyncRequest{EulerID: "0xabc"})
+	if err != nil {
+		t.Fatalf("one bad target stopped the snapshot: %v", err)
+	}
+	if len(snapshot.Changed) != 1 || snapshot.Changed[0].AdrID != 1 {
+		t.Fatalf("changed = %+v", snapshot.Changed)
+	}
+	found := false
+	for _, warning := range snapshot.Warnings {
+		if strings.Contains(warning, "target 11") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %+v", snapshot.Warnings)
 	}
 }
 

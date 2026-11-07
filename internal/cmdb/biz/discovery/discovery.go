@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"crypto/ed25519"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
@@ -60,6 +61,12 @@ type Usecase struct {
 	// agents is the machine side: principals, registered collectors, task ACKs
 	// and report receipts. Nillable so the console-only tests keep working.
 	agents AgentRepo
+
+	// signingKey is the task/artifact signing key. Nil means this deployment
+	// does not sign tasks; euler then receives no trust anchor and does not
+	// verify signatures.
+	signingKey   ed25519.PrivateKey
+	signingKeyID string
 
 	// Now is the clock, injectable so a test can reason about timestamps
 	// without sleeping.

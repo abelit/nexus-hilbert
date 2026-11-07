@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -318,35 +319,47 @@ func (u *Usecase) openCredentials(ctx context.Context, target discoverymodel.Tar
 
 	// A TARGET MAY NAME AN ACCOUNT INSTEAD OF HOLDING A KEY. The reference
 	// replaces whatever credential the target itself carries, which is cantor's
-	// behaviour — `pop` then `update`.
-	if raw, ok := out["reference"]; !ok || raw == nil {
-		if refRaw, ok := out["_reference"]; ok && refRaw != nil {
-			id := toModelID(refRaw)
-			if id == 0 {
-				return nil, fmt.Errorf("%w: target %d points at account %v", ErrTargetIncomplete, target.ID, refRaw)
-			}
-			account, err := u.repo.LoadAccount(ctx, id)
-			if err != nil {
-				return nil, err
-			}
-			if account == nil {
-				// cantor's `get_config_by_id` returned an empty mapping for a
-				// missing account, so the target was handed out with no
-				// credential at all and failed silently at the far end. A
-				// reference that names nothing is a configuration error the
-				// deployment can fix, and it is reported as one.
-				return nil, fmt.Errorf("%w: target %d points at account %d, which does not exist",
-					ErrTargetIncomplete, target.ID, id)
-			}
-			delete(out, AccountPasswordKey)
-			delete(out, AccountSecretKey)
-			opened, err := openCredentialEntries(account.Config)
-			if err != nil {
-				return nil, fmt.Errorf("%w: target %d, account %d, %v", ErrCredentialUnreadable, target.ID, id, err)
-			}
-			for k, v := range opened {
-				out[k] = v
-			}
+	// behaviour — `pop` then `update`. `_reference` is the current key; a legacy
+	// `reference` is accepted only when no underscore key was written.
+	refRaw, hasRef := out["_reference"]
+	if !hasRef || refRaw == nil {
+		refRaw, hasRef = out["reference"]
+	}
+	delete(out, "reference")
+	delete(out, "_reference")
+	if hasRef && refRaw != nil {
+		id := toModelID(refRaw)
+		if id == 0 {
+			return nil, fmt.Errorf("%w: target %d points at account %v", ErrTargetIncomplete, target.ID, refRaw)
+		}
+		account, err := u.repo.LoadAccount(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if account == nil {
+			// cantor's `get_config_by_id` returned an empty mapping for a
+			// missing account, so the target was handed out with no
+			// credential at all and failed silently at the far end. A
+			// reference that names nothing is a configuration error the
+			// deployment can fix, and it is reported as one.
+			return nil, fmt.Errorf("%w: target %d points at account %d, which does not exist",
+				ErrTargetIncomplete, target.ID, id)
+		}
+		// A reference may use only an account of the target's rule. Otherwise a
+		// target could borrow another provider's credential.
+		if account.AdrID == nil || target.AdrID == nil || *account.AdrID != *target.AdrID {
+			return nil, fmt.Errorf("%w: target %d references account %d from another rule",
+				ErrTargetIncomplete, target.ID, id)
+		}
+		for _, key := range credentialKeys {
+			delete(out, key)
+		}
+		opened, err := openCredentialEntries(account.Config)
+		if err != nil {
+			return nil, fmt.Errorf("%w: target %d, account %d, %v", ErrCredentialUnreadable, target.ID, id, err)
+		}
+		for k, v := range opened {
+			out[k] = v
 		}
 	}
 
@@ -377,6 +390,28 @@ func openCredentialEntries(config map[string]any) (map[string]any, error) {
 			return nil, fmt.Errorf("%s cannot be decrypted: %w", key, err)
 		}
 		out[key] = plain
+	}
+	if nodes, ok := nodeMaps(out["nodes"]); ok {
+		opened := make([]any, 0, len(nodes))
+		for _, node := range nodes {
+			copy := make(map[string]any, len(node))
+			for key, value := range node {
+				copy[key] = value
+			}
+			delete(copy, "has_community")
+			if raw, ok := copy[AccountCommunityKey]; ok {
+				text, _ := raw.(string)
+				if strings.TrimSpace(text) != "" {
+					plain, err := secretbox.Decrypt(text)
+					if err != nil {
+						return nil, fmt.Errorf("node community cannot be decrypted: %w", err)
+					}
+					copy[AccountCommunityKey] = plain
+				}
+			}
+			opened = append(opened, copy)
+		}
+		out["nodes"] = opened
 	}
 	return out, nil
 }
@@ -457,6 +492,12 @@ func toModelID(raw any) model.ID {
 		return model.ID(v)
 	case float64:
 		return model.ID(int64(v))
+	case json.Number:
+		n, err := strconv.ParseInt(string(v), 10, 32)
+		if err != nil || n <= 0 {
+			return 0
+		}
+		return model.ID(n)
 	case string:
 		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 32)
 		if err != nil || n <= 0 {

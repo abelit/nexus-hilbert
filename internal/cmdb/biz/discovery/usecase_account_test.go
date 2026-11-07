@@ -169,6 +169,71 @@ func TestOnlyTheOwnerReplacesACredential(t *testing.T) {
 	}
 }
 
+func TestRenderAccountStripsAndFlagsEveryCredential(t *testing.T) {
+	sealedKey, err := secretbox.Encrypt("access-key-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedCommunity, err := secretbox.Encrypt("public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := renderAccount(discoverymodel.Account{Config: map[string]any{
+		AccountKeyKey:       sealedKey,
+		AccountCommunityKey: sealedCommunity,
+		"region":            "cn-north",
+	}})
+	if !view.HasKey || !view.HasCommunity {
+		t.Fatalf("flags = %+v", view)
+	}
+	if _, present := view.Config[AccountKeyKey]; present {
+		t.Fatalf("access key was returned: %+v", view.Config)
+	}
+	if _, present := view.Config[AccountCommunityKey]; present {
+		t.Fatalf("community was returned: %+v", view.Config)
+	}
+	if view.Config["region"] != "cn-north" {
+		t.Fatalf("an ordinary field went missing: %+v", view.Config)
+	}
+}
+
+func TestClearingACredentialNeedsOwnership(t *testing.T) {
+	owner := model.ID(1)
+	prior := discoverymodel.Account{UID: &owner}
+	// PRESENT AND EMPTY IS A CLEAR, not an omission. It must take the same
+	// ownership check as replacing the value.
+	if mayWriteCredential(prior, map[string]any{AccountSecretKey: ""}, Actor{UserID: 2}) {
+		t.Fatal("a non-owner cleared a credential")
+	}
+	if !mayWriteCredential(prior, map[string]any{AccountSecretKey: ""}, Actor{UserID: 1}) {
+		t.Fatal("the owner could not clear the credential")
+	}
+	if mayWriteCredential(prior, map[string]any{AccountKeyKey: "new"}, Actor{UserID: 2}) {
+		t.Fatal("a non-owner replaced an access key")
+	}
+}
+
+func TestSealAccountConfigNormalizesTheReference(t *testing.T) {
+	sealed, err := sealAccountConfig(map[string]any{"reference": "5"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sealed["_reference"] != "5" {
+		t.Fatalf("reference was not normalized: %+v", sealed)
+	}
+	if _, present := sealed["reference"]; present {
+		t.Fatalf("the legacy key survived: %+v", sealed)
+	}
+
+	cleared, err := sealAccountConfig(map[string]any{"_reference": ""}, sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := cleared["_reference"]; present {
+		t.Fatalf("an empty reference was not cleared: %+v", cleared)
+	}
+}
+
 func TestAccountNeedsAName(t *testing.T) {
 	uc, _ := newAccountUsecase(t)
 	_, err := uc.UpsertAccounts(context.Background(), "aliyun", []AccountInput{

@@ -78,6 +78,12 @@ func buildHandlers(db *gorm.DB, log *slog.Logger, fileOpts cmdbfilebiz.Options) 
 		WithWriter(cmdbcibiz.NewDiscoveryWriter(ciUC)).
 		WithAttributes(cmdbcitypebiz.NewDiscoveryAttributeResolver(citypeUC)).
 		WithAgents(discoveryRepo)
+	key, _, keyErr := cmdbdiscoverybiz.SigningKeyFromEnv()
+	if keyErr != nil {
+		log.Error("discovery task signing disabled", slog.Any("err", keyErr))
+	} else if key != nil {
+		discoveryUC.WithSigningKey(key)
+	}
 
 	historyUC := cmdbhistorybiz.NewUsecase(historyRepo).
 		WithTypeNames(cmdbcitypebiz.NewHistoryTypeNames(citypeUC)).

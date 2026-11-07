@@ -97,6 +97,8 @@ export type Account = {
   config: Record<string, unknown>;
   has_secret: boolean;
   has_password: boolean;
+  has_key?: boolean;
+  has_community?: boolean;
 };
 
 export type AccountInput = {
@@ -140,6 +142,10 @@ export type Target = {
   extra_option: Record<string, unknown>;
   has_secret: boolean;
   has_password: boolean;
+  has_key?: boolean;
+  has_community?: boolean;
+  has_reference?: boolean;
+  reference_account_id?: number;
   uid?: number;
   enabled: boolean;
   created_at?: string;

@@ -44,6 +44,7 @@ type AccountDraft = {
   password: string;
   hasSecret: boolean;
   hasPassword: boolean;
+  hasKey: boolean;
 };
 
 function textOf(value: unknown): string {
@@ -57,13 +58,16 @@ function draftFrom(account: Account, index: number): AccountDraft {
     id: account.id,
     name: account.name,
     config: { ...config },
-    accessKey: textOf(config.key),
+    // `key` is credential material too, so the read path strips it and reports
+    // has_key instead. A blank field means "keep the stored value".
+    accessKey: '',
     secret: '',
     host: textOf(config.host),
     account: textOf(config.account),
     password: '',
     hasSecret: account.has_secret,
     hasPassword: account.has_password,
+    hasKey: account.has_key ?? false,
   };
 }
 
@@ -79,6 +83,7 @@ function emptyDraft(index: number): AccountDraft {
     password: '',
     hasSecret: false,
     hasPassword: false,
+    hasKey: false,
   };
 }
 
@@ -146,7 +151,7 @@ export function AccountConfigDialog({ rule, onClose }: { rule: Rule; onClose(): 
           setErr(tr(`第 ${index + 1} 个账号没有填写用户名`, `Account ${index + 1} has no account`));
           return;
         }
-      } else if (!draft.accessKey.trim()) {
+      } else if (!draft.hasKey && !draft.accessKey.trim()) {
         setErr(tr(`第 ${index + 1} 个账号没有填写 key`, `Account ${index + 1} has no key`));
         return;
       }
@@ -161,7 +166,8 @@ export function AccountConfigDialog({ rule, onClose }: { rule: Rule; onClose(): 
         if (draft.password.trim()) config.password = draft.password;
         else delete config.password;
       } else {
-        config.key = draft.accessKey.trim();
+        if (draft.accessKey.trim()) config.key = draft.accessKey.trim();
+        else delete config.key;
         if (draft.secret.trim()) config.secret = draft.secret;
         else delete config.secret;
       }
@@ -320,6 +326,11 @@ export function AccountConfigDialog({ rule, onClose }: { rule: Rule; onClose(): 
                             aria-label={tr(`账号 key ${index + 1}`, `Account key ${index + 1}`)}
                             value={draft.accessKey}
                             onChange={(event) => update(draft.rowKey, { accessKey: event.target.value })}
+                            placeholder={
+                              draft.hasKey
+                                ? tr('已设置，留空保持原值', 'Stored; leave blank to keep')
+                                : ''
+                            }
                             className="mt-1 w-full font-mono"
                           />
                         </div>
