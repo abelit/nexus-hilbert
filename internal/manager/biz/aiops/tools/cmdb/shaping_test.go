@@ -7,16 +7,16 @@ import (
 
 func TestCompactCIKeepsIdentityAndCapsAttributes(t *testing.T) {
 	ci := map[string]any{
-		"_id":         float64(1),
-		"ci_id":       float64(1),
-		"_type":       float64(2),
-		"ci_type":     "host",
-		"unique":      "web-01",
-		"hostname":    "web-01",
-		"private_ip":  []any{"10.0.0.1"},
-		"owner":       "ops",
-		"nested":      map[string]any{"drop": true},
-		"empty":       "",
+		"_id":        float64(1),
+		"ci_id":      float64(1),
+		"_type":      float64(2),
+		"ci_type":    "host",
+		"unique":     "web-01",
+		"hostname":   "web-01",
+		"private_ip": []any{"10.0.0.1"},
+		"owner":      "ops",
+		"nested":     map[string]any{"drop": true},
+		"empty":      "",
 	}
 	for i := 0; i < 10; i++ {
 		ci[fmt.Sprintf("attr_%d", i)] = i

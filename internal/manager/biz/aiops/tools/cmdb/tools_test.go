@@ -293,6 +293,43 @@ func TestGetCIHistoryPaging(t *testing.T) {
 	}
 }
 
+func TestGetCIHonorsExplicitFields(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		values := map[string]any{}
+		for i := 0; i < 8; i++ {
+			values[fmt.Sprintf("f%d", i)] = i
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ci_id": 5, "type_id": 3, "values": values})
+	})
+	got := runTool(t, c, ToolNameGetCI, `{"ci_id":5,"fields":"f0,f1,f2,f3,f4,f5,f6,f7"}`)
+	ci, _ := got["ci"].(map[string]any)
+	for i := 0; i < 8; i++ {
+		key := fmt.Sprintf("f%d", i)
+		if _, ok := ci[key]; !ok {
+			t.Fatalf("explicit field %q was dropped: %v", key, ci)
+		}
+	}
+}
+
+func TestSearchCIHonorsFL(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		row := map[string]any{"_id": 1, "ci_id": 1, "ci_type": "host"}
+		for i := 0; i < 8; i++ {
+			row[fmt.Sprintf("f%d", i)] = i
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"numfound": 1, "page": 1, "result": []map[string]any{row}})
+	})
+	got := runTool(t, c, ToolNameSearchCI, `{"q":"host","fl":"f0,f1,f2,f3,f4,f5,f6,f7"}`)
+	items, _ := got["items"].([]any)
+	row, _ := items[0].(map[string]any)
+	for i := 0; i < 8; i++ {
+		key := fmt.Sprintf("f%d", i)
+		if _, ok := row[key]; !ok {
+			t.Fatalf("explicit fl field %q was dropped: %v", key, row)
+		}
+	}
+}
+
 func TestRelationGraphBounds(t *testing.T) {
 	var childRequests int
 	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -332,5 +369,67 @@ func TestRelationGraphBounds(t *testing.T) {
 	}
 	if nodes, _ := got["nodes"].([]any); len(nodes) > 2 {
 		t.Fatalf("nodes = %d, want <= 2", len(nodes))
+	}
+}
+
+func TestRelationGraphBoundsFanOut(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/children"):
+			id, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/ci-relations/"), "/children"))
+			items := make([]map[string]any, 0, 30)
+			for i := 1; i <= 30; i++ {
+				items = append(items, map[string]any{
+					"relation_id": id*100 + i, "ci_id": i, "type_id": 3, "relation_type_id": 1,
+				})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "numfound": len(items), "page": 1})
+		case strings.HasSuffix(r.URL.Path, "/parents"):
+			id, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/ci-relations/"), "/parents"))
+			items := []map[string]any{}
+			if id > 1 {
+				items = append(items, map[string]any{
+					"relation_id": (id-1)*100 + id, "ci_id": id - 1, "type_id": 3, "relation_type_id": 1,
+				})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "numfound": len(items), "page": 1})
+		case strings.HasPrefix(r.URL.Path, "/api/v1/cmdb/instances/"):
+			id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/instances/"))
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ci_id": id, "type_id": 3,
+				"values": map[string]any{"hostname": fmt.Sprintf("h-%d", id)},
+			})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	})
+
+	got := runTool(t, c, ToolNameRelationGraph, `{"ci_id":1,"direction":"both","depth":3,"max_nodes":5}`)
+	nodes, _ := got["nodes"].([]any)
+	if len(nodes) > 5 {
+		t.Fatalf("nodes = %d, want <= 5", len(nodes))
+	}
+	edges, _ := got["edges"].([]any)
+	if len(edges) > 10 {
+		t.Fatalf("edges = %d, want <= 10 (2*max_nodes)", len(edges))
+	}
+	nodeSet := map[float64]bool{}
+	for _, n := range nodes {
+		nodeSet[n.(map[string]any)["ci_id"].(float64)] = true
+	}
+	seen := map[string]bool{}
+	for _, e := range edges {
+		edge := e.(map[string]any)
+		key := fmt.Sprintf("%v->%v#%v", edge["from"], edge["to"], edge["relation_id"])
+		if seen[key] {
+			t.Fatalf("duplicate edge %s", key)
+		}
+		seen[key] = true
+		if !nodeSet[edge["from"].(float64)] || !nodeSet[edge["to"].(float64)] {
+			t.Fatalf("dangling edge %v", edge)
+		}
+	}
+	if got["truncated"] != true {
+		t.Fatalf("truncated = %v, want true", got["truncated"])
 	}
 }

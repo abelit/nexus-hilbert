@@ -19,7 +19,7 @@ CMDB 已经是独立进程（ADR-035），对外提供 `/api/v1/cmdb/*`；AIOps 
 4. **可用性**：仅当配置了 `ONGRID_CMDB_API_URL` 且 client 非 nil 时注册工具；CMDB 未部署时能力整体缺席，而不是让模型调用后拿到 502。
 5. **分级**：本次交付只做 **P0 只读**；P1 扩展只读、P2 写操作各自另立计划，不复用本次 PR。P0 工具 class 一律 `read`。删除 CI、批量删除、模型/属性/关系类型 CRUD、ACL 与用户管理不提供。
 6. **Persona 范围**：P0 只读工具对全部排障 Agent 开放——coordinator（空 `Tools` 继承全量）、`incident-investigator`、`specialist-compute/disk/network/ops/sre`。这些 persona 的 `tools:` 白名单需要同步加入 `cmdb_*` 和 `ToolSearch`；`reporter` / `reviewer` 不加入。
-7. **输出**：默认返回摘要（身份字段 + 少量属性），支持 `fields` 显式取字段；列表带 `total`/`page` 和截断提示。响应裁剪在 client 层完成，工具只做参数校验。
+7. **输出**：默认返回摘要（身份字段 + 最多 5 个属性），支持 `fields`/`fl` 显式取字段（最多放行 20 个，超出加 `note`）；列表带 `total`/`page` 和截断提示。关系图同时限制节点数和边数（`2 × max_nodes`），按 `(from,to,relation_id)` 去重且不返回悬空边。响应裁剪在 client/工具层完成，工具只做参数校验。
 8. **命名**：统一 `cmdb_*` 前缀，与未来 MCP/其它来源不冲突。
 
 ### P0 工具集（只读）

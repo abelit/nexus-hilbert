@@ -28,6 +28,10 @@ const (
 const (
 	maxItems = 20
 	maxAttrs = 5
+	// maxExplicitAttrs is the budget when the caller names fields/fl
+	// explicitly. Anything the caller asked for is honoured up to this cap;
+	// beyond it the result carries a note instead of silently dropping them.
+	maxExplicitAttrs = 20
 )
 
 // tool is a read-only CMDB capability with a declarative JSON Schema. The
@@ -92,7 +96,7 @@ var searchCISchema = json.RawMessage(`{
     "page": {"type": "integer", "minimum": 1, "default": 1},
     "count": {"type": "integer", "minimum": 1, "maximum": 20, "default": 20},
     "sort": {"type": "string", "description": "Sort expression, e.g. -_updated_at for recent changes."},
-    "fl": {"type": "string", "description": "Comma-separated attribute list to return."}
+    "fl": {"type": "string", "description": "Comma-separated attribute list to return (up to 20; all named fields are honoured within that cap)."}
   },
   "required": ["q"]
 }`)
@@ -146,12 +150,24 @@ func newSearchCITool(c *Client) basetool.BaseTool {
 			if err := json.Unmarshal(data, &pageData); err != nil {
 				return nil, fmt.Errorf("cmdb_search_ci: decode response: %w", err)
 			}
+			budget := maxAttrs
+			fieldsNote := ""
+			if requested := splitCSV(args.FL); len(requested) > 0 {
+				budget = len(requested)
+				if budget > maxExplicitAttrs {
+					budget = maxExplicitAttrs
+					fieldsNote = fmt.Sprintf("Requested fields truncated to %d; request fewer fields per call.", maxExplicitAttrs)
+				}
+			}
 			items := make([]any, 0, len(pageData.Result))
 			for _, row := range pageData.Result {
-				items = append(items, CompactCI(row, maxAttrs))
+				items = append(items, CompactCI(row, budget))
 			}
 			out := Truncate(items, maxItems, pageData.NumFound)
 			out["page"] = pageData.Page
+			if fieldsNote != "" {
+				out["note"] = joinNotes(out["note"], fieldsNote)
+			}
 			return out, nil
 		},
 	}
@@ -161,7 +177,7 @@ var getCISchema = json.RawMessage(`{
   "type": "object",
   "properties": {
     "ci_id": {"type": "integer", "minimum": 1, "description": "Numeric CI id returned by cmdb_search_ci."},
-    "fields": {"type": "string", "description": "Comma-separated attributes to return; omitted means a summary."}
+    "fields": {"type": "string", "description": "Comma-separated attributes to return (up to 20); omitted means a 5-attribute summary."}
   },
   "required": ["ci_id"]
 }`)
@@ -175,7 +191,7 @@ func newGetCITool(c *Client) basetool.BaseTool {
 	return &tool{
 		name:        ToolNameGetCI,
 		description: "Fetch one CMDB configuration item by numeric id.",
-		whenToUse:   "Use after cmdb_search_ci when you need the full attribute set or a specific field of one CI.",
+		whenToUse:   "Use after cmdb_search_ci when you need the attributes you name (up to 20) or a summary of one CI.",
 		schema:      getCISchema,
 		run: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var args getCIArgs
@@ -197,14 +213,27 @@ func newGetCITool(c *Client) basetool.BaseTool {
 			if err := json.Unmarshal(data, &dto); err != nil {
 				return nil, fmt.Errorf("cmdb_get_ci: decode response: %w", err)
 			}
-			return map[string]any{"ci": normalizeInstance(dto)}, nil
+			budget := maxAttrs
+			note := ""
+			if requested := splitCSV(args.Fields); len(requested) > 0 {
+				budget = len(requested)
+				if budget > maxExplicitAttrs {
+					budget = maxExplicitAttrs
+					note = fmt.Sprintf("Requested fields truncated to %d; request fewer fields per call.", maxExplicitAttrs)
+				}
+			}
+			out := map[string]any{"ci": normalizeInstance(dto, budget)}
+			if note != "" {
+				out["note"] = note
+			}
+			return out, nil
 		},
 	}
 }
 
 // normalizeInstance flattens the instance DTO's nested values so a CI looks
 // the same whether it came from search or from a single-instance read.
-func normalizeInstance(dto map[string]any) map[string]any {
+func normalizeInstance(dto map[string]any, maxAttrs int) map[string]any {
 	if values, ok := dto["values"].(map[string]any); ok {
 		delete(dto, "values")
 		for k, v := range values {
@@ -680,53 +709,9 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 				maxNodes = 50
 			}
 
-			visited := map[int]bool{args.CIID: true}
-			order := []int{args.CIID}
-			edges := make([]map[string]any, 0)
-			truncated := false
-			frontier := []int{args.CIID}
-
-			for level := 0; level < depth && len(frontier) > 0; level++ {
-				next := make([]int, 0)
-				for _, id := range frontier {
-					for _, side := range sides {
-						query := url.Values{"page": {"1"}, "count": {strconv.Itoa(maxNodes)}}
-						data, err := c.Get(ctx, fmt.Sprintf("/ci-relations/%d/%s", id, side.path), query)
-						if err != nil {
-							return nil, err
-						}
-						var page struct {
-							Items []neighbour `json:"items"`
-						}
-						if err := json.Unmarshal(data, &page); err != nil {
-							return nil, fmt.Errorf("cmdb_relation_graph: decode neighbours: %w", err)
-						}
-						for _, n := range page.Items {
-							if n.CIID <= 0 {
-								continue
-							}
-							from, to := id, n.CIID
-							if side.incoming {
-								from, to = n.CIID, id
-							}
-							edges = append(edges, map[string]any{
-								"from": from, "to": to,
-								"relation_id": n.RelationID, "relation_type_id": n.RelationTypeID,
-							})
-							if visited[n.CIID] {
-								continue
-							}
-							if len(visited) >= maxNodes {
-								truncated = true
-								continue
-							}
-							visited[n.CIID] = true
-							order = append(order, n.CIID)
-							next = append(next, n.CIID)
-						}
-					}
-				}
-				frontier = next
+			order, edges, truncated, err := walkRelationGraph(ctx, c, args.CIID, sides, depth, maxNodes)
+			if err != nil {
+				return nil, err
 			}
 
 			nodes := make([]map[string]any, 0, len(order))
@@ -760,6 +745,29 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 	}
 }
 
+// splitCSV reads the comma-separated field lists the CMDB API takes.
+func splitCSV(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func joinNotes(existing any, extra string) string {
+	if s, ok := existing.(string); ok && s != "" {
+		return s + " " + extra
+	}
+	return extra
+}
+
 // number normalises a JSON number decoded into any (encoding/json uses
 // float64 by default).
 func number(v any) (float64, bool) {
@@ -785,4 +793,84 @@ func displayName(dto map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// walkRelationGraph expands up to depth levels around ciID. It bounds BOTH
+// nodes and edges: an unbounded edge list is how a 3-hop fan-out turns into
+// hundreds of thousands of tokens. Edges are deduplicated by
+// (from,to,relation_id) and only kept when both endpoints are in the returned
+// node set, so direction=both cannot produce duplicate or dangling edges.
+func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSide, depth, maxNodes int) ([]int, []map[string]any, bool, error) {
+	maxEdges := maxNodes * 2
+	visited := map[int]bool{ciID: true}
+	order := []int{ciID}
+	edges := make([]map[string]any, 0, maxEdges)
+	edgeSeen := make(map[string]struct{}, maxEdges)
+	truncated := false
+	frontier := []int{ciID}
+
+	for level := 0; level < depth && len(frontier) > 0; level++ {
+		next := make([]int, 0)
+		stop := false
+		for _, id := range frontier {
+			for _, side := range sides {
+				query := url.Values{"page": {"1"}, "count": {strconv.Itoa(maxNodes)}}
+				data, err := c.Get(ctx, fmt.Sprintf("/ci-relations/%d/%s", id, side.path), query)
+				if err != nil {
+					return nil, nil, false, err
+				}
+				var page struct {
+					Items []neighbour `json:"items"`
+				}
+				if err := json.Unmarshal(data, &page); err != nil {
+					return nil, nil, false, fmt.Errorf("cmdb_relation_graph: decode neighbours: %w", err)
+				}
+				for _, n := range page.Items {
+					if n.CIID <= 0 {
+						continue
+					}
+					if !visited[n.CIID] {
+						if len(visited) >= maxNodes {
+							truncated = true
+							// The node will not be returned, so its edge
+							// would dangle; drop both.
+							continue
+						}
+						visited[n.CIID] = true
+						order = append(order, n.CIID)
+						next = append(next, n.CIID)
+					}
+					from, to := id, n.CIID
+					if side.incoming {
+						from, to = n.CIID, id
+					}
+					key := fmt.Sprintf("%d->%d#%d", from, to, n.RelationID)
+					if _, seen := edgeSeen[key]; seen {
+						continue
+					}
+					if len(edges) >= maxEdges {
+						truncated = true
+						stop = true
+						break
+					}
+					edgeSeen[key] = struct{}{}
+					edges = append(edges, map[string]any{
+						"from": from, "to": to,
+						"relation_id": n.RelationID, "relation_type_id": n.RelationTypeID,
+					})
+				}
+				if stop {
+					break
+				}
+			}
+			if stop {
+				break
+			}
+		}
+		if stop || len(next) == 0 {
+			break
+		}
+		frontier = next
+	}
+	return order, edges, truncated, nil
 }
