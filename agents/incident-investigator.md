@@ -37,6 +37,16 @@ tools:
   - host_find_large_files
   - host_du_summary
   - host_stat_file
+  - cmdb_search_ci
+  - cmdb_get_ci
+  - cmdb_list_ci_types
+  - cmdb_get_ci_type
+  - cmdb_get_ci_relations
+  - cmdb_query_relation_path
+  - cmdb_find_ci_type_path
+  - cmdb_get_ci_history
+  - cmdb_relation_graph
+  - ToolSearch
 
 disallowed_tools:
   - execute_skill

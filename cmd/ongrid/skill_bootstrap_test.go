@@ -8,6 +8,37 @@ import (
 	"testing"
 )
 
+func TestBuiltinDiagnosticAgentsCanUseCMDBTools(t *testing.T) {
+	agents, err := filepath.Abs("../../agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ONGRID_BUILTIN_AGENTS_ROOT", agents)
+	t.Setenv("ONGRID_BUILTIN_SKILLS_ROOT", "")
+	t.Setenv("ONGRID_SKILLS_ROOT", filepath.Join(t.TempDir(), "missing"))
+
+	_, personas := loadBootstrapRegistries(slog.Default())
+	want := "cmdb_search_ci"
+	for _, name := range []string{
+		"incident-investigator", "specialist-compute", "specialist-disk",
+		"specialist-network", "specialist-ops", "specialist-sre",
+	} {
+		def, ok := personas.ByName(name)
+		if !ok {
+			t.Fatalf("%s not loaded", name)
+		}
+		if !slices.Contains(def.Tools, want) {
+			t.Fatalf("%s missing %s", name, want)
+		}
+		if !slices.Contains(def.Tools, "ToolSearch") {
+			t.Fatalf("%s missing ToolSearch", name)
+		}
+	}
+	if reviewer, ok := personas.ByName("reviewer"); ok && slices.Contains(reviewer.Tools, want) {
+		t.Fatal("reviewer must not get CMDB tools")
+	}
+}
+
 func TestLoadBootstrapRegistriesSkillRoots(t *testing.T) {
 	fixtures, err := filepath.Abs("../../internal/manager/biz/aiops/runtime/v3/chatruntime/testdata")
 	if err != nil {
