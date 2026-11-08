@@ -97,7 +97,8 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 	if in.RelationTypeID == 0 {
 		return nil, fmt.Errorf("%w", cibiz.ErrRelationTypeRequired)
 	}
-	if err := assertRelationTypeLive(tx, in.RelationTypeID); err != nil {
+	relationType, err := loadRelationType(tx, in.RelationTypeID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -117,6 +118,12 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 		// alone, which makes a repeated add a no-op — the behaviour a console's
 		// "add relation" button needs when it is pressed twice.
 		if in.RelationTypeID != 0 && existing.RelationTypeID != in.RelationTypeID {
+			// A retype is a new vocabulary decision, so a retired type is
+			// refused even though the pair already exists. Repeating the
+			// existing type stays a no-op and is allowed for legacy edges.
+			if err := assertRelationTypeUsable(relationType); err != nil {
+				return nil, err
+			}
 			if err := tx.Model(existing).
 				Update("relation_type_id", in.RelationTypeID).Error; err != nil {
 				return nil, fmt.Errorf("update relation type: %w", err)
@@ -124,6 +131,10 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 			existing.RelationTypeID = in.RelationTypeID
 		}
 		return existing, nil
+	}
+
+	if err := assertRelationTypeUsable(relationType); err != nil {
+		return nil, err
 	}
 
 	if in.EnforceConstraint {
@@ -243,19 +254,32 @@ func writeRelationAudit(tx *gorm.DB, row *cimodel.Relation, op model.OperateType
 	return nil
 }
 
-// assertRelationTypeLive refuses an edge whose relation type is gone. The
-// column is NOT NULL and there is no foreign key, so the database would happily
-// store a dangling id; the check is the only referential guarantee this table
-// has.
-func assertRelationTypeLive(tx *gorm.DB, id model.ID) error {
-	var n int64
-	if err := tx.Model(&citypemodel.RelationType{}).Where("id = ?", id).Count(&n).Error; err != nil {
-		return fmt.Errorf("check relation type: %w", err)
+// loadRelationType refuses an edge whose relation type is gone. The column is
+// NOT NULL and there is no foreign key, so the database would happily store a
+// dangling id; the check is the only referential guarantee this table has.
+func loadRelationType(tx *gorm.DB, id model.ID) (*citypemodel.RelationType, error) {
+	var rt citypemodel.RelationType
+	err := tx.Where("id = ?", id).First(&rt).Error
+	switch {
+	case err == nil:
+		return &rt, nil
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return nil, fmt.Errorf("%w: %d", cibiz.ErrRelationTypeNotFound, id)
+	default:
+		return nil, fmt.Errorf("check relation type: %w", err)
 	}
-	if n == 0 {
-		return fmt.Errorf("%w: %d", cibiz.ErrRelationTypeNotFound, id)
+}
+
+// assertRelationTypeUsable refuses new edges that would reintroduce retired
+// vocabulary. Existing edges are left alone: only writes are gated.
+func assertRelationTypeUsable(rt *citypemodel.RelationType) error {
+	if !rt.Deprecated {
+		return nil
 	}
-	return nil
+	if rt.Replacement != "" {
+		return fmt.Errorf("%w: %s; use %s", cibiz.ErrRelationTypeDeprecated, rt.Name, rt.Replacement)
+	}
+	return fmt.Errorf("%w: %s", cibiz.ErrRelationTypeDeprecated, rt.Name)
 }
 
 // lockCI takes a row lock on an instance, so two relation writes for the same

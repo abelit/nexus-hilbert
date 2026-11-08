@@ -144,10 +144,11 @@ func (u *Usecase) ensureBuiltinRelation(ctx context.Context, spec cibiz.BuiltinR
 	}
 	if _, err := u.SaveTypeRelation(ctx, TypeRelationInput{
 		ParentRef: spec.ParentModel, ChildRef: spec.ChildModel,
-		RelationTypeID: rt.ID,
-		Constraint:     string(spec.Constraint),
-		AllowSelf:      spec.AllowSelf,
-		Actor:          actor,
+		RelationTypeID:  rt.ID,
+		Constraint:      string(spec.Constraint),
+		AllowSelf:       spec.AllowSelf,
+		AllowDeprecated: true,
+		Actor:           actor,
 	}); err != nil {
 		return fmt.Errorf("create the built-in relation %s: %w", label, err)
 	}

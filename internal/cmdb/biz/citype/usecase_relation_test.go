@@ -3,6 +3,7 @@ package citype
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
@@ -179,6 +180,66 @@ func TestSaveTypeRelationValidatesItsInputs(t *testing.T) {
 		_, err := attrUsecase(relRepo()).SaveTypeRelation(ctx, in)
 		if !errors.Is(err, errs.ErrNotFound) {
 			t.Fatalf("error = %v, want NotFound", err)
+		}
+	})
+}
+
+// A deprecated relation type is retired vocabulary: a new pair must not adopt
+// it. An existing rule may keep it so legacy configuration stays editable, and
+// the built-in bootstrap may recreate its own rules.
+func TestSaveTypeRelationRejectsDeprecatedRelationType(t *testing.T) {
+	ctx := context.Background()
+	deprecatedRepo := func() *attrRepo {
+		repo := relRepo()
+		rt := citypemodel.RelationType{Name: "bind", Deprecated: true, Replacement: "COVERS"}
+		rt.ID = 6
+		repo.relationTypes[6] = rt
+		return repo
+	}
+
+	t.Run("new pair", func(t *testing.T) {
+		in := relInput()
+		in.RelationTypeID = 6
+		_, err := attrUsecase(deprecatedRepo()).SaveTypeRelation(ctx, in)
+		if !errors.Is(err, ErrRelationTypeDeprecated) {
+			t.Fatalf("error = %v, want ErrRelationTypeDeprecated", err)
+		}
+		if !strings.Contains(err.Error(), "COVERS") {
+			t.Fatalf("error = %v, want the replacement name", err)
+		}
+	})
+
+	t.Run("existing rule keeps its deprecated type", func(t *testing.T) {
+		repo := deprecatedRepo()
+		repo.relations = append(repo.relations, citypemodel.CITypeRelation{
+			ParentID: 10, ChildID: 20, RelationTypeID: 6,
+		})
+		in := relInput()
+		in.RelationTypeID = 6
+		if _, err := attrUsecase(repo).SaveTypeRelation(ctx, in); err != nil {
+			t.Fatalf("SaveTypeRelation(existing legacy rule) error = %v, want nil", err)
+		}
+	})
+
+	t.Run("builtin bootstrap", func(t *testing.T) {
+		in := relInput()
+		in.RelationTypeID = 6
+		in.AllowDeprecated = true
+		if _, err := attrUsecase(deprecatedRepo()).SaveTypeRelation(ctx, in); err != nil {
+			t.Fatalf("SaveTypeRelation(AllowDeprecated) error = %v, want nil", err)
+		}
+	})
+
+	t.Run("changing to a deprecated type", func(t *testing.T) {
+		repo := deprecatedRepo()
+		repo.relations = append(repo.relations, citypemodel.CITypeRelation{
+			ParentID: 10, ChildID: 20, RelationTypeID: 5,
+		})
+		in := relInput()
+		in.RelationTypeID = 6
+		_, err := attrUsecase(repo).SaveTypeRelation(ctx, in)
+		if !errors.Is(err, ErrRelationTypeDeprecated) {
+			t.Fatalf("error = %v, want ErrRelationTypeDeprecated", err)
 		}
 	})
 }

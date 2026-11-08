@@ -451,6 +451,81 @@ func TestAddRelationRejectsSoftDeletedRelationType(t *testing.T) {
 	}
 }
 
+// A deprecated relation type is retired vocabulary. New edges must be refused;
+// a repeated add of an existing edge is a no-op and stays allowed so retrying a
+// legacy write does not fail.
+func TestAddRelationRejectsDeprecatedRelationType(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+	seedDeprecatedRelationType(t, db, 60, "bind", "COVERS")
+
+	spec := addSpec(4, 5, model.ConstraintMany2Many)
+	spec.RelationTypeID = 60
+	_, err := repo.AddRelation(context.Background(), spec)
+	if !errors.Is(err, cibiz.ErrRelationTypeDeprecated) {
+		t.Fatalf("AddRelation(deprecated type) error = %v, want ErrRelationTypeDeprecated", err)
+	}
+	if !strings.Contains(err.Error(), "COVERS") {
+		t.Fatalf("error = %v, want the replacement name", err)
+	}
+	var n int64
+	if err := db.Model(&cimodel.Relation{}).Where("first_ci_id = 4 AND second_ci_id = 5").Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("edge survived the refusal: %d rows", n)
+	}
+}
+
+func TestAddRelationAllowsRepeatingALegacyDeprecatedEdge(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+	seedDeprecatedRelationType(t, db, 60, "bind", "COVERS")
+	existing := cimodel.Relation{FirstCIID: 4, SecondCIID: 5, RelationTypeID: 60}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	spec := addSpec(4, 5, model.ConstraintMany2Many)
+	spec.RelationTypeID = 60
+	got, err := repo.AddRelation(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("AddRelation(existing deprecated edge) error = %v", err)
+	}
+	if got.ID != existing.ID {
+		t.Fatalf("id = %d, want the existing edge %d", got.ID, existing.ID)
+	}
+}
+
+func TestAddRelationRejectsRetypingAnEdgeToADeprecatedType(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+	seedDeprecatedRelationType(t, db, 60, "bind", "COVERS")
+	existing := cimodel.Relation{FirstCIID: 4, SecondCIID: 5, RelationTypeID: 10}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	spec := addSpec(4, 5, model.ConstraintMany2Many)
+	spec.RelationTypeID = 60
+	if _, err := repo.AddRelation(context.Background(), spec); !errors.Is(err, cibiz.ErrRelationTypeDeprecated) {
+		t.Fatalf("AddRelation(retype deprecated) error = %v, want ErrRelationTypeDeprecated", err)
+	}
+	var got cimodel.Relation
+	if err := db.First(&got, existing.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.RelationTypeID != 10 {
+		t.Fatalf("relation type = %d, want the original 10", got.RelationTypeID)
+	}
+}
+
+func seedDeprecatedRelationType(t *testing.T, db *gorm.DB, id model.ID, name, replacement string) {
+	t.Helper()
+	rt := citypemodel.RelationType{Name: name, Deprecated: true, Replacement: replacement}
+	rt.ID = id
+	if err := db.Create(&rt).Error; err != nil {
+		t.Fatalf("seed deprecated type %s: %v", name, err)
+	}
+}
+
 // The business layer refuses a self-edge, but discovery and repair paths call
 // the store directly. The store is the single write entry point, so it must
 // refuse one too — otherwise the 271 legacy self-loops can be created again.

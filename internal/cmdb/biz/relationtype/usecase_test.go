@@ -134,6 +134,33 @@ func TestListReturnsEverything(t *testing.T) {
 	}
 }
 
+// The console offers ListUsable for selectors: a retired word must not be
+// selectable, while the dictionary page still needs the full list.
+func TestListUsableHidesDeprecatedTypes(t *testing.T) {
+	retired := newRT(2, "bind", "#1890ff")
+	retired.Deprecated = true
+	retired.Replacement = "COVERS"
+	uc := NewUsecase(newFakeRepo(
+		newRT(1, "RUNS_ON", "#1890ff"),
+		retired,
+	), nil)
+
+	all, err := uc.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("List() = %d rows, want the full dictionary (2)", len(all))
+	}
+	usable, err := uc.ListUsable(context.Background())
+	if err != nil {
+		t.Fatalf("ListUsable() error = %v", err)
+	}
+	if len(usable) != 1 || usable[0].Name != "RUNS_ON" {
+		t.Fatalf("ListUsable() = %+v, want only RUNS_ON", usable)
+	}
+}
+
 func TestCreateAppliesDefaultColour(t *testing.T) {
 	repo := newFakeRepo()
 	uc := NewUsecase(repo, nil)

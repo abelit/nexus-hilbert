@@ -178,6 +178,39 @@ func TestListReturnsItemsAndTotal(t *testing.T) {
 	}
 }
 
+// The dictionary page needs retired rows, but selectors ask for usable types.
+func TestListCanHideDeprecatedTypes(t *testing.T) {
+	repo := newStubRepo()
+	retired := row(2, "bind", "#1890ff")
+	retired.Deprecated = true
+	retired.Replacement = "COVERS"
+	repo.rows = []citypemodel.RelationType{
+		row(1, "runs_on", "#1890ff"),
+		retired,
+	}
+	router := newRouter(t, repo, "user", false)
+
+	rec := do(t, router, http.MethodGet, "/v1/cmdb/relation-types?include_deprecated=false", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got listResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, rec.Body.String())
+	}
+	if got.Total != 1 || len(got.Items) != 1 || got.Items[0].Name != "runs_on" {
+		t.Fatalf("response = %+v, want only runs_on", got)
+	}
+
+	rec = do(t, router, http.MethodGet, "/v1/cmdb/relation-types", "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, rec.Body.String())
+	}
+	if got.Total != 2 {
+		t.Fatalf("default list total = %d, want 2", got.Total)
+	}
+}
+
 // The list route exposes the read-only semantic mirror so the console and the
 // AI tools can explain an edge without a second ontology call.
 func TestListExposesSemanticMirror(t *testing.T) {

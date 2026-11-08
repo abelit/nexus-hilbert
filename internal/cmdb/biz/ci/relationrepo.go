@@ -196,4 +196,9 @@ var (
 	// ErrRelationTypeNotFound is returned when the named relation type does
 	// not exist (or was soft-deleted).
 	ErrRelationTypeNotFound = fmt.Errorf("%w: relation type does not exist", errs.ErrNotFound)
+
+	// ErrRelationTypeDeprecated is returned when a new edge (or a re-typed
+	// edge) names a relation type retired in favour of a replacement. Existing
+	// edges keep working; only new vocabulary is refused.
+	ErrRelationTypeDeprecated = fmt.Errorf("%w: relation type is deprecated", errs.ErrInvalid)
 )

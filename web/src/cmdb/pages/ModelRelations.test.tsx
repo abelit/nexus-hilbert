@@ -152,6 +152,34 @@ describe('the flat relation list', () => {
     expect(postedPath).toBe('/api/v1/cmdb/ci-types/1/relation-children/2');
   });
 
+  it('does not offer deprecated relation types', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get('/api/v1/cmdb/ci-type-relations', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/cmdb/relation-types', () =>
+        HttpResponse.json({
+          items: [
+            { id: 5, name: '连接', color: '#6366f1', deprecated: false },
+            { id: 9, name: 'bind', color: '#6366f1', deprecated: true, replacement: 'COVERS' },
+          ],
+          total: 2,
+        }),
+      ),
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [host, disk], total: 2 })),
+      http.get('/api/v1/cmdb/ci-types/:ref/attributes', ({ params }) =>
+        HttpResponse.json({ type_id: Number(params.ref), unique_id: 1, unique: 'name', attributes: [] }),
+      ),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '新增关系' }));
+    await selectOption(screen.getByLabelText('源 CI 类型'), '主机');
+    await selectOption(screen.getByLabelText('目标 CI 类型'), '磁盘');
+    await user.click(screen.getByRole('combobox', { name: '关联类型' }));
+    expect(await screen.findByRole('option', { name: '连接' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'bind' })).not.toBeInTheDocument();
+  });
+
   it('clears the source side of an attribute mapping when the source type changes', async () => {
     let releaseRack = () => {};
     const rackPending = new Promise<void>((resolve) => {

@@ -19,6 +19,11 @@ var (
 	// relation type.
 	ErrRelationTypeNotFound = fmt.Errorf("%w: relation_type_id does not match a relation type", errs.ErrNotFound)
 
+	// ErrRelationTypeDeprecated refuses a new model rule that names a retired
+	// relation type. An existing rule may keep its type so legacy configuration
+	// stays editable, and the built-in bootstrap may recreate its own rules.
+	ErrRelationTypeDeprecated = fmt.Errorf("%w: relation type is deprecated", errs.ErrInvalid)
+
 	// ErrRelationSelfLoop refuses a relation from a model to itself.
 	//
 	// cantor refused it too, but only as a side effect of running a topological
@@ -169,6 +174,12 @@ type TypeRelationInput struct {
 	// bootstrap sets it.
 	AllowSelf bool
 
+	// AllowDeprecated lets the built-in bootstrap recreate its own rule after
+	// the vocabulary was migrated. The HTTP input does not expose it, so a
+	// console or API caller cannot reintroduce a retired type through a new
+	// pair.
+	AllowDeprecated bool
+
 	Actor model.ID
 }
 
@@ -229,6 +240,18 @@ func (u *Usecase) SaveTypeRelation(ctx context.Context, in TypeRelationInput) (*
 	previous, err := u.repo.TypeRelationByPair(ctx, parent.Type.ID, child.Type.ID)
 	if err != nil {
 		return nil, err
+	}
+
+	// A retired type may stay on the rule that already uses it (editing the
+	// constraint or attribute pairs is not a new vocabulary decision), but a
+	// new pair must not adopt it.
+	relationType := types[in.RelationTypeID]
+	if relationType.Deprecated && !in.AllowDeprecated &&
+		(previous == nil || previous.RelationTypeID != in.RelationTypeID) {
+		if relationType.Replacement != "" {
+			return nil, fmt.Errorf("%w: %s; use %s", ErrRelationTypeDeprecated, relationType.Name, relationType.Replacement)
+		}
+		return nil, fmt.Errorf("%w: %s", ErrRelationTypeDeprecated, relationType.Name)
 	}
 
 	saved, err := u.repo.SaveTypeRelation(ctx, TypeRelationSaveSpec{
