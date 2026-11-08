@@ -22,7 +22,7 @@ func TestPlanRelationSplitClassifiesPairsAndFlagsReview(t *testing.T) {
 
 	// Relation type ids high enough not to collide with newTestDB's pool.
 	for id, name := range map[int32]string{
-		101: "contain", 102: "connect", 103: "depend", 104: "deploy", 105: "run",
+		101: "contain", 102: "connect", 103: "depend", 104: "deploy", 105: "run", 106: "bind",
 	} {
 		rt := citypemodel.RelationType{Name: name}
 		rt.ID = id
@@ -34,7 +34,7 @@ func TestPlanRelationSplitClassifiesPairsAndFlagsReview(t *testing.T) {
 	typeIDs := map[string]model.ID{
 		"ipam_subnet": 1, "ipam_address": 2, "app_cluster": 3, "app_instance": 4,
 		"power_source": 5, "ups": 6, "service": 7, "application": 8,
-		"db_cluster": 9, "vserver": 10, "container": 11,
+		"db_cluster": 9, "vserver": 10, "container": 11, "sla": 12,
 	}
 	for name, id := range typeIDs {
 		ct := citypemodel.CIType{Name: name, Alias: name, UniqueID: 1, Enabled: true}
@@ -62,11 +62,13 @@ func TestPlanRelationSplitClassifiesPairsAndFlagsReview(t *testing.T) {
 	addRule(103, typeIDs["service"], typeIDs["application"])
 	addRule(104, typeIDs["app_instance"], typeIDs["vserver"])
 	addRule(105, typeIDs["container"], typeIDs["vserver"])
+	addRule(106, typeIDs["sla"], typeIDs["service"])
 
 	ciIDs := map[string]model.ID{
 		"ipam_subnet": 1001, "ipam_address": 1002, "app_cluster": 1003, "app_instance": 1004,
 		"power_source": 1005, "ups": 1006, "service_a": 1007, "service_b": 1008,
 		"application": 1009, "db_cluster": 1010, "vserver": 1011, "container": 1012,
+		"sla": 1013,
 	}
 	ciTypes := map[string]model.ID{
 		"ipam_subnet": typeIDs["ipam_subnet"], "ipam_address": typeIDs["ipam_address"],
@@ -75,6 +77,7 @@ func TestPlanRelationSplitClassifiesPairsAndFlagsReview(t *testing.T) {
 		"service_a": typeIDs["service"], "service_b": typeIDs["service"],
 		"application": typeIDs["application"], "db_cluster": typeIDs["db_cluster"],
 		"vserver": typeIDs["vserver"], "container": typeIDs["container"],
+		"sla": typeIDs["sla"],
 	}
 	for name, id := range ciIDs {
 		ci := cimodel.CI{TypeID: ciTypes[name], PropsJSON: "{}"}
@@ -101,6 +104,7 @@ func TestPlanRelationSplitClassifiesPairsAndFlagsReview(t *testing.T) {
 	addEdge(103, ciIDs["service_a"], ciIDs["application"])
 	addEdge(104, ciIDs["app_instance"], ciIDs["vserver"])
 	addEdge(105, ciIDs["container"], ciIDs["vserver"])
+	addEdge(106, ciIDs["sla"], ciIDs["service_a"])
 
 	report, err := PlanRelationSplit(context.Background(), db)
 	if err != nil {
@@ -109,12 +113,13 @@ func TestPlanRelationSplitClassifiesPairsAndFlagsReview(t *testing.T) {
 	if report.UnresolvedRules != 0 || report.UnresolvedEdges != 0 {
 		t.Fatalf("unresolved = %d rules / %d edges, want 0", report.UnresolvedRules, report.UnresolvedEdges)
 	}
-	if report.TotalEdges != 9 {
-		t.Fatalf("total edges = %d, want 9", report.TotalEdges)
+	if report.TotalEdges != 10 {
+		t.Fatalf("total edges = %d, want 10", report.TotalEdges)
 	}
 	wantTotals := map[string]int64{
 		"ALLOCATED_TO": 1, "MEMBER_OF": 1, "PART_OF": 1,
 		"POWERED_BY": 1, "CONNECTS_TO": 1, "DEPENDS_ON": 2, "RUNS_ON": 2,
+		"UNDER_CONTRACT": 1,
 	}
 	for target, want := range wantTotals {
 		if report.Totals[target] != want {
@@ -147,6 +152,11 @@ func TestPlanRelationSplitClassifiesPairsAndFlagsReview(t *testing.T) {
 	if member.Target != "MEMBER_OF" || member.CmdbName != "HAS_MEMBER" ||
 		member.InverseOf != "MEMBER_OF" || !member.DirectionInverted {
 		t.Fatalf("member row = %+v, want HAS_MEMBER inverse_of MEMBER_OF", member)
+	}
+	contract := reviewed["bind|sla|service"]
+	if contract.Target != "UNDER_CONTRACT" || contract.CmdbName != "COVERS" ||
+		contract.InverseOf != "UNDER_CONTRACT" || !contract.DirectionInverted {
+		t.Fatalf("bind row = %+v, want COVERS inverse_of UNDER_CONTRACT", contract)
 	}
 }
 

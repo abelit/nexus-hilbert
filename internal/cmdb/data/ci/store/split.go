@@ -68,7 +68,7 @@ JOIN c_ci_types p ON p.id = tr.parent_id
 JOIN c_ci_types c ON c.id = tr.child_id
 WHERE tr.delete_marker = 0 AND tr.deleted_at IS NULL
   AND rt.delete_marker = 0 AND rt.deleted_at IS NULL
-  AND rt.name IN ('contain', 'connect', 'depend', 'deploy', 'run')
+  AND rt.name IN ('bind', 'contain', 'connect', 'depend', 'deploy', 'run')
 ORDER BY rt.name, edges DESC, p.name, c.name`
 
 // PlanRelationSplit reads the active model rules and returns the proposed
@@ -105,6 +105,12 @@ func PlanRelationSplit(ctx context.Context, db *gorm.DB) (*SplitPlanReport, erro
 				planRow.DirectionInverted = true
 			}
 		}
+		if row.RelationType == "bind" {
+			planRow.CmdbName, planRow.InverseOf = contractMirror(target)
+			if planRow.CmdbName != "" {
+				planRow.DirectionInverted = true
+			}
+		}
 		report.Rows = append(report.Rows, planRow)
 		report.Totals[target] += row.Edges
 		report.TargetRules[target]++
@@ -115,6 +121,8 @@ func PlanRelationSplit(ctx context.Context, db *gorm.DB) (*SplitPlanReport, erro
 
 func splitTarget(row splitRow) (target string, review, inverted bool) {
 	switch row.RelationType {
+	case "bind":
+		return bindSplitTarget(row.ParentModel, row.ChildModel)
 	case "contain":
 		return containSplitTarget(row.ParentModel, row.ChildModel)
 	case "connect":
@@ -213,6 +221,27 @@ func containSplitTarget(parent, child string) (string, bool, bool) {
 		return "", false, false
 	}
 	return target, containReview[key], false
+}
+
+// contractMirror is the CMDB-side inverse of the topocortex contract relation.
+// CMDB stores contract -> resource (sla -> service); topocortex UNDER_CONTRACT
+// reads resource -> contract, so the CMDB type is COVERS and declares the
+// topocortex name as inverse_of.
+func contractMirror(target string) (cmdbName, inverseOf string) {
+	if target == "UNDER_CONTRACT" {
+		return "COVERS", "UNDER_CONTRACT"
+	}
+	return "", ""
+}
+
+// bindSplitTarget maps only the known SLA pair. Any other bind pair may be a
+// user-defined association with different semantics, so it stays unresolved
+// and is left in place for a human decision.
+func bindSplitTarget(parent, child string) (string, bool, bool) {
+	if parent == "sla" && child == "service" {
+		return "UNDER_CONTRACT", false, true
+	}
+	return "", false, false
 }
 
 var connectPowerPairs = map[[2]string]bool{

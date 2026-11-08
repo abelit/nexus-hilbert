@@ -39,7 +39,7 @@ ongrid-cmdb --plan-relation-split
 - `edges` 只统计活跃的、两端 CI 也活跃的实例边；
 - `review=true` 表示该模型对的语义需要业务确认，不能直接迁移；
 - `direction_inverted=true` 表示目标类型的方向与当前存储方向相反，需要 inverse 适配；
-- `cmdb_name` / `inverse_of` 只对 `contain` 出现：CMDB 保留 `整体→部分` 的存储方向，创建反向命名的类型并声明 `inverse_of`，由 connector 反转端点；
+- `cmdb_name` / `inverse_of` 对 `contain` 和目标方向相反的 `bind` 出现：CMDB 保留现有存储方向，创建反向命名的类型并声明 `inverse_of`，由 connector 反转端点；
 - `UNRESOLVED` 表示没有映射，必须补规则后才能迁移。
 
 ## 目标词汇原则
@@ -55,8 +55,11 @@ ongrid-cmdb --plan-relation-split
 | `depend` | `DEPENDS_ON` | `DEPENDS_ON` | 运行时依赖 |
 | `connect` | `POWERED_BY` | `POWERED_BY` | 供电链；当前方向是 provider→consumer，目标方向相反 |
 | `connect` | `CONNECTS_TO` | `CONNECTS_TO` | 逻辑连接；有 APM 证据后再细化为 `CALLS` |
+| `bind` | `UNDER_CONTRACT` | `COVERS`（`UNDER_CONTRACT`） | SLA/合同覆盖资源；CMDB 存合同→资源，目标读资源→合同 |
 
 结构类目标（`PART_OF` / `MEMBER_OF` / `BELONGS_TO` / `LOCATED_IN` / `ALLOCATED_TO`）读作 `部分→整体`，与 CMDB 现有 `contain` 的存储方向相反。直接改名会反转 1634 条边，并且 36 条 one2many 规则会变成 CMDB 不支持的 many2one；因此拆分保留存储方向，用反向命名的 CMDB 类型 + `inverse_of` 适配。
+
+`bind` 同理：CMDB 存 `sla→service`（合同→资源），topocortex `UNDER_CONTRACT` 读资源→合同；1 条 `sla→service` 规则是 one2many，不能翻转，因此改为 `COVERS` 并声明 `inverse_of=UNDER_CONTRACT`。只迁移 `sla→service` 这一确定模型对；其他 `bind` 模型对进入未解析/人工确认，不会被全局改写。
 
 ## 需要人工确认的行
 
@@ -68,7 +71,18 @@ ongrid-cmdb --plan-relation-split
 - `application` 下的 `circuit/env_monitor/accounts/apple_profiles/certificate`：归属还是其他关联；
 - `db_cluster→database`：组成还是成员；
 - `dcim_server_room` 下的供电设备：位置还是供电依赖；
-- `demo111` / `hello1111`：测试数据，应优先清理而不是迁移。
+- `demo111` / `hello1111`：测试数据，应优先清理而不是迁移；
+- `bind` 的其他模型对：只自动迁移 `sla→service`；其他对可能是用户自定义关联，保持未解析并留在原类型。
+
+### topocortex 前置依赖
+
+`COVERS.inverse_of=UNDER_CONTRACT` 记录的是目标映射，但当前 topocortex 只在 `docs/examples/enterprise-aiops` 示例中声明 `UNDER_CONTRACT`，运行时 seed 没有该类型，也没有 `Service→Contract` 的反向声明。connector 在导出 OWL `inverseOf` 前必须先让 topocortex：
+
+1. 在运行时本体声明 `UNDER_CONTRACT`；
+2. 声明 CMDB `sla` 对应的 Contract/ServiceOffering 类及资源→合同的端点对；
+3. 通过同步把确认后的语义写回 CMDB 镜像（CMDB 的语义字段只读）。
+
+在此之前，CMDB 的 `COVERS` 类型可正常读写和展示，`inverse_of` 仅作为迁移意图保留。
 
 ## 执行拆分
 
@@ -84,17 +98,18 @@ ongrid-cmdb --split-relations
 
 执行内容：
 
-1. 创建 `RUNS_ON`、`DEPENDS_ON`、`POWERED_BY`、`CONNECTS_TO`（已存在则保留）；
+1. 创建 `RUNS_ON`、`DEPENDS_ON`、`POWERED_BY`、`CONNECTS_TO`、`COVERS`（已存在则保留）；
 2. `deploy`/`run` 的模型规则和实例边改为 `RUNS_ON`；
 3. `depend` 改为 `DEPENDS_ON`；
 4. 供电链改为 `POWERED_BY`，模型规则端点与实例边端点同时交换（供电链是 many2many / one2one，翻转安全）；
 5. `connect service→service` 改为 `CONNECTS_TO`；
 6. `contain` 按模型对改为 `CONTAINS` / `HAS_MEMBER` / `HAS_BELONGING` / `HAS_LOCATION` / `ALLOCATES`，只改关系类型、不交换端点；新类型声明对应的 `inverse_of`，`CONTAINS` 同时标记 `transitive`；
-7. `demo111` / `hello1111` 的规则和边软删除，CI 类型与实例保留；
-8. 旧类型 `deploy`/`run`/`depend`/`connect`/`contain` 在没有活跃规则和边后标记 deprecated，并写 `replacement`。
+7. `bind` 的 `sla→service` 规则和边改为 `COVERS`，只改关系类型、不交换端点，声明 `inverse_of=UNDER_CONTRACT`；
+8. `demo111` / `hello1111` 的规则和边软删除，CI 类型与实例保留；
+9. 旧类型 `bind`/`deploy`/`run`/`depend`/`connect`/`contain` 在没有活跃规则和边后标记 deprecated，并写 `replacement`。
 
 命令是幂等的：第二次执行应返回 0 重分类、0 删除。
-只在有对应规则时才创建目标类型，因此不含 `contain` 规则的库不会产生 5 个空的结构类型。
+只在有对应规则时才创建目标类型，因此不含 `contain` 或 `bind` 规则的库不会产生对应的空类型。
 
 ### 执行前
 
@@ -111,7 +126,6 @@ ongrid-cmdb --split-relations
 
 ## 不在本规划内
 
-- `bind`：保留 `inverse_of=UNDER_CONTRACT` 适配，或单独决定；
-- `install`：无引用，标记 deprecated/删除；
+- `install`：启动时的语义回填已标记 `deprecated=true`、`replacement=RUNS_ON`，且无规则/边引用；只剩可选的字典删除，需要逐部署确认后再做；
 - `manage` 的数据方向：由 `inverse_of` 适配，不翻转；
 - 实例边迁移本身：需要备份、dry-run、双写/对账和回滚，不能在规划器里执行。
