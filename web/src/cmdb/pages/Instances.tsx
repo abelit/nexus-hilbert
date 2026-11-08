@@ -14,6 +14,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Sparkles,
   Table2,
   Trash2,
   X,
@@ -29,8 +30,12 @@ import { Select } from '@/components/ui/Select';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Modal } from '@/components/Modal';
 import { useI18n } from '@/i18n/locale';
+import { openAssistant } from '@/lib/assistantIntent';
 import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
+
+import { AIActionButton } from '../components/AIActionButton';
+import { explainCIsPrompt, relationsPrompt } from '../lib/aiPrompts';
 
 import { describeError } from '../api/http';
 import {
@@ -199,7 +204,7 @@ function identityAttribute(
 }
 
 export default function InstancesPage() {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
   const [params, setParams] = useSearchParams();
@@ -261,6 +266,20 @@ export default function InstancesPage() {
     return Number.isSafeInteger(ci) && ci > 0 ? { id: ci, tab: 'overview' } : null;
   });
 
+  // SELECTION IS THE OPERATOR'S INTENT, NOT A PAGE FACT. Checked instances stay
+  // selected while paging; changing the model or the query starts a new set.
+  const [selected, setSelected] = useState<Set<string | number>>(() => new Set());
+  const selectedCount = selected.size;
+  const selectedIDList = [...selected].map(String).sort();
+  let selectedIDText = '';
+  let selectionTruncated = false;
+  for (const id of selectedIDList) {
+    if (selectedIDText.length + id.length + (selectedIDText ? 1 : 0) > 200) {
+      selectionTruncated = true;
+      break;
+    }
+    selectedIDText += (selectedIDText ? ',' : '') + id;
+  }
   useCMDBAssistantFacts({
     model: typeRef,
     search,
@@ -270,11 +289,11 @@ export default function InstancesPage() {
     loaded_rows: rows.length,
     open_ci_id: viewing?.id,
     open_ci_tab: viewing?.tab,
+    selection_count: selectedCount,
+    selected_ids: selectedIDText || undefined,
+    selection_truncated: selectionTruncated || undefined,
+    selection_query: [typeRef, search, condition].filter(Boolean).join(' ') || undefined,
   });
-  // SELECTION IS THE OPERATOR'S INTENT, NOT A PAGE FACT. Checked instances stay
-  // selected while paging; changing the model or the query starts a new set.
-  const [selected, setSelected] = useState<Set<string | number>>(() => new Set());
-  const selectedCount = selected.size;
   const clearSelection = useCallback(() => setSelected(new Set()), []);
   // BATCH DELETE IS DELIBERATE. The dialog asks the operator to solve an
   // arithmetic expression; the challenge is regenerated on every open so a
@@ -1467,6 +1486,26 @@ export default function InstancesPage() {
                         controls when something is selected. */}
                     {selectedCount > 0 && (
                       <>
+                        <AIActionButton
+                          zh="AI 解读"
+                          en="AI explain"
+                          onClick={() =>
+                            openAssistant({
+                              prompt: explainCIsPrompt([...selected].map(Number), model?.name ?? typeRef, locale),
+                            })
+                          }
+                        />
+                        {selectedCount === 1 && (
+                          <AIActionButton
+                            zh="AI 影响面"
+                            en="AI impact"
+                            onClick={() =>
+                              openAssistant({
+                                prompt: relationsPrompt(Number([...selected][0]), 'both', 2, locale),
+                              })
+                            }
+                          />
+                        )}
                         <Button
                           variant="dangerGhost"
                           size="sm"
@@ -1604,6 +1643,21 @@ export default function InstancesPage() {
                       }
                       actions={(row) => (
                         <span className="flex items-center gap-1 whitespace-nowrap">
+                          <Button
+                            variant="plain"
+                            size="sm"
+                            type="button"
+                            onClick={() =>
+                              openAssistant({
+                                prompt: explainCIsPrompt([row.ci_id], model?.name ?? typeRef, locale),
+                              })
+                            }
+                            aria-label={tr(`AI 解读实例 ${row.ci_id}`, `AI explain instance ${row.ci_id}`)}
+                            title={tr(`AI 解读实例 ${row.ci_id}`, `AI explain instance ${row.ci_id}`)}
+                            className="cmdb-liquid-action-ai inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+                          >
+                            <Sparkles size={13} aria-hidden="true" />
+                          </Button>
                           <Button
                             variant="plain"
                             size="sm"
@@ -1965,7 +2019,7 @@ function InstanceCard({
   onDelete(): void;
   onSaveFile(attribute: TypeAttribute, serialized: string): void | Promise<void>;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const titleAttribute = identityAttribute(columns, model);
   const titleLabel = titleAttribute?.is_reference
     ? referenceText(row.values?.[titleAttribute.name], referenceLabels)
@@ -2054,6 +2108,21 @@ function InstanceCard({
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
         <span className="text-[10px] text-text-faint">#{row.ci_id}</span>
         <span className="flex items-center gap-1 whitespace-nowrap">
+          <Button
+            variant="plain"
+            size="sm"
+            type="button"
+            onClick={() =>
+              openAssistant({
+                prompt: explainCIsPrompt([row.ci_id], model?.name ?? '', locale),
+              })
+            }
+            aria-label={tr(`AI 解读实例 ${row.ci_id}`, `AI explain instance ${row.ci_id}`)}
+            title={tr(`AI 解读实例 ${row.ci_id}`, `AI explain instance ${row.ci_id}`)}
+            className="cmdb-liquid-action-ai inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
+          >
+            <Sparkles size={13} aria-hidden="true" />
+          </Button>
           <Button
             variant="plain"
             size="sm"

@@ -5,13 +5,16 @@ import { Button } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/i18n/locale';
+import { openAssistant } from '@/lib/assistantIntent';
 import { cn } from '@/lib/cn';
 
 import type { AttributeGroup, CIType, TypeAttribute } from '../../api/citype';
 import type { Instance } from '../../api/instance';
+import { AIActionButton } from '../AIActionButton';
 import { AttributeValue } from '../AttributeControl';
 import { FileField } from '../files/FileField';
 import { attributeSections } from '../../lib/attribute-sections';
+import { explainValuePrompt, translateValuePrompt } from '../../lib/aiPrompts';
 import { choiceText } from '../../lib/choice-labels';
 import { referenceRawText, referenceText, useReferenceLabels } from '../../lib/reference-labels';
 import { displayValue, isValueTypeCode } from '../../lib/valuetype';
@@ -22,6 +25,16 @@ import { InstanceRelations } from './InstanceRelations';
 // disabled inputs: disabled controls still announce themselves as form fields,
 // and a detail view is a definition list an operator scans, not a form they
 // think they can change.
+
+function valueText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
 
 export function InstanceOverview({
   model,
@@ -48,7 +61,7 @@ export function InstanceOverview({
   /** Hides the relation add affordance as well as the inline editors. */
   readOnly?: boolean;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const referenceLabels = useReferenceLabels(instance ? [instance] : [], attributes, models);
   const [editing, setEditing] = useState<string | null>(null);
   const [savingName, setSavingName] = useState<string | null>(null);
@@ -201,6 +214,38 @@ export function InstanceOverview({
                               </Chip>
                             )}
                           </span>
+                          {!attribute.is_password && !attribute.is_file && valueText(value).trim() && (
+                            <span className="flex shrink-0 items-center gap-0.5">
+                              <AIActionButton
+                                iconOnly
+                                zh="AI 解释"
+                                en="AI explain"
+                                onClick={() =>
+                                  openAssistant({
+                                    prompt: explainValuePrompt(
+                                      valueText(value),
+                                      `${attribute.alias || attribute.name} (${attribute.name})`,
+                                    ),
+                                  })
+                                }
+                              />
+                              <AIActionButton
+                                iconOnly
+                                icon="languages"
+                                zh="AI 翻译"
+                                en="AI translate"
+                                onClick={() =>
+                                  openAssistant({
+                                    prompt: translateValuePrompt(
+                                      valueText(value),
+                                      locale.toLowerCase().startsWith('zh') ? 'en' : 'zh',
+                                      `${attribute.alias || attribute.name} (${attribute.name})`,
+                                    ),
+                                  })
+                                }
+                              />
+                            </span>
+                          )}
                           {editable(attribute) && (
                             <button
                               type="button"

@@ -11,6 +11,7 @@ import {
   Loader2,
   RefreshCw,
   Search as SearchIcon,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -23,6 +24,9 @@ import { Label } from '@/components/ui/Label';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PaginationFooter } from '@/components/ui/PaginationFooter';
 import { useDialogs } from '@/components/ui/useDialogs';
+import { openAssistant } from '@/lib/assistantIntent';
+
+import { explainCIsPrompt } from '../lib/aiPrompts';
 import { Modal } from '@/components/Modal';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
@@ -132,7 +136,7 @@ function optionTypes(option: SearchOption, models: CIType[]): string[] {
 }
 
 export default function SearchPage() {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const navigate = useNavigate();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
@@ -795,6 +799,24 @@ export default function SearchPage() {
                 }
                 actions={(row) => (
                   <span className="flex items-center gap-1">
+                    <Button
+                      variant="plain"
+                      size="sm"
+                      type="button"
+                      onClick={() =>
+                        openAssistant({
+                          prompt: explainCIsPrompt(
+                            [row._id],
+                            row.ci_type_alias || row.ci_type || '',
+                            locale,
+                          ),
+                        })
+                      }
+                      aria-label={tr(`AI 解读资源 ${row._id}`, `AI explain resource ${row._id}`)}
+                      title={tr('AI 解读', 'AI explain')}
+                    >
+                      <Sparkles size={13} aria-hidden="true" />
+                    </Button>
                     <Button
                       variant="plain"
                       size="sm"

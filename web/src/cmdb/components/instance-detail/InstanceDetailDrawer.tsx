@@ -7,6 +7,10 @@ import { DialogDescription, DialogTitle } from '@/components/ui/Dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { listUsers, type User } from '@/api/users';
 import { useI18n } from '@/i18n/locale';
+import { openAssistant } from '@/lib/assistantIntent';
+
+import { AIActionButton } from '../AIActionButton';
+import { explainCIsPrompt, relationsPrompt } from '../../lib/aiPrompts';
 import { cn } from '@/lib/cn';
 import { usePermissions } from '@/store/me';
 
@@ -81,7 +85,7 @@ export function InstanceDetailDrawer({
    */
   readOnly?: boolean;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const { isAdmin, canMutate } = usePermissions();
   const toast = useToast();
   const [tab, setTab] = useState<TabKey>(initialTab);
@@ -352,6 +356,28 @@ export function InstanceDetailDrawer({
                 </span>
               )}
             </DialogDescription>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <AIActionButton
+              zh="AI 解读"
+              en="AI explain"
+              iconOnly
+              onClick={() =>
+                openAssistant({
+                  prompt: explainCIsPrompt([subject.id], subject.model.name, locale),
+                })
+              }
+            />
+            <AIActionButton
+              zh="AI 影响面"
+              en="AI impact"
+              iconOnly
+              onClick={() =>
+                openAssistant({
+                  prompt: relationsPrompt(subject.id, 'both', 2, locale),
+                })
+              }
+            />
           </div>
           <button
             type="button"

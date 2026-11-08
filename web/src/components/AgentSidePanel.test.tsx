@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentSidePanel } from './AgentSidePanel';
 import { AssistantRoute, useAssistantPage } from '@/lib/assistantPage';
+import { openAssistant } from '@/lib/assistantIntent';
 import { createSession, getMessages, listModels, listSessions, streamMessage, updateSessionModel } from '@/api/chat';
 
 vi.stubGlobal('ResizeObserver', class {
@@ -50,6 +51,15 @@ describe('global assistant', () => {
       callbacks.onDone?.({ assistant_message: { content: 'finished' } } as Parameters<NonNullable<typeof callbacks.onDone>>[0]);
     });
   });
+  it('opens and prefills from an assistant intent', async () => {
+    render(<MemoryRouter initialEntries={['/alert']}><Console/></MemoryRouter>);
+
+    act(() => openAssistant({ prompt: '解释这条告警' }));
+
+    const panel = within(await screen.findByRole('dialog', { name: 'Ongrid AI 助理' }));
+    expect(panel.getByRole('textbox')).toHaveValue('解释这条告警');
+  });
+
   it('pins the confirmed page for follow-ups and starts a new conversation with only declared facts', async () => {
     vi.mocked(createSession).mockImplementation(async input => ({
       page_context: input.page_context, title: input.title, id: input.related_incident_id ? 'incident-session' : 'settings-session', user_id: 9,
