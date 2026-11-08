@@ -153,12 +153,20 @@ export default function RelationTypesPage() {
             className="h-2.5 w-2.5 shrink-0 rounded-full border border-border"
             style={{ backgroundColor: isValidColor(row.color) ? row.color : 'transparent' }}
           />
-          <span className="min-w-0 truncate font-medium text-text" title={row.name}>
+          <span
+            className="min-w-0 truncate font-medium text-text"
+            title={row.description ? `${row.name} — ${row.description}` : row.name}
+          >
             {row.name}
           </span>
           {row.deprecated && (
             <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/5 px-1 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
-              {tr('已弃用', 'Deprecated')}
+              <span>{tr('已弃用', 'Deprecated')}</span>
+              {row.replacement && (
+                <span className="ml-1 font-mono" title={tr(`替代为 ${row.replacement}`, `Replaced by ${row.replacement}`)}>
+                  → {row.replacement}
+                </span>
+              )}
             </span>
           )}
         </div>
@@ -171,7 +179,7 @@ export default function RelationTypesPage() {
       cell: (row) => {
         const category = CATEGORY_LABELS[row.category];
         const direction = DIRECTION_LABELS[row.direction];
-        if (!row.category && !row.direction) {
+        if (!row.category && !row.direction && !row.transitive) {
           return <span className="text-text-faint">—</span>;
         }
         return (
@@ -179,6 +187,11 @@ export default function RelationTypesPage() {
             {row.category && (
               <span className="whitespace-nowrap rounded-full border border-border px-1.5 py-0.5 text-[10px] text-text-muted">
                 {category ? tr(category.zh, category.en) : row.category}
+              </span>
+            )}
+            {row.transitive && (
+              <span className="whitespace-nowrap rounded-full border border-border px-1.5 py-0.5 text-[10px] text-text-muted">
+                {tr('可传递', 'Transitive')}
               </span>
             )}
             {row.direction && (
@@ -189,6 +202,29 @@ export default function RelationTypesPage() {
           </div>
         );
       },
+    },
+    {
+      key: 'inverse',
+      header: tr('反向关系', 'Inverse'),
+      hideable: true,
+      // The connector reads inverse_of to reverse the endpoints. Keep it next
+      // to direction rather than in a tooltip: it is the operator-visible half
+      // of a direction mapping that the data cannot show.
+      hideBelow: 1024,
+      cell: (row) =>
+        row.inverse_of ? (
+          <code
+            className="whitespace-nowrap font-mono text-[11px] text-text-muted"
+            title={tr(
+              'connector 读取该类型时反转端点',
+              'The connector reverses the endpoints when it reads this type',
+            )}
+          >
+            {row.inverse_of}
+          </code>
+        ) : (
+          <span className="text-text-faint">—</span>
+        ),
     },
     {
       key: 'propagation',
