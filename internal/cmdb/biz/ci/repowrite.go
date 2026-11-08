@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
@@ -106,6 +107,16 @@ type WriteSpec struct {
 	// invisible in the tree, unreachable from the room that was supposed to
 	// hold it, and indistinguishable from a root.
 	Parent *ParentLink
+
+	// EvidenceSource is the provenance written on the containment and relation
+	// edges this write creates (model.RelationEvidenceSource). Empty becomes
+	// manual at the store; the discovery path sets the collector value and
+	// ObservedAt, and the import path sets import.
+	EvidenceSource string
+
+	// ObservedAt is the collection time for edges a collector observed. It is
+	// nil for manual and import writes.
+	ObservedAt *time.Time
 }
 
 // Reader is the read half of the port: what the list, detail and export paths

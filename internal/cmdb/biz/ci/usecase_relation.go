@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"fmt"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
@@ -289,6 +290,12 @@ type Neighbours struct {
 	RelationTypeDirection  string  `json:"relation_type_direction,omitempty"`
 	RelationTypePropagates bool    `json:"relation_type_propagates"`
 	RelationTypeWeight     float64 `json:"relation_type_weight"`
+
+	// Provenance of the edge. AIOps uses it to tell an observation from an
+	// inference; an edge with no source cannot be weighted.
+	EvidenceSource string     `json:"evidence_source,omitempty"`
+	Confidence     *float64   `json:"confidence,omitempty"`
+	ObservedAt     *time.Time `json:"observed_at,omitempty"`
 }
 
 // NeighbourPage is one page of an instance's neighbours.
@@ -364,6 +371,9 @@ func (u *Usecase) neighbours(ctx context.Context, ciID, relationTypeID model.ID,
 		}
 		item := Neighbours{
 			RelationID: row.ID, CIID: otherID, TypeID: types[otherID], RelationTypeID: row.RelationTypeID,
+			EvidenceSource: row.EvidenceSource,
+			Confidence:     row.Confidence,
+			ObservedAt:     row.ObservedAt,
 		}
 		if row.AncestorIDs != nil {
 			item.AncestorIDs = *row.AncestorIDs

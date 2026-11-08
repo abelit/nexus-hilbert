@@ -168,11 +168,12 @@ func (u *Usecase) CommitImport(ctx context.Context, req ImportRequest) (*ImportR
 		specs = append(specs, WriteSpec{
 			TypeRef: plan.set.Type.Name, TypeID: plan.set.Type.ID,
 			UniqueAttrID: plan.set.UniqueAttrID, UniqueValue: unique,
-			Policy:    policy,
-			Specs:     u.plannerSpecs(plan.set),
-			Values:    values,
-			Relations: importRelationSpecs(plan, row),
-			Audit:     req.Audit,
+			Policy:         policy,
+			Specs:          u.plannerSpecs(plan.set),
+			Values:         values,
+			Relations:      importRelationSpecs(plan, row),
+			Audit:          req.Audit,
+			EvidenceSource: string(model.RelationEvidenceImport),
 		})
 	}
 

@@ -373,7 +373,7 @@ func TestSubnetRefusesAHostBitSpelling(t *testing.T) {
 // --- addresses ---
 
 func TestAddressAssignmentMaintainsTheCounters(t *testing.T) {
-	uc, _ := newIPAMFixture(t)
+	uc, db := newIPAMFixture(t)
 	ids := ipamSeed(t, uc)
 	ctx := context.Background()
 
@@ -386,6 +386,13 @@ func TestAddressAssignmentMaintainsTheCounters(t *testing.T) {
 	}
 	if got.Created != 2 || len(got.AddressIDs) != 2 {
 		t.Fatalf("created %d addressed, ids %v", got.Created, got.AddressIDs)
+	}
+	var edge cimodel.Relation
+	if err := db.Where("second_ci_id = ?", got.AddressIDs[0]).First(&edge).Error; err != nil {
+		t.Fatalf("subnet edge not found: %v", err)
+	}
+	if edge.EvidenceSource != string(model.RelationEvidenceIPAM) {
+		t.Fatalf("IPAM edge evidence = %q, want %q", edge.EvidenceSource, model.RelationEvidenceIPAM)
 	}
 	if got.AssignCount != 2 {
 		t.Fatalf("assign_count = %d, want 2", got.AssignCount)

@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	valuemodel "github.com/ongridio/ongrid/internal/cmdb/model/value"
@@ -230,6 +231,66 @@ func TestIndexNamesAreGloballyUnique(t *testing.T) {
 func TestMigrateRejectsNilDB(t *testing.T) {
 	if err := Migrate(nil); err == nil {
 		t.Fatal("Migrate(nil) = nil error, want error")
+	}
+}
+
+// Existing edges get a semantic provenance once, without claiming an unknown
+// edge was manual. A configured value survives, soft-deleted rows are included,
+// and a second pass is a no-op.
+func TestMigrateBackfillsRelationEvidence(t *testing.T) {
+	db := newTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	attribute, discovery := "0", "1"
+	rows := []cimodel.Relation{
+		{FirstCIID: 1, SecondCIID: 2, RelationTypeID: 10, Source: &attribute},
+		{FirstCIID: 1, SecondCIID: 3, RelationTypeID: 10, Source: &discovery},
+		{FirstCIID: 1, SecondCIID: 4, RelationTypeID: 10},
+		{
+			FirstCIID: 1, SecondCIID: 5, RelationTypeID: 10,
+			Source: &attribute, EvidenceSource: string(model.RelationEvidenceManual),
+		},
+	}
+	for i := range rows {
+		if err := db.Create(&rows[i]).Error; err != nil {
+			t.Fatalf("seed edge %d: %v", i, err)
+		}
+	}
+	if err := db.Delete(&cimodel.Relation{}, rows[2].ID).Error; err != nil {
+		t.Fatalf("soft-delete edge: %v", err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("second Migrate() error = %v", err)
+	}
+
+	want := map[model.ID]string{
+		rows[0].ID: string(model.RelationEvidenceAttributeRule),
+		rows[1].ID: string(model.RelationEvidenceAutoDiscovery),
+		rows[2].ID: string(model.RelationEvidenceLegacy),
+		rows[3].ID: string(model.RelationEvidenceManual),
+	}
+	for id, evidence := range want {
+		var got cimodel.Relation
+		if err := db.Unscoped().First(&got, id).Error; err != nil {
+			t.Fatalf("read edge %d: %v", id, err)
+		}
+		if got.EvidenceSource != evidence {
+			t.Fatalf("edge %d evidence = %q, want %q", id, got.EvidenceSource, evidence)
+		}
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("third Migrate() error = %v", err)
+	}
+	var got cimodel.Relation
+	if err := db.Unscoped().First(&got, rows[1].ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.EvidenceSource != string(model.RelationEvidenceAutoDiscovery) {
+		t.Fatalf("a second pass changed evidence to %q", got.EvidenceSource)
 	}
 }
 

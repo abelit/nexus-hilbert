@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
@@ -460,6 +461,12 @@ type neighbour struct {
 	RelationTypeDirection  string  `json:"relation_type_direction"`
 	RelationTypePropagates bool    `json:"relation_type_propagates"`
 	RelationTypeWeight     float64 `json:"relation_type_weight"`
+
+	// Provenance of the edge, so the model can tell a collector's observation
+	// from a manual entry or an inference.
+	EvidenceSource string     `json:"evidence_source"`
+	Confidence     *float64   `json:"confidence"`
+	ObservedAt     *time.Time `json:"observed_at"`
 }
 
 func newGetCIRelationsTool(c *Client) basetool.BaseTool {
@@ -507,7 +514,7 @@ func newGetCIRelationsTool(c *Client) basetool.BaseTool {
 			}
 			items := make([]any, 0, len(pageData.Items))
 			for _, n := range pageData.Items {
-				items = append(items, map[string]any{
+				item := map[string]any{
 					"relation_id": n.RelationID, "ci_id": n.CIID,
 					"type_id": n.TypeID, "relation_type_id": n.RelationTypeID,
 					"relation_type_name":       n.RelationTypeName,
@@ -515,7 +522,17 @@ func newGetCIRelationsTool(c *Client) basetool.BaseTool {
 					"relation_type_direction":  n.RelationTypeDirection,
 					"relation_type_propagates": n.RelationTypePropagates,
 					"relation_type_weight":     n.RelationTypeWeight,
-				})
+				}
+				if n.EvidenceSource != "" {
+					item["evidence_source"] = n.EvidenceSource
+				}
+				if n.Confidence != nil {
+					item["confidence"] = *n.Confidence
+				}
+				if n.ObservedAt != nil {
+					item["observed_at"] = n.ObservedAt
+				}
+				items = append(items, item)
 			}
 			out := Truncate(items, maxItems, pageData.NumFound)
 			out["page"] = pageData.Page

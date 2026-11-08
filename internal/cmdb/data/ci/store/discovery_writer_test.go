@@ -66,6 +66,12 @@ func TestDiscoveryWriterMapsValuesAndBuildsTheEdge(t *testing.T) {
 	if rel.Source == nil || *rel.Source != string(model.RelationFromAutoDiscovery) {
 		t.Fatalf("relation source = %v, want auto-discovery", rel.Source)
 	}
+	if rel.EvidenceSource != string(model.RelationEvidenceAutoDiscovery) {
+		t.Fatalf("relation evidence source = %q, want collector:autodiscovery", rel.EvidenceSource)
+	}
+	if rel.ObservedAt == nil {
+		t.Fatal("a collector edge must record its observation time")
+	}
 
 	// A PEER VALUE THAT MATCHES NOTHING still writes the instance: the relation
 	// is a hint, not a precondition, and refusing the accept would make a

@@ -39,6 +39,7 @@ func (o OperateType) Valid() bool {
 }
 
 // RelationSource is cantor's RelationSourceEnum: how a relation came to exist.
+// It is a one-character code and is kept as-is for compatibility.
 type RelationSource string
 
 const (
@@ -48,6 +49,36 @@ const (
 	// RelationFromAutoDiscovery marks a relation created when a discovery
 	// candidate was accepted into the CMDB.
 	RelationFromAutoDiscovery RelationSource = "1"
+)
+
+// RelationEvidenceSource is the semantic provenance written to
+// c_ci_relations.evidence_source. cantor's one-character `source` stays as it
+// is; this field carries the vocabulary AIOps reasons about and is what new
+// writes populate.
+type RelationEvidenceSource string
+
+const (
+	// RelationEvidenceManual is an edge a person created through the console
+	// or the API. It is the default for writes that do not name a source.
+	RelationEvidenceManual RelationEvidenceSource = "manual"
+	// RelationEvidenceImport is an edge written by a spreadsheet import.
+	RelationEvidenceImport RelationEvidenceSource = "import"
+	// RelationEvidenceAttributeRule is an edge derived from reference-valued
+	// attributes.
+	RelationEvidenceAttributeRule RelationEvidenceSource = "attribute-rule"
+	// RelationEvidenceAutoDiscovery is an edge a collector established when
+	// its candidate was accepted. Collectors also set observed_at.
+	RelationEvidenceAutoDiscovery RelationEvidenceSource = "collector:autodiscovery"
+	// RelationEvidenceIPAM is an edge the built-in IPAM operations created
+	// (scope, subnet and address placement).
+	RelationEvidenceIPAM RelationEvidenceSource = "system:ipam"
+	// RelationEvidenceLegacy is an edge that existed before provenance was
+	// recorded. The migration assigns it where no source is known; it does
+	// not claim the edge was manual.
+	RelationEvidenceLegacy RelationEvidenceSource = "legacy"
+	// RelationEvidenceInference is reserved for edges an inference engine
+	// created.
+	RelationEvidenceInference RelationEvidenceSource = "inference"
 )
 
 // Constraint is cantor's ConstraintEnum: the cardinality rule on a
