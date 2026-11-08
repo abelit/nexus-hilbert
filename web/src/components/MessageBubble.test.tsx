@@ -22,6 +22,20 @@ vi.mock('@/api/approvals', () => ({
   approveApproval: vi.fn(),
   rejectApproval: vi.fn(),
 }));
+vi.mock('@/cmdb', () => ({
+  RelationGraphCard: ({ graph }: { graph: { root: { name: string } } }) => (
+    <div data-testid="relation-graph-card">{graph.root.name}</div>
+  ),
+  parseRelationGraph: (value: unknown) =>
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    'root' in value &&
+    'nodes' in value &&
+    'edges' in value
+      ? value
+      : null,
+}));
 
 afterEach(() => {
   cleanup();
@@ -500,5 +514,49 @@ describe('MessageBubble operation card', () => {
     await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
     expect(screen.getByText('1 个 PCAP · tcp port 443')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Stop|停止/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('MessageBubble relation graph card', () => {
+  const graph = {
+    root: { id: 1, name: 'web-01', type_id: 3, type_name: 'server' },
+    nodes: [{ id: 1, name: 'web-01', type_id: 3, type_name: 'server' }],
+    edges: [],
+    counts: { upstream: 0, downstream: 0 },
+    truncated: false,
+  };
+
+  function toolCard(result: unknown, status: 'success' | 'error' = 'success'): ChatMessage {
+    return {
+      id: 'relation-graph-tool',
+      role: 'tool',
+      kind: 'tool_card',
+      tool_call: {
+        name: 'cmdb_relation_graph',
+        status,
+        result,
+      },
+    };
+  }
+
+  it('renders the relation graph card for a graph result', () => {
+    render(<MessageBubble message={toolCard(graph)} />);
+
+    expect(screen.getByTestId('relation-graph-card')).toHaveTextContent('web-01');
+    expect(screen.queryByText('cmdb_relation_graph')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the generic tool block for a malformed result', () => {
+    render(<MessageBubble message={toolCard({ items: [] })} />);
+
+    expect(screen.queryByTestId('relation-graph-card')).not.toBeInTheDocument();
+    expect(screen.getByText('cmdb_relation_graph')).toBeInTheDocument();
+  });
+
+  it('does not render the card for an error result', () => {
+    render(<MessageBubble message={toolCard(graph, 'error')} />);
+
+    expect(screen.queryByTestId('relation-graph-card')).not.toBeInTheDocument();
+    expect(screen.getByText('cmdb_relation_graph')).toBeInTheDocument();
   });
 });
