@@ -39,6 +39,43 @@ func TestBuiltinDiagnosticAgentsCanUseCMDBTools(t *testing.T) {
 	}
 }
 
+func TestBuiltinCMDBAssistantsAreDispatchable(t *testing.T) {
+	agents, err := filepath.Abs("../../agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ONGRID_BUILTIN_AGENTS_ROOT", agents)
+	t.Setenv("ONGRID_BUILTIN_SKILLS_ROOT", "")
+	t.Setenv("ONGRID_SKILLS_ROOT", filepath.Join(t.TempDir(), "missing"))
+	_, personas := loadBootstrapRegistries(slog.Default())
+
+	cases := map[string]struct {
+		capability string
+		tools      []string
+	}{
+		"model-steward":   {"cmdb_model_explanation", []string{"cmdb_list_ci_types", "cmdb_get_ci_type", "cmdb_search_ci", "cmdb_get_ci", "cmdb_find_ci_type_path"}},
+		"change-auditor":  {"cmdb_change_audit", []string{"cmdb_get_ci_history", "cmdb_get_ci", "cmdb_search_ci", "query_change_events"}},
+		"ci-investigator": {"cmdb_dependency_triage", []string{"cmdb_search_ci", "cmdb_get_ci_relations", "cmdb_relation_graph", "expand_topology"}},
+	}
+	for name, want := range cases {
+		def, ok := personas.ByName(name)
+		if !ok {
+			t.Fatalf("%s not loaded", name)
+		}
+		if def.PermissionMode != "read-only" {
+			t.Fatalf("%s permission_mode = %q, want read-only", name, def.PermissionMode)
+		}
+		if len(def.Capabilities) == 0 || def.Capabilities[0].ID != want.capability {
+			t.Fatalf("%s capabilities = %+v, want %s", name, def.Capabilities, want.capability)
+		}
+		for _, tool := range want.tools {
+			if !slices.Contains(def.Tools, tool) {
+				t.Fatalf("%s missing %s", name, tool)
+			}
+		}
+	}
+}
+
 func TestLoadBootstrapRegistriesSkillRoots(t *testing.T) {
 	fixtures, err := filepath.Abs("../../internal/manager/biz/aiops/runtime/v3/chatruntime/testdata")
 	if err != nil {
