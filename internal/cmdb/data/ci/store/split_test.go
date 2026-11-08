@@ -139,8 +139,14 @@ func TestPlanRelationSplitClassifiesPairsAndFlagsReview(t *testing.T) {
 		t.Fatalf("ambiguous depend row = %+v, want reviewed DEPENDS_ON", dep)
 	}
 	ipam := reviewed["contain|ipam_subnet|ipam_address"]
-	if ipam.Review || ipam.Target != "ALLOCATED_TO" {
-		t.Fatalf("ipam row = %+v, want unreviewed ALLOCATED_TO", ipam)
+	if ipam.Review || ipam.Target != "ALLOCATED_TO" || ipam.CmdbName != "ALLOCATES" ||
+		ipam.InverseOf != "ALLOCATED_TO" || !ipam.DirectionInverted {
+		t.Fatalf("ipam row = %+v, want ALLOCATES inverse_of ALLOCATED_TO", ipam)
+	}
+	member := reviewed["contain|app_cluster|app_instance"]
+	if member.Target != "MEMBER_OF" || member.CmdbName != "HAS_MEMBER" ||
+		member.InverseOf != "MEMBER_OF" || !member.DirectionInverted {
+		t.Fatalf("member row = %+v, want HAS_MEMBER inverse_of MEMBER_OF", member)
 	}
 }
 
