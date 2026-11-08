@@ -1,8 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CronBuilder } from './CronBuilder';
+
+beforeEach(() => localStorage.setItem('ongrid-locale', 'zh-CN'));
 
 describe('cron builder', () => {
   it('opens on the current expression and applies a reset', async () => {

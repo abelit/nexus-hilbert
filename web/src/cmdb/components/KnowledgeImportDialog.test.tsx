@@ -1,11 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw-server';
 import { KnowledgeImportDialog } from './KnowledgeImportDialog';
 import { ToastProvider } from './Toast';
+
+beforeEach(() => localStorage.setItem('ongrid-locale', 'zh-CN'));
 
 const item = {
   ciId: 42,

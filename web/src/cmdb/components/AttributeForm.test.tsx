@@ -20,6 +20,8 @@ function renderForm(attribute: Parameters<typeof AttributeForm>[0]['attribute'] 
 }
 
 beforeEach(() => {
+  // CI auto-detects en-US; this suite asserts the Chinese labels.
+  localStorage.setItem('ongrid-locale', 'zh-CN');
   server.use(http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })));
 });
 
