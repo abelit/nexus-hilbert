@@ -238,6 +238,10 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
         onExpand: (next: RelationNode) => void expand(next),
       } satisfies CINodeData,
       draggable: false,
+      // React Flow sets pointer-events: none on a node unless it is
+      // selectable, draggable, or has a node-level handler. Our buttons are
+      // the interaction surface, so opt the node back in explicitly.
+      style: { pointerEvents: 'all' },
     }));
     for (const [index, group] of overflow.entries()) {
       flowNodes.push({

@@ -27,7 +27,12 @@ vi.mock('./InstanceDetailPeek', () => ({
 }));
 
 const flow = vi.hoisted(() => ({
-  nodes: [] as Array<{ id: string; type?: string; data?: unknown }>,
+  nodes: [] as Array<{
+    id: string;
+    type?: string;
+    data?: unknown;
+    style?: { pointerEvents?: string };
+  }>,
   fitView: vi.fn(),
 }));
 
@@ -150,6 +155,14 @@ describe('RelationGraphCard', () => {
     await userEvent.click(screen.getByRole('button', { name: '展开 app-01 一跳' }));
 
     await waitFor(() => expect(flow.fitView).toHaveBeenCalled());
+  });
+
+  it('opts every CI node into pointer events', () => {
+    render(<RelationGraphCard graph={graphFixture()} />);
+
+    const ciNodes = flow.nodes.filter((node) => node.type === 'ci');
+    expect(ciNodes.length).toBeGreaterThan(0);
+    expect(ciNodes.every((node) => node.style?.pointerEvents === 'all')).toBe(true);
   });
 
   it('opens the read-only CI peek from a node', async () => {
