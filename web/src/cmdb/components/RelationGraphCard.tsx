@@ -12,8 +12,9 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ChevronDown, ChevronRight, Loader2, Network, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Maximize2, Network, Plus } from 'lucide-react';
 
+import { Modal } from '@/components/Modal';
 import { useI18n } from '@/i18n/locale';
 
 import { listRelations, type ModelRelation } from '../api/citype';
@@ -125,28 +126,67 @@ function graphSignature(graph: RelationGraph): string {
   return `${graph.root.id}|${nodes}|${edges}|${graph.counts.upstream}/${graph.counts.downstream}|${graph.truncated}`;
 }
 
-export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
-  const { tr } = useI18n();
-  const [current, setCurrent] = useState(graph);
-  const [collapsed, setCollapsed] = useState(false);
-  const [busyID, setBusyID] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
-  const [peek, setPeek] = useState<{ id: number; typeID: number | null } | null>(null);
-
-  const labelMap = useRef(new Map<string, string>());
-  const labelsLoaded = useRef<Promise<void> | null>(null);
-  const lastSignature = useRef('');
+function GraphCanvas({
+  graph,
+  busyID,
+  onOpen,
+  onExpand,
+  maxPerColumn,
+  heightClass,
+  testID,
+}: {
+  graph: RelationGraph;
+  busyID: number | null;
+  onOpen(node: RelationNode): void;
+  onExpand(node: RelationNode): void;
+  /** 0 disables aggregation (the enlarged view shows every node). */
+  maxPerColumn: number;
+  heightClass: string;
+  testID: string;
+}) {
   const flowRef = useRef<ReactFlowInstance<FlowNode, Edge> | null>(null);
 
-  useEffect(() => {
-    const next = graphSignature(graph);
-    if (next === lastSignature.current) return;
-    lastSignature.current = next;
-    setCurrent(graph);
-    setExpanded(new Set());
-    setError(null);
-  }, [graph]);
+  const { flowNodes, flowEdges } = useMemo(() => {
+    const placed = layoutRelationGraph(graph);
+    const { nodes, overflow } = aggregateColumns(placed.nodes, maxPerColumn);
+
+    const flowNodes: FlowNode[] = nodes.map((node) => ({
+      id: String(node.id),
+      type: 'ci',
+      position: { x: node.x, y: node.y },
+      data: {
+        node,
+        isRoot: node.id === graph.root.id,
+        busy: busyID === node.id,
+        onOpen,
+        onExpand,
+      } satisfies CINodeData,
+      draggable: false,
+      // React Flow sets pointer-events: none on a node unless it is
+      // selectable, draggable, or has a node-level handler. Our buttons are
+      // the interaction surface, so opt the node back in explicitly.
+      style: { pointerEvents: 'all' },
+    }));
+    for (const [index, group] of overflow.entries()) {
+      flowNodes.push({
+        id: `more-${group.side}-${group.depth}-${index}`,
+        type: 'more',
+        position: { x: group.x, y: group.y },
+        data: { count: group.count } satisfies MoreNodeData,
+        draggable: false,
+      });
+    }
+
+    const flowEdges: Edge[] = placed.edges.map((edge) => ({
+      id: `e-${edge.source}-${edge.target}`,
+      source: String(edge.source),
+      target: String(edge.target),
+      label: edge.label,
+      markerEnd: { type: MarkerType.ArrowClosed },
+    }));
+
+    return { flowNodes, flowEdges };
+  }, [busyID, graph, maxPerColumn, onExpand, onOpen]);
 
   // `fitView` on ReactFlow only runs on mount. An expansion adds a column
   // outside the current viewport, which looks like a no-op on narrow screens
@@ -161,7 +201,54 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
       void instance.fitView({ padding: 0.2, duration: reduceMotion ? 0 : 220 });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [current]);
+  }, [graph]);
+
+  return (
+    <div className={heightClass} data-testid={testID}>
+      <ReactFlow
+        nodes={flowNodes}
+        edges={flowEdges}
+        nodeTypes={nodeTypes}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        minZoom={0.2}
+        onInit={(instance) => {
+          flowRef.current = instance;
+        }}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
+  );
+}
+
+export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
+  const { tr } = useI18n();
+  const [current, setCurrent] = useState(graph);
+  const [collapsed, setCollapsed] = useState(false);
+  const [busyID, setBusyID] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [peek, setPeek] = useState<{ id: number; typeID: number | null } | null>(null);
+  const [maximized, setMaximized] = useState(false);
+
+  const labelMap = useRef(new Map<string, string>());
+  const labelsLoaded = useRef<Promise<void> | null>(null);
+  const lastSignature = useRef('');
+
+  useEffect(() => {
+    const next = graphSignature(graph);
+    if (next === lastSignature.current) return;
+    lastSignature.current = next;
+    setCurrent(graph);
+    setExpanded(new Set());
+    setError(null);
+  }, [graph]);
 
   const ensureLabels = useCallback(async () => {
     if (!labelsLoaded.current) {
@@ -222,48 +309,6 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
 
   const byID = useMemo(() => new Map(current.nodes.map((node) => [node.id, node])), [current.nodes]);
 
-  const { flowNodes, flowEdges } = useMemo(() => {
-    const placed = layoutRelationGraph(current);
-    const { nodes, overflow } = aggregateColumns(placed.nodes, MAX_PER_COLUMN);
-
-    const flowNodes: FlowNode[] = nodes.map((node) => ({
-      id: String(node.id),
-      type: 'ci',
-      position: { x: node.x, y: node.y },
-      data: {
-        node,
-        isRoot: node.id === current.root.id,
-        busy: busyID === node.id,
-        onOpen: openNode,
-        onExpand: (next: RelationNode) => void expand(next),
-      } satisfies CINodeData,
-      draggable: false,
-      // React Flow sets pointer-events: none on a node unless it is
-      // selectable, draggable, or has a node-level handler. Our buttons are
-      // the interaction surface, so opt the node back in explicitly.
-      style: { pointerEvents: 'all' },
-    }));
-    for (const [index, group] of overflow.entries()) {
-      flowNodes.push({
-        id: `more-${group.side}-${group.depth}-${index}`,
-        type: 'more',
-        position: { x: group.x, y: group.y },
-        data: { count: group.count } satisfies MoreNodeData,
-        draggable: false,
-      });
-    }
-
-    const flowEdges: Edge[] = placed.edges.map((edge) => ({
-      id: `e-${edge.source}-${edge.target}`,
-      source: String(edge.source),
-      target: String(edge.target),
-      label: edge.label,
-      markerEnd: { type: MarkerType.ArrowClosed },
-    }));
-
-    return { flowNodes, flowEdges };
-  }, [busyID, current, expand, openNode]);
-
   return (
     <section className="w-full overflow-hidden rounded-lg border border-border bg-bg/40 text-xs">
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
@@ -279,42 +324,41 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
             {tr('结果已截断', 'Truncated')}
           </span>
         )}
-        <button
-          type="button"
-          onClick={() => setCollapsed((value) => !value)}
-          aria-label={
-            collapsed
-              ? tr('展开关系图', 'Expand relation graph')
-              : tr('收起关系图', 'Collapse relation graph')
-          }
-          className="ml-auto grid size-6 place-items-center rounded text-text-faint hover:bg-bg/60 hover:text-text"
-        >
-          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setMaximized(true)}
+            aria-label={tr('放大关系图', 'Enlarge relation graph')}
+            className="grid size-6 place-items-center rounded text-text-faint hover:bg-bg/60 hover:text-text"
+          >
+            <Maximize2 size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-label={
+              collapsed
+                ? tr('展开关系图', 'Expand relation graph')
+                : tr('收起关系图', 'Collapse relation graph')
+            }
+            className="grid size-6 place-items-center rounded text-text-faint hover:bg-bg/60 hover:text-text"
+          >
+            {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
       </div>
 
       {!collapsed && (
         <>
-          <div className="h-72 w-full" data-testid="relation-graph-canvas">
-            <ReactFlow
-              nodes={flowNodes}
-              edges={flowEdges}
-              nodeTypes={nodeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
-              minZoom={0.2}
-              onInit={(instance) => {
-                flowRef.current = instance;
-              }}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              elementsSelectable={false}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background />
-              <Controls showInteractive={false} />
-            </ReactFlow>
-          </div>
+          <GraphCanvas
+            graph={current}
+            busyID={busyID}
+            onOpen={openNode}
+            onExpand={(node) => void expand(node)}
+            maxPerColumn={MAX_PER_COLUMN}
+            heightClass="h-72 w-full"
+            testID="relation-graph-canvas"
+          />
 
           <details className="border-t border-border px-3 py-2">
             <summary className="cursor-pointer text-[11px] font-medium text-text-muted">
@@ -349,6 +393,37 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
           )}
         </>
       )}
+
+      <Modal
+        open={maximized}
+        onClose={() => setMaximized(false)}
+        title={tr('关系图', 'Relation graph')}
+        size="xl"
+      >
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
+            <span>
+              {tr(`${current.counts.upstream} 上游`, `${current.counts.upstream} upstream`)}
+              {' · '}
+              {tr(`${current.counts.downstream} 下游`, `${current.counts.downstream} downstream`)}
+            </span>
+            {current.truncated && (
+              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                {tr('结果已截断', 'Truncated')}
+              </span>
+            )}
+          </div>
+          <GraphCanvas
+            graph={current}
+            busyID={busyID}
+            onOpen={openNode}
+            onExpand={(node) => void expand(node)}
+            maxPerColumn={0}
+            heightClass="h-[68vh] min-h-[420px] w-full"
+            testID="relation-graph-modal-canvas"
+          />
+        </div>
+      </Modal>
 
       {peek && (
         <InstanceDetailPeek

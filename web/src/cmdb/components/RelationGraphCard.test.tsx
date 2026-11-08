@@ -185,6 +185,16 @@ describe('RelationGraphCard', () => {
     expect(screen.getByText('还有 7 个')).toBeInTheDocument();
   });
 
+  it('opens an enlarged graph in a dialog', async () => {
+    render(<RelationGraphCard graph={graphFixture()} />);
+
+    await userEvent.click(screen.getByRole('button', { name: '放大关系图' }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('relation-graph-modal-canvas')).toBeInTheDocument();
+    expect(flow.nodes.filter((node) => node.type === 'ci')).toHaveLength(3);
+  });
+
   it('collapses without losing the summary', async () => {
     render(<RelationGraphCard graph={graphFixture()} />);
     expect(screen.getByTestId('relation-graph-flow')).toBeInTheDocument();
