@@ -71,6 +71,24 @@ func (u *Usecase) List(ctx context.Context) ([]citypemodel.RelationType, error) 
 	return u.repo.List(ctx)
 }
 
+// ListUsable is the selector view: it drops deprecated rows so a console
+// dropdown or a connector cannot offer retired vocabulary. The dictionary page
+// keeps using List so an operator can still see what was retired and why.
+func (u *Usecase) ListUsable(ctx context.Context) ([]citypemodel.RelationType, error) {
+	rows, err := u.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]citypemodel.RelationType, 0, len(rows))
+	for _, rt := range rows {
+		if rt.Deprecated {
+			continue
+		}
+		out = append(out, rt)
+	}
+	return out, nil
+}
+
 // Create adds a relation type.
 //
 // The duplicate-name check is a read followed by a write, so two concurrent

@@ -135,8 +135,27 @@ type listResponse struct {
 	Total int               `json:"total"`
 }
 
+// list serves the dictionary. include_deprecated defaults to true so the
+// dictionary page can show retired words; selectors pass false to hide them.
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.uc.List(r.Context())
+	includeDeprecated := true
+	if raw := r.URL.Query().Get("include_deprecated"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeErr(w, errs.ErrInvalid)
+			return
+		}
+		includeDeprecated = parsed
+	}
+	var (
+		rows []citypemodel.RelationType
+		err  error
+	)
+	if includeDeprecated {
+		rows, err = h.uc.List(r.Context())
+	} else {
+		rows, err = h.uc.ListUsable(r.Context())
+	}
 	if err != nil {
 		writeErr(w, err)
 		return

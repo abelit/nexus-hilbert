@@ -540,7 +540,7 @@ function RelationModal({
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    void listRelationTypes()
+    void listRelationTypes({ includeDeprecated: false })
       .then((rows) => {
         setTypes(rows);
         if (rows.length > 0) setRelationTypeID(String(rows[0].id));

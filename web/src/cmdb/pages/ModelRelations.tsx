@@ -123,7 +123,10 @@ export default function ModelRelationsPage() {
   };
 
   const loadFormLookups = async () => {
-    const [gotModels, gotTypes] = await Promise.all([listCITypes(), listRelationTypes()]);
+    const [gotModels, gotTypes] = await Promise.all([
+      listCITypes(),
+      listRelationTypes({ includeDeprecated: false }),
+    ]);
     setModels(gotModels);
     setRelationTypes(gotTypes);
     return { models: gotModels, relationTypes: gotTypes };

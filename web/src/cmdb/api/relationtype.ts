@@ -40,9 +40,21 @@ export type RelationTypeInput = {
   color: string;
 };
 
-export async function listRelationTypes(): Promise<RelationType[]> {
-  const got = await cmdbGet<ListResponse<RelationType>>('/relation-types');
-  return got.items ?? [];
+/**
+ * includeDeprecated defaults to true: the dictionary page needs retired rows so
+ * an operator can see the badge and replacement. Selectors pass false so a
+ * retired word is never offered.
+ */
+export async function listRelationTypes(
+  options: { includeDeprecated?: boolean } = {},
+): Promise<RelationType[]> {
+  const includeDeprecated = options.includeDeprecated ?? true;
+  const path = includeDeprecated ? '/relation-types' : '/relation-types?include_deprecated=false';
+  const got = await cmdbGet<ListResponse<RelationType>>(path);
+  const rows = got.items ?? [];
+  // Filter locally as well, so a server that ignores the parameter cannot put a
+  // retired type back into a dropdown.
+  return includeDeprecated ? rows : rows.filter((row) => !row.deprecated);
 }
 
 export function createRelationType(input: RelationTypeInput): Promise<RelationType> {
