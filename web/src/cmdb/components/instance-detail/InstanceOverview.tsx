@@ -33,6 +33,7 @@ export function InstanceOverview({
   error,
   onRetry,
   onSaveValue,
+  readOnly = false,
 }: {
   model: CIType;
   models: CIType[];
@@ -44,6 +45,8 @@ export function InstanceOverview({
   onRetry(): void;
   /** Writes one attribute; omitted for a surface that must stay read-only. */
   onSaveValue?(name: string, value: unknown): Promise<void>;
+  /** Hides the relation add affordance as well as the inline editors. */
+  readOnly?: boolean;
 }) {
   const { tr } = useI18n();
   const referenceLabels = useReferenceLabels(instance ? [instance] : [], attributes, models);
@@ -217,7 +220,7 @@ export function InstanceOverview({
         </div>
       </section>
 
-      <InstanceRelations ciID={instance.ci_id} modelRef={model.name} models={models} />
+      <InstanceRelations ciID={instance.ci_id} modelRef={model.name} models={models} readOnly={readOnly} />
     </div>
   );
 }

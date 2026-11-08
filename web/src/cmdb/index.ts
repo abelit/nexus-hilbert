@@ -11,6 +11,7 @@ export type { CMDBRoute, CMDBNavItem } from './routes';
 export { DataTable } from './components/DataTable';
 export type { Column, SortState } from './components/DataTable';
 export { Drawer } from './components/Drawer';
+export { InstanceDetailPeek } from './components/InstanceDetailPeek';
 export { Tree } from './components/Tree';
 export type { TreeNode } from './components/Tree';
 export { AttributeControl, AttributeValue } from './components/AttributeControl';

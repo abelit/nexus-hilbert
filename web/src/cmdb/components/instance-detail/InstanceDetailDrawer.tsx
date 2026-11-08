@@ -61,6 +61,7 @@ export function InstanceDetailDrawer({
   onClose,
   onEdit,
   onInstanceSaved,
+  readOnly = false,
 }: {
   model: CIType;
   models: CIType[];
@@ -73,6 +74,12 @@ export function InstanceDetailDrawer({
   onEdit?(instanceID: number): void;
   /** Lets the list or relation table behind the drawer refresh after an edit. */
   onInstanceSaved?(instanceID: number): void;
+  /**
+   * Removes every write affordance: inline edit, file upload, add-relation,
+   * the footer Edit and rollback. Used by the assistant's relation-graph peek;
+   * the console drawer keeps its default false.
+   */
+  readOnly?: boolean;
 }) {
   const { tr } = useI18n();
   const { isAdmin, canMutate } = usePermissions();
@@ -273,7 +280,7 @@ export function InstanceDetailDrawer({
   const statusStopped = ['inactive', 'offline', 'disabled', 'error', '停用', '异常'].includes(statusLower);
   // Editing opens the page's form for the page's model, so it stays available
   // only while the drawer still shows that model; a cross-model jump is read-only.
-  const canEdit = Boolean(onEdit) && Number(subject.model.id) === Number(model.id);
+  const canEdit = !readOnly && Boolean(onEdit) && Number(subject.model.id) === Number(model.id);
   const updatedAt = headerDateTime(instance?.updated_at);
   // cantor stored a nickname; this service writes the caller's email. Resolve
   // that email to the IAM display name when the viewer may read the user list,
@@ -412,7 +419,8 @@ export function InstanceDetailDrawer({
               loading={loading}
               error={error}
               onRetry={() => setRetryKey((key) => key + 1)}
-              onSaveValue={saveAttribute}
+              onSaveValue={readOnly ? undefined : saveAttribute}
+              readOnly={readOnly}
             />
           )}
         </TabsContent>

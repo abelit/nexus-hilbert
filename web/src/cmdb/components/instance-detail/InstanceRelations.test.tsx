@@ -113,11 +113,11 @@ const candidateRow: SearchRow = {
   code: 'bsvc-20260628-0002',
 };
 
-function renderRelations() {
+function renderRelations(readOnly = false) {
   return render(
     <MemoryRouter>
       <ToastProvider>
-        <InstanceRelations ciID={5} modelRef="host" models={[host, service]} />
+        <InstanceRelations ciID={5} modelRef="host" models={[host, service]} readOnly={readOnly} />
       </ToastProvider>
     </MemoryRouter>,
   );
@@ -200,5 +200,16 @@ describe('the related resources table', () => {
       body: { relation_type_id: 3 },
     });
     expect(await screen.findByText('已添加关联：业务服务 B')).toBeInTheDocument();
+  });
+});
+
+
+describe('read-only peek', () => {
+  it('hides the add affordances when readOnly is set', async () => {
+    mocks();
+    renderRelations(true);
+
+    await screen.findByText('业务服务 A');
+    expect(screen.queryByRole('button', { name: /^添加/ })).not.toBeInTheDocument();
   });
 });
