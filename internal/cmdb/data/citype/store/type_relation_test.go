@@ -139,6 +139,24 @@ func TestSaveTypeRelationRefusesASelfLoop(t *testing.T) {
 	}
 }
 
+// A structural self-hierarchy is legitimate: a subnet can contain a subnet.
+// The bootstrap is the only trusted caller allowed to declare it; the public
+// use case still refuses a self relation unless it opts in.
+func TestSaveTypeRelationAllowsStructuralSelfLoopWhenRequested(t *testing.T) {
+	repo, db := newAttrRepo(t)
+	parent, _, rt := relationFixture(t, repo, db)
+
+	spec := saveSpec(parent.ID, parent.ID, rt.ID)
+	spec.AllowSelf = true
+	saved, err := repo.SaveTypeRelation(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("SaveTypeRelation(AllowSelf) error = %v", err)
+	}
+	if saved.ParentID != parent.ID || saved.ChildID != parent.ID {
+		t.Fatalf("saved = %+v, want the self-rule", saved)
+	}
+}
+
 func TestSaveTypeRelationRefusesAnUnknownRelationType(t *testing.T) {
 	repo, db := newAttrRepo(t)
 	parent, child, _ := relationFixture(t, repo, db)

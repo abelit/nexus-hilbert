@@ -11,9 +11,52 @@ import { ToastProvider } from '../components/Toast';
 // The first CMDB page, against a mocked backend: the shared layer proven on a
 // real endpoint rather than on a fixture.
 
+function semantics(overrides: Record<string, unknown> = {}) {
+  return {
+    category: '',
+    direction: '',
+    propagates_default: false,
+    weight_default: 0,
+    inverse_of: '',
+    transitive: false,
+    sub_property_of: null,
+    display_name_zh: '',
+    display_name_en: '',
+    description: '',
+    deprecated: false,
+    replacement: '',
+    revision: 0,
+    display_name_override: '',
+    ...overrides,
+  };
+}
+
 const rows = [
-  { id: 1, name: 'depends_on', color: '#6366f1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' },
-  { id: 2, name: 'runs_on', color: '', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' },
+  {
+    id: 1, name: 'depends_on', color: '#6366f1',
+    created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+    ...semantics({
+      category: 'dependency', direction: 'dst_to_src',
+      propagates_default: true, weight_default: 0.8, display_name_zh: '依赖',
+    }),
+  },
+  {
+    id: 2, name: 'runs_on', color: '',
+    created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+    ...semantics({
+      category: 'runtime', direction: 'dst_to_src',
+      propagates_default: true, weight_default: 1.0, display_name_zh: '运行于',
+    }),
+  },
+  {
+    id: 3, name: 'install', color: '#000000',
+    created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+    ...semantics({
+      category: 'runtime', direction: 'dst_to_src',
+      propagates_default: true, weight_default: 0.8,
+      deprecated: true, replacement: 'RUNS_ON',
+    }),
+  },
 ];
 
 function renderPage() {
@@ -42,6 +85,11 @@ describe('the list', () => {
     // A TYPE WITH NO COLOUR SHOWS A DASH rather than a transparent swatch that
     // looks like a rendering bug.
     expect(screen.getByText('—')).toBeInTheDocument();
+    // The semantic mirror is visible: category, direction and propagation.
+    expect(screen.getByText('依赖')).toBeInTheDocument();
+    expect(screen.getAllByText('目标→源').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('传播 · 0.8').length).toBeGreaterThan(0);
+    expect(screen.getByText('已弃用')).toBeInTheDocument();
   });
 
   it('offers a retry when the load fails, and keeps the table usable', async () => {

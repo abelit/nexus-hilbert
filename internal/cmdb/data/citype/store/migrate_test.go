@@ -68,6 +68,166 @@ func TestRelationTypeDefaults(t *testing.T) {
 	}
 }
 
+// The relation-type dictionary gains the semantic fields nexus-topocortex
+// already models. CMDB mirrors them read-only; the columns still have to exist
+// before a sync can write them.
+func TestRelationTypeCarriesSemanticMirrorColumns(t *testing.T) {
+	db := newTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	want := []string{
+		"category", "direction", "propagates_default", "weight_default",
+		"inverse_of", "transitive", "sub_property_of",
+		"display_name_zh", "display_name_en", "description",
+		"deprecated", "replacement", "revision", "display_name_override",
+	}
+	for _, column := range want {
+		if !db.Migrator().HasColumn(&citypemodel.RelationType{}, column) {
+			t.Errorf("column %s was not created", column)
+		}
+	}
+}
+
+// The semantic mirror must round-trip, including the JSON vocabulary list and
+// the defaults the ontology sync relies on.
+func TestRelationTypeSemanticMirrorRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	rt := citypemodel.RelationType{
+		Name:                "CALLS",
+		Category:            "dependency",
+		Direction:           "src_to_dst",
+		PropagatesDefault:   true,
+		WeightDefault:       0.8,
+		InverseOf:           "CALLED_BY",
+		Transitive:          false,
+		SubPropertyOf:       citypemodel.StringList{"DEPENDS_ON"},
+		DisplayNameZH:       "调用",
+		DisplayNameEN:       "Calls",
+		Description:         "caller invokes callee",
+		Revision:            3,
+		DisplayNameOverride: "服务调用",
+	}
+	if err := db.Create(&rt).Error; err != nil {
+		t.Fatalf("create relation type: %v", err)
+	}
+
+	var got citypemodel.RelationType
+	if err := db.First(&got, rt.ID).Error; err != nil {
+		t.Fatalf("read relation type: %v", err)
+	}
+	if got.Category != "dependency" || got.Direction != "src_to_dst" ||
+		!got.PropagatesDefault || got.WeightDefault != 0.8 ||
+		got.InverseOf != "CALLED_BY" || got.Transitive ||
+		len(got.SubPropertyOf) != 1 || got.SubPropertyOf[0] != "DEPENDS_ON" ||
+		got.DisplayNameZH != "调用" || got.DisplayNameEN != "Calls" ||
+		got.Description != "caller invokes callee" || got.Revision != 3 ||
+		got.DisplayNameOverride != "服务调用" {
+		t.Fatalf("semantic mirror did not round-trip: %+v", got)
+	}
+
+	defaulted := citypemodel.RelationType{Name: "DEPENDS_ON"}
+	if err := db.Create(&defaulted).Error; err != nil {
+		t.Fatalf("create defaulted relation type: %v", err)
+	}
+	var gotDefault citypemodel.RelationType
+	if err := db.First(&gotDefault, defaulted.ID).Error; err != nil {
+		t.Fatalf("read defaulted relation type: %v", err)
+	}
+	if gotDefault.WeightDefault != 1 || gotDefault.PropagatesDefault ||
+		gotDefault.Transitive || gotDefault.Deprecated || gotDefault.Revision != 0 {
+		t.Fatalf("semantic defaults = %+v, want weight 1 and false/zero flags", gotDefault)
+	}
+}
+
+// The eight live vocabulary words get their first semantic values from the
+// migration. It only fills rows that are still unconfigured (category empty,
+// revision zero) and never overwrites an ontology-managed or operator-edited
+// row.
+func TestBackfillRelationTypeSemantics(t *testing.T) {
+	db := newTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	for _, name := range []string{
+		"contain", "deploy", "install", "connect", "manage", "bind", "depend", "run",
+	} {
+		if err := db.Create(&citypemodel.RelationType{Name: name}).Error; err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	custom := citypemodel.RelationType{
+		Name: "CALLS", Category: "association", Direction: "src_to_dst",
+		WeightDefault: 0.5, Revision: 9,
+	}
+	if err := db.Create(&custom).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// The second migration is what runs the backfill.
+	if err := Migrate(db); err != nil {
+		t.Fatalf("second Migrate() error = %v", err)
+	}
+
+	type want struct {
+		category, direction, replacement, zh string
+		propagates, transitive, deprecated   bool
+		weight                               float64
+	}
+	wants := map[string]want{
+		"contain": {"structure", "src_to_dst", "", "包含", false, true, false, 0},
+		"deploy":  {"runtime", "dst_to_src", "", "部署", true, false, false, 1.0},
+		"install": {"runtime", "dst_to_src", "RUNS_ON", "安装", true, false, true, 0.8},
+		"connect": {"dependency", "bidirectional", "", "连接", true, false, false, 0.6},
+		"manage":  {"ownership", "src_to_dst", "", "管理", false, false, false, 0},
+		"bind":    {"ownership", "src_to_dst", "", "绑定", false, false, false, 0},
+		"depend":  {"dependency", "dst_to_src", "", "依赖", true, false, false, 0.8},
+		"run":     {"runtime", "dst_to_src", "", "运行于", true, false, false, 1.0},
+	}
+	for name, w := range wants {
+		var got citypemodel.RelationType
+		if err := db.Where("name = ?", name).First(&got).Error; err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if got.Category != w.category || got.Direction != w.direction ||
+			got.PropagatesDefault != w.propagates || got.WeightDefault != w.weight ||
+			got.Transitive != w.transitive || got.Deprecated != w.deprecated ||
+			got.Replacement != w.replacement || got.DisplayNameZH != w.zh ||
+			got.Revision != 1 {
+			t.Fatalf("%s = %+v, want %+v", name, got, w)
+		}
+	}
+
+	var gotCustom citypemodel.RelationType
+	if err := db.Where("name = ?", "CALLS").First(&gotCustom).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotCustom.Category != "association" || gotCustom.WeightDefault != 0.5 || gotCustom.Revision != 9 {
+		t.Fatalf("an ontology-managed row was overwritten: %+v", gotCustom)
+	}
+
+	// A second backfill pass must not touch a row that is already configured.
+	if err := db.Model(&citypemodel.RelationType{}).Where("name = ?", "contain").
+		Updates(map[string]any{"category": "custom", "revision": 7}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("third Migrate() error = %v", err)
+	}
+	var gotContain citypemodel.RelationType
+	if err := db.Where("name = ?", "contain").First(&gotContain).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotContain.Category != "custom" || gotContain.Revision != 7 {
+		t.Fatalf("the backfill overwrote a configured row: %+v", gotContain)
+	}
+}
+
 // Attribute defaults matter for storage-table selection: an attribute created
 // without explicit flags must be an unindexed TEXT ("2"), which is what cantor
 // defaults to.

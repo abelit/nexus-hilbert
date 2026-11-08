@@ -5,6 +5,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 
 	"gorm.io/gorm"
 
@@ -28,7 +29,7 @@ func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return errNilDB
 	}
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&citypemodel.RelationType{},
 		&citypemodel.CITypeGroup{},
 		&citypemodel.CITypeGroupItem{},
@@ -53,5 +54,54 @@ func Migrate(db *gorm.DB) error {
 		// live in this package's schema rather than the resource one's.
 		&citypemodel.PreferenceRelationView{},
 		&citypemodel.PreferenceSearchOption{},
-	)
+	); err != nil {
+		return err
+	}
+	return backfillRelationTypeSemantics(db)
+}
+
+// The first semantic values for the eight live vocabulary words.
+//
+// THIS IS A BACKFILL, NOT A SEED. It runs inside Migrate because the semantics
+// columns are new and every existing row predates them; unlike seeding business
+// rows, filling a column that has no value yet is a migration. It only touches
+// rows whose category is empty AND whose revision is zero, so an operator edit
+// or a later topocortex sync is never overwritten.
+func backfillRelationTypeSemantics(db *gorm.DB) error {
+	type seed struct {
+		name, category, direction, displayZH, displayEN, description, replacement string
+		propagates, transitive, deprecated                                        bool
+		weight                                                                    float64
+	}
+	seeds := []seed{
+		{"contain", "structure", "src_to_dst", "包含", "Contains", "结构包含：整体由部分组成，不传播故障。", "", false, true, false, 0},
+		{"deploy", "runtime", "dst_to_src", "部署", "Deploys", "部署：工作负载部署到宿主，宿主故障影响工作负载。", "", true, false, false, 1.0},
+		{"install", "runtime", "dst_to_src", "安装", "Installs", "安装：已弃用，等价于运行于。", "RUNS_ON", true, false, true, 0.8},
+		{"connect", "dependency", "bidirectional", "连接", "Connects", "连接：逻辑或物理连接，方向与语义待拆分。", "", true, false, false, 0.6},
+		{"manage", "ownership", "src_to_dst", "管理", "Manages", "管理：人员或团队负责资源，不传播故障。", "", false, false, false, 0},
+		{"bind", "ownership", "src_to_dst", "绑定", "Binds", "绑定：SLA/合同与服务的关联，不传播故障。", "", false, false, false, 0},
+		{"depend", "dependency", "dst_to_src", "依赖", "Depends on", "依赖：源依赖目标，目标故障影响源。", "", true, false, false, 0.8},
+		{"run", "runtime", "dst_to_src", "运行于", "Runs on", "运行于：工作负载运行在宿主上，宿主故障影响工作负载。", "", true, false, false, 1.0},
+	}
+	for _, s := range seeds {
+		updates := map[string]any{
+			"category":           s.category,
+			"direction":          s.direction,
+			"propagates_default": s.propagates,
+			"weight_default":     s.weight,
+			"transitive":         s.transitive,
+			"display_name_zh":    s.displayZH,
+			"display_name_en":    s.displayEN,
+			"description":        s.description,
+			"deprecated":         s.deprecated,
+			"replacement":        s.replacement,
+			"revision":           1,
+		}
+		if err := db.Model(&citypemodel.RelationType{}).
+			Where("name = ? AND category = '' AND revision = 0", s.name).
+			Updates(updates).Error; err != nil {
+			return fmt.Errorf("cmdb citype: backfill relation type %q: %w", s.name, err)
+		}
+	}
+	return nil
 }

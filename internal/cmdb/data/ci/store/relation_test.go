@@ -299,6 +299,56 @@ func walkIDs(page *cibiz.HierarchyPage) string {
 // than truncated. The ids become a SQL IN list, and SQLite refuses a statement
 // with more than 32766 bound variables — measured — so the ceiling is real and
 // a silent truncation would be a hierarchy with a missing branch.
+// Legacy many-to-many edges have ancestor_ids NULL. A scoped walk (which the
+// hierarchy turns on as soon as a level is many-to-many) must fall back to
+// those edges rather than silently returning an empty level.
+func TestWalkChildrenScopedFallsBackToNullAncestors(t *testing.T) {
+	repo, _ := newRelationRepo(t, treeEdges)
+
+	got, err := repo.WalkChildren(context.Background(), []cibiz.WalkKey{
+		{Path: "1", Node: 1, TypeID: hostTypeID},
+	}, true)
+	if err != nil {
+		t.Fatalf("WalkChildren(scoped) error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("children = %+v, want 2", got)
+	}
+	want := map[string]bool{"1,2": true, "1,3": true}
+	for _, key := range got {
+		if !want[key.Path] {
+			t.Errorf("child path = %q, want one of %v", key.Path, want)
+		}
+	}
+}
+
+// A neighbour page carries the edge's vocabulary, so an AI or console does not
+// need a second request to learn what the edge means or whether it propagates.
+func TestChildrenExposeRelationTypeVocabulary(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+	if err := db.Model(&citypemodel.RelationType{}).Where("id = ?", 10).Updates(map[string]any{
+		"name": "run", "category": "runtime", "direction": "dst_to_src",
+		"propagates_default": true, "weight_default": 1.0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	uc := cibiz.NewUsecase(repo, &graphStub{}, nil)
+
+	page, err := uc.Children(context.Background(), 1, 0, 1, 20)
+	if err != nil {
+		t.Fatalf("Children() error = %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("items = %+v, want 2", page.Items)
+	}
+	item := page.Items[0]
+	if item.RelationTypeName != "run" || item.RelationTypeCategory != "runtime" ||
+		item.RelationTypeDirection != "dst_to_src" || !item.RelationTypePropagates ||
+		item.RelationTypeWeight != 1.0 {
+		t.Fatalf("relation type vocabulary not attached: %+v", item)
+	}
+}
+
 func TestWalkHierarchyRefusesTooManyInstances(t *testing.T) {
 	repo, db := newRelationRepo(t, treeEdges)
 	uc := cibiz.NewUsecase(repo, &graphStub{
@@ -346,6 +396,77 @@ func addSpec(first, second model.ID, constraint model.Constraint) cibiz.Relation
 		FirstCIID: first, SecondCIID: second,
 		RelationTypeID: 10, FirstTypeID: hostTypeID, SecondTypeID: hostTypeID,
 		Constraint: constraint, EnforceConstraint: true, Actor: 7,
+	}
+}
+
+// A zero relation type cannot be labelled, filtered or reasoned about; the
+// column is NOT NULL but the database would still store 0.
+func TestAddRelationRejectsZeroRelationType(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+
+	spec := addSpec(4, 5, model.ConstraintMany2Many)
+	spec.RelationTypeID = 0
+	if _, err := repo.AddRelation(context.Background(), spec); !errors.Is(err, cibiz.ErrRelationTypeRequired) {
+		t.Fatalf("AddRelation(zero type) error = %v, want ErrRelationTypeRequired", err)
+	}
+	var n int64
+	if err := db.Model(&cimodel.Relation{}).Where("first_ci_id = 4 AND second_ci_id = 5").Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("edge survived the refusal: %d rows", n)
+	}
+}
+
+// A dangling relation type id is the one referential check this table has: the
+// column has no foreign key.
+func TestAddRelationRejectsUnknownRelationType(t *testing.T) {
+	repo, _ := newRelationRepo(t, treeEdges)
+
+	spec := addSpec(4, 5, model.ConstraintMany2Many)
+	spec.RelationTypeID = 9999
+	if _, err := repo.AddRelation(context.Background(), spec); !errors.Is(err, cibiz.ErrRelationTypeNotFound) {
+		t.Fatalf("AddRelation(unknown type) error = %v, want ErrRelationTypeNotFound", err)
+	}
+}
+
+// Soft-deleted dictionary rows must not be usable: GORM's default scope hides
+// them, which is exactly what the live query sees.
+func TestAddRelationRejectsSoftDeletedRelationType(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+
+	rt := citypemodel.RelationType{Name: "retired"}
+	rt.ID = 50
+	if err := db.Create(&rt).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&citypemodel.RelationType{}, rt.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	spec := addSpec(4, 5, model.ConstraintMany2Many)
+	spec.RelationTypeID = 50
+	if _, err := repo.AddRelation(context.Background(), spec); !errors.Is(err, cibiz.ErrRelationTypeNotFound) {
+		t.Fatalf("AddRelation(deleted type) error = %v, want ErrRelationTypeNotFound", err)
+	}
+}
+
+// The business layer refuses a self-edge, but discovery and repair paths call
+// the store directly. The store is the single write entry point, so it must
+// refuse one too — otherwise the 271 legacy self-loops can be created again.
+func TestAddRelationRejectsSelfEdgeAtStoreBoundary(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+
+	_, err := repo.AddRelation(context.Background(), addSpec(4, 4, model.ConstraintMany2Many))
+	if !errors.Is(err, cibiz.ErrSelfRelation) {
+		t.Fatalf("AddRelation(self) error = %v, want ErrSelfRelation", err)
+	}
+	var n int64
+	if err := db.Model(&cimodel.Relation{}).Where("first_ci_id = 4 AND second_ci_id = 4").Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("self-edge survived the refusal: %d rows", n)
 	}
 }
 

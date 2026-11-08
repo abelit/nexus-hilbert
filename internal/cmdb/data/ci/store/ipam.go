@@ -337,14 +337,14 @@ func applyAddressChangeTx(ctx context.Context, tx *gorm.DB, change cibiz.Address
 		}
 
 		if id, ok := existing[ip]; ok {
-			if _, err := applyValues(tx, id, change.SubnetTypeID, change.AddressSpecs, values, change.Audit); err != nil {
+			if _, err := applyValues(tx, id, change.AddressTypeID, change.AddressSpecs, values, change.Audit); err != nil {
 				return result, err
 			}
 			result.AddressIDs = append(result.AddressIDs, id)
 			continue
 		}
 
-		row := &cimodel.CI{TypeID: change.SubnetTypeID}
+		row := &cimodel.CI{TypeID: change.AddressTypeID}
 		if _, err := insertCIWithValues(tx, row, change.AddressSpecs, values, change.Audit); err != nil {
 			return result, err
 		}
@@ -368,7 +368,7 @@ func applyAddressChangeTx(ctx context.Context, tx *gorm.DB, change cibiz.Address
 			if keep[id] || id == 0 {
 				continue
 			}
-			if _, err := applyValues(tx, id, change.SubnetTypeID, change.AddressSpecs,
+			if _, err := applyValues(tx, id, change.AddressTypeID, change.AddressSpecs,
 				map[model.ID]any{change.Attrs.IsUsed: int32(0)}, change.Audit); err != nil {
 				return result, err
 			}
@@ -402,7 +402,7 @@ func applyAddressChangeTx(ctx context.Context, tx *gorm.DB, change cibiz.Address
 //
 // IT IS THE CALLER'S, carried on the change: an address is not a subnet, and
 // the store learns neither from the request.
-func relatedAddressTypeID(change cibiz.AddressChange) model.ID { return change.SubnetTypeID }
+func relatedAddressTypeID(change cibiz.AddressChange) model.ID { return change.AddressTypeID }
 
 // subnetAddressesTx returns the subnet's addresses, keyed by address string.
 func subnetAddressesTx(ctx context.Context, tx *gorm.DB, change cibiz.AddressChange) (map[string]model.ID, error) {
@@ -435,13 +435,13 @@ func subnetAddressesTx(ctx context.Context, tx *gorm.DB, change cibiz.AddressCha
 // relateToSubnetTx adds the containment edge for a new address.
 func relateToSubnetTx(tx *gorm.DB, change cibiz.AddressChange, addressID model.ID) error {
 	rule := cibiz.RelationAddSpec{
-		FirstCIID:  change.SubnetID,
-		SecondCIID: addressID,
-		// The model pair's rule is the caller's; a deployment that has not
-		// declared one leaves it zero, and the write then applies no cardinality
-		// constraint rather than a guessed one.
+		FirstCIID:         change.SubnetID,
+		SecondCIID:        addressID,
+		RelationTypeID:    change.RelationTypeID,
 		FirstTypeID:       change.SubnetTypeID,
-		EnforceConstraint: false,
+		SecondTypeID:      change.AddressTypeID,
+		Constraint:        change.Constraint,
+		EnforceConstraint: true,
 		Actor:             change.Audit.Actor,
 	}
 	_, err := addRelationTx(tx, rule)
@@ -755,8 +755,13 @@ func (r *Repo) MoveSubnet(ctx context.Context, in cibiz.SubnetMove) error {
 
 		if in.TargetParentID != 0 {
 			_, err := addRelationTx(tx, cibiz.RelationAddSpec{
-				FirstCIID: in.TargetParentID, SecondCIID: in.SubnetID,
-				EnforceConstraint: false,
+				FirstCIID:         in.TargetParentID,
+				SecondCIID:        in.SubnetID,
+				RelationTypeID:    in.RelationTypeID,
+				FirstTypeID:       in.TargetParentTypeID,
+				SecondTypeID:      in.SubnetTypeID,
+				Constraint:        in.Constraint,
+				EnforceConstraint: true,
 				Actor:             in.Audit.Actor,
 			})
 			if err != nil {

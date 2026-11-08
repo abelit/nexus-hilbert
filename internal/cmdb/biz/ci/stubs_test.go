@@ -7,6 +7,7 @@ import (
 	"github.com/ongridio/ongrid/internal/cmdb/biz/search"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
+	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 )
 
 // valueRepoStub is the do-nothing write half, embedded by doubles that
@@ -87,6 +88,9 @@ func (relationRepoStub) RelationsFrom(context.Context, model.ID, model.ID, int, 
 }
 func (relationRepoStub) RelationsTo(context.Context, model.ID, model.ID, int, int) ([]cimodel.Relation, int64, error) {
 	return nil, 0, errors.New("not used")
+}
+func (relationRepoStub) RelationTypesByID(context.Context, []model.ID) (map[model.ID]citypemodel.RelationType, error) {
+	return nil, errors.New("not used")
 }
 func (relationRepoStub) WalkChildren(context.Context, []WalkKey, bool) ([]WalkKey, error) {
 	return nil, errors.New("not used")

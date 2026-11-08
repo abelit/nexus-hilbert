@@ -188,6 +188,45 @@ func TestUpdateWritesNameAndColour(t *testing.T) {
 	}
 }
 
+// The semantic mirror is owned by nexus-topocortex. A CMDB update must change
+// only the local name/colour, even if the caller loaded a row, mutated a
+// semantic field in memory, and wrote it back.
+func TestUpdateDoesNotWriteSemanticMirror(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	rt := &citypemodel.RelationType{
+		Name: "CALLS", Color: "#1890ff",
+		Category: "dependency", Direction: "src_to_dst",
+		PropagatesDefault: true, WeightDefault: 0.8, Revision: 3,
+		DisplayNameZH: "调用",
+	}
+	if err := repo.Create(ctx, rt); err != nil {
+		t.Fatal(err)
+	}
+
+	rt.Name = "CALLS_V2"
+	rt.Color = "#ff0000"
+	rt.Category = "association"
+	rt.Direction = "bidirectional"
+	rt.WeightDefault = 0.1
+	if err := repo.Update(ctx, rt); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	got, err := repo.Get(ctx, rt.ID)
+	if err != nil || got == nil {
+		t.Fatalf("Get() = %+v, %v", got, err)
+	}
+	if got.Name != "CALLS_V2" || got.Color != "#ff0000" {
+		t.Fatalf("local fields = %+v, want the updated name and colour", got)
+	}
+	if got.Category != "dependency" || got.Direction != "src_to_dst" ||
+		!got.PropagatesDefault || got.WeightDefault != 0.8 || got.Revision != 3 {
+		t.Fatalf("semantic mirror was overwritten by a local update: %+v", got)
+	}
+}
+
 // A repository miss must surface as errs.ErrNotFound, not as GORM's own
 // sentinel: the data layer is where storage vocabulary stops.
 func TestUpdateAndDeleteMissingReturnErrsNotFound(t *testing.T) {

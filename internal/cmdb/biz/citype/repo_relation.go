@@ -43,6 +43,11 @@ type TypeRelationRepo interface {
 	// Missing ids are absent rather than an error: a relation whose type was
 	// deleted afterwards must still render.
 	RelationTypesByID(ctx context.Context, ids []model.ID) (map[model.ID]citypemodel.RelationType, error)
+
+	// EnsureRelationType returns the live relation type with this name, creating
+	// it with the default colour when absent. It is the bootstrap's entry point:
+	// the feature knows the vocabulary word, the dictionary owns the row.
+	EnsureRelationType(ctx context.Context, name string) (*citypemodel.RelationType, error)
 }
 
 // TypeRelationFilter narrows a relation listing.
@@ -69,6 +74,11 @@ type TypeRelationSaveSpec struct {
 	// Previous is the row being replaced, or nil on create, for the history
 	// delta and the ownership of the warning below.
 	Previous *citypemodel.CITypeRelation
+
+	// AllowSelf permits a structural self-hierarchy (ipam_subnet -> ipam_subnet).
+	// It is internal: the public use case leaves it false and the bootstrap sets
+	// it explicitly.
+	AllowSelf bool
 
 	Actor model.ID
 }

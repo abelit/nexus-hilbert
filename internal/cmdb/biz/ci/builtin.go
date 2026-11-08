@@ -309,6 +309,50 @@ type BuiltinAttributeSpec struct {
 	IsUnique bool
 }
 
+// BuiltinRelationSpec is one model relation a built-in feature needs.
+//
+// THE FEATURE DECLARES ITS OWN SHAPE for the same reason BuiltinModelSpec does:
+// the model configuration module creates it without knowing which feature
+// consumes it. The bootstrap skips a pair that already has a live rule, so an
+// operator's cardinality or relation-type choice is never overwritten.
+type BuiltinRelationSpec struct {
+	ParentModel string
+	ChildModel  string
+
+	// RelationTypeName is the vocabulary the pair uses. The structural
+	// built-ins use `contain`; a fresh database gets it created on demand.
+	RelationTypeName string
+
+	Constraint model.Constraint
+
+	// AllowSelf is true only for a structural self-hierarchy, currently
+	// ipam_subnet -> ipam_subnet.
+	AllowSelf bool
+}
+
+// BuiltinContainRelation is the structural vocabulary the built-ins use.
+const BuiltinContainRelation = "contain"
+
+// DCIMBuiltinRelations is the fixed data-centre tree. The rack -> device edge is
+// deliberately absent: which models are devices is the deployment's decision.
+func DCIMBuiltinRelations() []BuiltinRelationSpec {
+	return []BuiltinRelationSpec{
+		{ParentModel: string(ModelDCIMRegion), ChildModel: string(ModelDCIMIDC), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelDCIMIDC), ChildModel: string(ModelDCIMServerRoom), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelDCIMServerRoom), ChildModel: string(ModelDCIMRack), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
+	}
+}
+
+// IPAMBuiltinRelations is the scope -> subnet -> address tree, plus the nested
+// subnet hierarchy. A subnet has one container, so the default is one2many.
+func IPAMBuiltinRelations() []BuiltinRelationSpec {
+	return []BuiltinRelationSpec{
+		{ParentModel: string(ModelIPAMScope), ChildModel: string(ModelIPAMSubnet), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelIPAMSubnet), ChildModel: string(ModelIPAMSubnet), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many, AllowSelf: true},
+		{ParentModel: string(ModelIPAMSubnet), ChildModel: string(ModelIPAMAddress), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
+	}
+}
+
 // BuiltinModelSpec is a model a feature addresses by a fixed name.
 //
 // THE FEATURE DECLARES ITS OWN SHAPE and the model configuration module creates

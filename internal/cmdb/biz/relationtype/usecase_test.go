@@ -3,6 +3,7 @@ package relationtype
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -190,8 +191,10 @@ func TestCreateValidation(t *testing.T) {
 	}{
 		{name: "empty name", input: "", wantErr: ErrNameRequired},
 		{name: "whitespace-only name", input: "   ", wantErr: ErrNameRequired},
-		{name: "name too long", input: "12345678901234567", wantErr: ErrNameTooLong},
-		{name: "name at the limit", input: "1234567890123456", wantValid: true},
+		{name: "name too long", input: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", wantErr: ErrNameTooLong},
+		{name: "name at the limit", input: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", wantValid: true},
+		{name: "64 Chinese characters fit the varchar width", input: strings.Repeat("中", 64), wantValid: true},
+		{name: "65 Chinese characters are too long", input: strings.Repeat("中", 65), wantErr: ErrNameTooLong},
 		{name: "colour too long", input: "ok", color: "#1234567", wantErr: ErrColorTooLong},
 		{name: "colour without hash", input: "ok", color: "1234567", wantErr: ErrColorInvalid},
 		{name: "colour not hex", input: "ok", color: "#gggggg", wantErr: ErrColorInvalid},

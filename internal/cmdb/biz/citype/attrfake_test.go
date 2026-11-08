@@ -516,6 +516,9 @@ func (noAttrRepo) DeleteTypeRelation(context.Context, TypeRelationDeleteSpec) er
 func (noAttrRepo) RelationTypesByID(context.Context, []model.ID) (map[model.ID]citypemodel.RelationType, error) {
 	return nil, notImplemented()
 }
+func (noAttrRepo) EnsureRelationType(context.Context, string) (*citypemodel.RelationType, error) {
+	return nil, notImplemented()
+}
 
 func (noAttrRepo) ShowAttributes(context.Context, model.ID, model.ID) ([]citypemodel.PreferenceShowAttributes, error) {
 	return nil, notImplemented()

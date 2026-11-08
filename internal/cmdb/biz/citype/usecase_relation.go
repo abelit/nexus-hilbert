@@ -164,6 +164,11 @@ type TypeRelationInput struct {
 	ParentAttrIDs []model.ID
 	ChildAttrIDs  []model.ID
 
+	// AllowSelf permits a structural self-hierarchy (ipam_subnet ->
+	// ipam_subnet). The HTTP input does not expose it; only the built-in
+	// bootstrap sets it.
+	AllowSelf bool
+
 	Actor model.ID
 }
 
@@ -201,7 +206,7 @@ func (u *Usecase) SaveTypeRelation(ctx context.Context, in TypeRelationInput) (*
 	if child == nil {
 		return nil, fmt.Errorf("%w: child model %q", errs.ErrNotFound, in.ChildRef)
 	}
-	if parent.Type.ID == child.Type.ID {
+	if parent.Type.ID == child.Type.ID && !in.AllowSelf {
 		return nil, ErrRelationSelfLoop
 	}
 
@@ -233,6 +238,7 @@ func (u *Usecase) SaveTypeRelation(ctx context.Context, in TypeRelationInput) (*
 		ParentAttrIDs:  dedupeAttrIDs(in.ParentAttrIDs),
 		ChildAttrIDs:   dedupeAttrIDs(in.ChildAttrIDs),
 		Previous:       previous,
+		AllowSelf:      in.AllowSelf,
 		Actor:          in.Actor,
 	})
 	if err != nil {

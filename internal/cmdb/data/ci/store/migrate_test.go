@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
+	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	valuemodel "github.com/ongridio/ongrid/internal/cmdb/model/value"
 )
 
@@ -19,6 +20,21 @@ func newTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(testDSN(t)), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
+	}
+	// The CI store's relation writes now validate that the relation type
+	// exists. The dictionary lives in the citype store, which production
+	// migrates first; these focused store tests do not, so seed a small pool
+	// of ids. A dedicated test covers the not-found path with an id above the
+	// pool.
+	if err := db.AutoMigrate(&citypemodel.RelationType{}); err != nil {
+		t.Fatalf("migrate relation types: %v", err)
+	}
+	for _, id := range []int32{3, 4, 10, 30, 40} {
+		row := citypemodel.RelationType{Name: fmt.Sprintf("test_rt_%d", id)}
+		row.ID = id
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("seed relation type %d: %v", id, err)
+		}
 	}
 	return db
 }
@@ -48,6 +64,67 @@ func TestMigrateCreatesTheCMDBTableSet(t *testing.T) {
 		if db.Migrator().HasTable(dead) {
 			t.Errorf("deprecated table %s must not be created on a fresh database", dead)
 		}
+	}
+}
+
+// Edges carry provenance so AIOps can explain where a relation came from and
+// how much to trust it. The columns are additive; cantor's one-character
+// `source` enum stays untouched.
+func TestRelationCarriesProvenanceColumns(t *testing.T) {
+	db := newTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	want := []string{
+		"evidence_source", "confidence", "observed_at", "valid_from", "valid_to",
+		"evidence_type", "evidence_id", "evidence_uri", "content_hash",
+		"stance", "derivation_rule_id", "relation_type_version",
+	}
+	for _, column := range want {
+		if !db.Migrator().HasColumn(&cimodel.Relation{}, column) {
+			t.Errorf("column %s was not created", column)
+		}
+	}
+}
+
+func TestRelationProvenanceRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	observed := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	validFrom := observed.Add(-time.Hour)
+	validTo := observed.Add(time.Hour)
+	confidence := 0.87
+	ruleID := int32(42)
+	typeVersion := int32(3)
+	rel := cimodel.Relation{
+		FirstCIID: 1, SecondCIID: 2, RelationTypeID: 3,
+		EvidenceSource: "apm", Confidence: &confidence,
+		ObservedAt: &observed, ValidFrom: &validFrom, ValidTo: &validTo,
+		EvidenceType: "trace", EvidenceID: "span-1",
+		EvidenceURI: "tempo://trace/span-1", ContentHash: "sha256:abc",
+		Stance: "support", DerivationRuleID: &ruleID, RelationTypeVersion: &typeVersion,
+	}
+	if err := db.Create(&rel).Error; err != nil {
+		t.Fatalf("create relation: %v", err)
+	}
+
+	var got cimodel.Relation
+	if err := db.First(&got, rel.ID).Error; err != nil {
+		t.Fatalf("read relation: %v", err)
+	}
+	if got.EvidenceSource != "apm" || got.Confidence == nil || *got.Confidence != 0.87 ||
+		got.ObservedAt == nil || !got.ObservedAt.Equal(observed) ||
+		got.ValidFrom == nil || !got.ValidFrom.Equal(validFrom) ||
+		got.ValidTo == nil || !got.ValidTo.Equal(validTo) ||
+		got.EvidenceType != "trace" || got.EvidenceID != "span-1" ||
+		got.EvidenceURI != "tempo://trace/span-1" || got.ContentHash != "sha256:abc" ||
+		got.Stance != "support" || got.DerivationRuleID == nil || *got.DerivationRuleID != 42 ||
+		got.RelationTypeVersion == nil || *got.RelationTypeVersion != 3 {
+		t.Fatalf("provenance did not round-trip: %+v", got)
 	}
 }
 
@@ -84,6 +161,10 @@ func TestMigrateCreatesTheExpectedIndexes(t *testing.T) {
 		{&cimodel.Relation{}, "idx_c_ci_relations_first_ci_id"},
 		{&cimodel.Relation{}, "idx_c_ci_relations_second_ci_id"},
 		{&cimodel.Relation{}, "idx_c_ci_relations_relation_type_id"},
+		// Composite indexes for relation listings and the path-scoped walk.
+		{&cimodel.Relation{}, "idx_c_ci_relations_first_type"},
+		{&cimodel.Relation{}, "idx_c_ci_relations_second_type"},
+		{&cimodel.Relation{}, "idx_c_ci_relations_ancestor_parent"},
 		// The materialized ancestor path is indexed because cantor's
 		// many-to-many lookups read it.
 		{&cimodel.Relation{}, "idx_c_ci_relations_ancestor_ids"},

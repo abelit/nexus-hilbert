@@ -22,16 +22,43 @@ import (
 // "runs on / belongs to / connects to" vocabulary shared by model-level
 // relations and CI instance relations.
 //
-// This is the smallest entity in the CMDB: two meaningful fields. It is the
-// natural first vertical slice for exercising a new layer end to end.
+// THE SEMANTIC FIELDS BELOW ARE A READ-ONLY MIRROR of nexus-topocortex's
+// RelationTypeInfo. They are written by the ontology sync, never by CMDB's
+// create/update use case: the repository's Update selects only name and colour,
+// and a CMDB administrator's semantic edit is a proposal to topocortex. Keeping
+// the mirror in the row lets the CMDB UI and the AI tools answer "what does this
+// edge mean?" without a second HTTP call.
 type RelationType struct {
 	cmdbmodel.Base
 
-	Name  string `gorm:"column:name;size:16;not null;index:idx_c_relation_types_name"`
+	Name  string `gorm:"column:name;size:64;not null;index:idx_c_relation_types_name"`
 	Color string `gorm:"column:color;size:7;not null;default:'#1890ff'"`
+
+	// Semantic mirror, owned by nexus-topocortex.
+	Category          string       `gorm:"column:category;size:32;not null;default:''"`
+	Direction         string       `gorm:"column:direction;size:16;not null;default:''"`
+	PropagatesDefault bool         `gorm:"column:propagates_default;not null;default:false"`
+	WeightDefault     float64      `gorm:"column:weight_default;type:decimal(3,2);not null;default:1"`
+	InverseOf         string       `gorm:"column:inverse_of;size:64;not null;default:''"`
+	Transitive        bool         `gorm:"column:transitive;not null;default:false"`
+	SubPropertyOf     StringList   `gorm:"column:sub_property_of;serializer:json"`
+	DisplayNameZH     string       `gorm:"column:display_name_zh;size:128;not null;default:''"`
+	DisplayNameEN     string       `gorm:"column:display_name_en;size:128;not null;default:''"`
+	Description       string       `gorm:"column:description;type:text"`
+	Deprecated        bool         `gorm:"column:deprecated;not null;default:false"`
+	Replacement       string       `gorm:"column:replacement;size:64;not null;default:''"`
+	Revision          cmdbmodel.ID `gorm:"column:revision;not null;default:0"`
+
+	// DisplayNameOverride is CMDB-local presentation only. It must never change
+	// the semantic name or be written back to topocortex.
+	DisplayNameOverride string `gorm:"column:display_name_override;size:128;not null;default:''"`
 }
 
 func (RelationType) TableName() string { return "c_relation_types" }
+
+// StringList is a JSON array of vocabulary names, stored in a text column.
+// It mirrors topocortex's []string fields (sub_property_of, property_chains).
+type StringList []string
 
 // CITypeGroup is a folder for organising CI types in the model-config UI.
 type CITypeGroup struct {

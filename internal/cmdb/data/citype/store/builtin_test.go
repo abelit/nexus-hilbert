@@ -78,6 +78,70 @@ func TestEnsureBuiltinModelsCreatesThenLeavesAlone(t *testing.T) {
 	}
 }
 
+// The relation bootstrap is what makes the write gate safe on a fresh install:
+// without it, AssignAddresses and CreateSubnet have no rule to resolve. It is
+// idempotent, and it must create the structural ipam_subnet -> ipam_subnet
+// self-rule that the public API refuses by default.
+func TestEnsureBuiltinRelationsCreatesThenLeavesAlone(t *testing.T) {
+	uc := newBuiltinUsecase(t)
+	ctx := context.Background()
+	in := citypebiz.BuiltinEnsureInput{
+		Models:    append(cibiz.DCIMBuiltinModels(), cibiz.IPAMBuiltinModels()...),
+		Relations: append(cibiz.DCIMBuiltinRelations(), cibiz.IPAMBuiltinRelations()...),
+	}
+
+	first, err := uc.EnsureBuiltinModels(ctx, in)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	want := []string{
+		"relation dcim_region->dcim_idc",
+		"relation dcim_idc->dcim_server_room",
+		"relation dcim_server_room->dcim_rack",
+		"relation ipam_scope->ipam_subnet",
+		"relation ipam_subnet->ipam_subnet",
+		"relation ipam_subnet->ipam_address",
+	}
+	for _, label := range want {
+		if !containsString(first.Created, label) {
+			t.Fatalf("%q was not created: %v", label, first.Created)
+		}
+	}
+
+	second, err := uc.EnsureBuiltinModels(ctx, in)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(second.Created) != 0 {
+		t.Fatalf("the second call created %v; the relation bootstrap is not idempotent", second.Created)
+	}
+	for _, label := range want {
+		if !containsString(second.Existing, label) {
+			t.Fatalf("%q was not reported as existing: %v", label, second.Existing)
+		}
+	}
+
+	// The self-rule must be usable by the resolver the IPAM code is injected
+	// with, not merely present as a row.
+	subnet, err := uc.GetByRef(ctx, string(cibiz.ModelIPAMSubnet))
+	if err != nil || subnet == nil {
+		t.Fatalf("resolve ipam_subnet: %v", err)
+	}
+	rules, err := uc.ListTypeRelations(ctx, citypebiz.TypeRelationFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundSelf := false
+	for _, rule := range rules {
+		if rule.Parent.Type.Type.ID == subnet.Type.ID && rule.Child.Type.Type.ID == subnet.Type.ID {
+			foundSelf = true
+		}
+	}
+	if !foundSelf {
+		t.Fatal("the ipam_subnet -> ipam_subnet self-rule was not created")
+	}
+}
+
 // The models the bootstrap creates are the ones the DCIM code RESOLVES, which
 // is the only thing that makes the two halves meet: a model created under the
 // right name but without `u_count` is a rack every operation refuses.

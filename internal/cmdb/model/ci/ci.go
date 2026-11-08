@@ -76,17 +76,34 @@ func (CI) TableName() string { return "c_cis" }
 type Relation struct {
 	cmdbmodel.Base
 
-	FirstCIID  cmdbmodel.ID `gorm:"column:first_ci_id;not null;index:idx_c_ci_relations_first_ci_id"`
-	SecondCIID cmdbmodel.ID `gorm:"column:second_ci_id;not null;index:idx_c_ci_relations_second_ci_id"`
+	FirstCIID  cmdbmodel.ID `gorm:"column:first_ci_id;not null;index:idx_c_ci_relations_first_ci_id;index:idx_c_ci_relations_first_type,priority:1;index:idx_c_ci_relations_ancestor_parent,priority:2"`
+	SecondCIID cmdbmodel.ID `gorm:"column:second_ci_id;not null;index:idx_c_ci_relations_second_ci_id;index:idx_c_ci_relations_second_type,priority:1"`
 
-	RelationTypeID cmdbmodel.ID `gorm:"column:relation_type_id;not null;index:idx_c_ci_relations_relation_type_id"`
+	RelationTypeID cmdbmodel.ID `gorm:"column:relation_type_id;not null;index:idx_c_ci_relations_relation_type_id;index:idx_c_ci_relations_first_type,priority:2;index:idx_c_ci_relations_second_type,priority:2"`
 
 	// More is cantor's third CI reference on a relation, used by the
 	// many-to-many representation.
 	More *cmdbmodel.ID `gorm:"column:more;index:idx_c_ci_relations_more"`
 
-	// Source records how the edge came to exist (model.RelationSource).
+	// Source records how the edge came to exist (model.RelationSource). It is
+	// cantor's one-character enum and is kept untouched.
 	Source *string `gorm:"column:source;size:1"`
+
+	// Edge provenance, mirroring the evidence model nexus-topocortex uses for
+	// AIOps. These columns are additive: `source` above stays cantor's enum,
+	// and `evidence_source` carries the richer vocabulary.
+	EvidenceSource      string        `gorm:"column:evidence_source;size:64;not null;default:''"`
+	Confidence          *float64      `gorm:"column:confidence;type:decimal(3,2)"`
+	ObservedAt          *time.Time    `gorm:"column:observed_at"`
+	ValidFrom           *time.Time    `gorm:"column:valid_from"`
+	ValidTo             *time.Time    `gorm:"column:valid_to"`
+	EvidenceType        string        `gorm:"column:evidence_type;size:32;not null;default:''"`
+	EvidenceID          string        `gorm:"column:evidence_id;size:128;not null;default:''"`
+	EvidenceURI         string        `gorm:"column:evidence_uri;size:512;not null;default:''"`
+	ContentHash         string        `gorm:"column:content_hash;size:64;not null;default:''"`
+	Stance              string        `gorm:"column:stance;size:16;not null;default:''"`
+	DerivationRuleID    *cmdbmodel.ID `gorm:"column:derivation_rule_id"`
+	RelationTypeVersion *cmdbmodel.ID `gorm:"column:relation_type_version"`
 
 	// AncestorIDs is cantor's MATERIALIZED ANCESTOR PATH — a comma-separated
 	// list of CI ids — used only for many-to-many relations. It is the reason
@@ -96,7 +113,7 @@ type Relation struct {
 	//
 	// cantor declares String(128); the width is preserved so an adopted
 	// database does not reject rows this port would otherwise accept.
-	AncestorIDs *string `gorm:"column:ancestor_ids;size:128;index:idx_c_ci_relations_ancestor_ids"`
+	AncestorIDs *string `gorm:"column:ancestor_ids;size:128;index:idx_c_ci_relations_ancestor_ids;index:idx_c_ci_relations_ancestor_parent,priority:1"`
 }
 
 func (Relation) TableName() string { return "c_ci_relations" }

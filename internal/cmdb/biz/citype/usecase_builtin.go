@@ -102,7 +102,57 @@ func (u *Usecase) EnsureBuiltinModels(ctx context.Context, in BuiltinEnsureInput
 			return nil, fmt.Errorf("bind the built-in attributes of %s: %w", spec.Name, err)
 		}
 	}
+
+	for _, spec := range in.Relations {
+		if err := u.ensureBuiltinRelation(ctx, spec, in.Actor, out); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
+}
+
+// ensureBuiltinRelation creates one model relation if the pair has no live rule.
+// It NEVER edits an existing rule: the operator's cardinality, relation type
+// and attribute mapping are left exactly as they are.
+func (u *Usecase) ensureBuiltinRelation(ctx context.Context, spec cibiz.BuiltinRelationSpec, actor model.ID, out *BuiltinModelResult) error {
+	parent, err := u.GetByRef(ctx, spec.ParentModel)
+	if err != nil {
+		return err
+	}
+	if parent == nil {
+		return fmt.Errorf("%w: parent model %q", errs.ErrNotFound, spec.ParentModel)
+	}
+	child, err := u.GetByRef(ctx, spec.ChildModel)
+	if err != nil {
+		return err
+	}
+	if child == nil {
+		return fmt.Errorf("%w: child model %q", errs.ErrNotFound, spec.ChildModel)
+	}
+	rt, err := u.repo.EnsureRelationType(ctx, spec.RelationTypeName)
+	if err != nil {
+		return err
+	}
+	existing, err := u.repo.TypeRelationByPair(ctx, parent.Type.ID, child.Type.ID)
+	if err != nil {
+		return err
+	}
+	label := "relation " + spec.ParentModel + "->" + spec.ChildModel
+	if existing != nil {
+		out.Existing = append(out.Existing, label)
+		return nil
+	}
+	if _, err := u.SaveTypeRelation(ctx, TypeRelationInput{
+		ParentRef: spec.ParentModel, ChildRef: spec.ChildModel,
+		RelationTypeID: rt.ID,
+		Constraint:     string(spec.Constraint),
+		AllowSelf:      spec.AllowSelf,
+		Actor:          actor,
+	}); err != nil {
+		return fmt.Errorf("create the built-in relation %s: %w", label, err)
+	}
+	out.Created = append(out.Created, label)
+	return nil
 }
 
 // BuiltinEnsureInput is one bootstrap request.
@@ -111,6 +161,10 @@ type BuiltinEnsureInput struct {
 	// this package knowing which feature wants which, so the vocabulary stays
 	// with the feature that resolves it.
 	Models []cibiz.BuiltinModelSpec
+
+	// Relations are the model relations the feature needs. An existing rule is
+	// reported and left untouched.
+	Relations []cibiz.BuiltinRelationSpec
 
 	Actor model.ID
 }

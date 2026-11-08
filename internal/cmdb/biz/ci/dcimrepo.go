@@ -407,8 +407,19 @@ type IPAMHistoryFilter struct {
 // AddressChange is one batch of address assignments or releases.
 type AddressChange struct {
 	// SubnetID is the subnet the addresses belong to.
-	SubnetID     model.ID
-	SubnetTypeID model.ID
+	SubnetID model.ID
+
+	// SubnetTypeID is the SUBNET's model. AddressTypeID is the ADDRESS's model.
+	// They were one field (SubnetTypeID) meaning different things in different
+	// paths; the relation write needs both ends, so they are separate now.
+	SubnetTypeID  model.ID
+	AddressTypeID model.ID
+
+	// RelationTypeID and Constraint are the subnet -> address containment
+	// rule, resolved by the caller. The store does not read model
+	// configuration, so the rule travels with the change.
+	RelationTypeID model.ID
+	Constraint     model.Constraint
 
 	// IPs are the addresses to write, in the caller's order.
 	IPs []string
@@ -548,6 +559,11 @@ type SubnetMove struct {
 
 	// TargetParentID is the new container, or zero for the root.
 	TargetParentID model.ID
+	// TargetParentTypeID is that container's model, resolved with the rule.
+	TargetParentTypeID model.ID
+	// RelationTypeID and Constraint are the target parent -> subnet rule.
+	RelationTypeID model.ID
+	Constraint     model.Constraint
 	ScopeTypeID    model.ID
 
 	Attrs SubnetWriteAttrs

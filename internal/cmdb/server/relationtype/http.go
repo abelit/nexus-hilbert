@@ -79,15 +79,44 @@ func (h *Handler) requireAdmin(next http.Handler) http.Handler {
 // to_dict() serialised every mapped column, including the soft-delete fields;
 // the port deliberately narrows that.
 type relationTypeDTO struct {
-	ID        int32  `json:"id"`
-	Name      string `json:"name"`
-	Color     string `json:"color"`
+	ID    int32  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+
+	// Read-only mirror of nexus-topocortex's RelationTypeInfo. These fields are
+	// populated by the ontology sync; the write endpoints below do not accept
+	// them.
+	Category            string                 `json:"category"`
+	Direction           string                 `json:"direction"`
+	PropagatesDefault   bool                   `json:"propagates_default"`
+	WeightDefault       float64                `json:"weight_default"`
+	InverseOf           string                 `json:"inverse_of"`
+	Transitive          bool                   `json:"transitive"`
+	SubPropertyOf       citypemodel.StringList `json:"sub_property_of"`
+	DisplayNameZH       string                 `json:"display_name_zh"`
+	DisplayNameEN       string                 `json:"display_name_en"`
+	Description         string                 `json:"description"`
+	Deprecated          bool                   `json:"deprecated"`
+	Replacement         string                 `json:"replacement"`
+	Revision            int32                  `json:"revision"`
+	DisplayNameOverride string                 `json:"display_name_override"`
+
 	CreatedAt string `json:"created_at,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 func toDTO(rt citypemodel.RelationType) relationTypeDTO {
-	dto := relationTypeDTO{ID: rt.ID, Name: rt.Name, Color: rt.Color}
+	dto := relationTypeDTO{
+		ID: rt.ID, Name: rt.Name, Color: rt.Color,
+		Category: rt.Category, Direction: rt.Direction,
+		PropagatesDefault: rt.PropagatesDefault, WeightDefault: rt.WeightDefault,
+		InverseOf: rt.InverseOf, Transitive: rt.Transitive,
+		SubPropertyOf: rt.SubPropertyOf,
+		DisplayNameZH: rt.DisplayNameZH, DisplayNameEN: rt.DisplayNameEN,
+		Description: rt.Description, Deprecated: rt.Deprecated,
+		Replacement: rt.Replacement, Revision: rt.Revision,
+		DisplayNameOverride: rt.DisplayNameOverride,
+	}
 	if !rt.CreatedAt.IsZero() {
 		dto.CreatedAt = rt.CreatedAt.UTC().Format(time.RFC3339)
 	}

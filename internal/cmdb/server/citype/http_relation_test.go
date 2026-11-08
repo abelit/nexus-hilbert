@@ -80,6 +80,16 @@ func (s *attrStub) DeleteTypeRelation(_ context.Context, in citypebiz.TypeRelati
 	return nil
 }
 
+func (s *attrStub) EnsureRelationType(_ context.Context, name string) (*citypemodel.RelationType, error) {
+	for _, rt := range s.relationTypes {
+		if rt.Name == name {
+			copied := rt
+			return &copied, nil
+		}
+	}
+	return nil, stubNotImplemented()
+}
+
 func (s *attrStub) RelationTypesByID(_ context.Context, ids []model.ID) (map[model.ID]citypemodel.RelationType, error) {
 	out := map[model.ID]citypemodel.RelationType{}
 	for _, id := range ids {

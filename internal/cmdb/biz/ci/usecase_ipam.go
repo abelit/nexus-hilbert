@@ -1048,6 +1048,17 @@ func (u *Usecase) AssignAddresses(ctx context.Context, in AddressAssignInput) (*
 	subnetSet, _ := builtins.Get(ModelIPAMSubnet)
 	addressSet, _ := builtins.Get(ModelIPAMAddress)
 
+	// The address needs the subnet -> address relation rule before it can be
+	// written. It is required, not optional: an untyped containment edge is the
+	// data the write gate now refuses.
+	rule, ok, err := u.types.RelationBetween(ctx, subnetSet.Type.ID, addressSet.Type.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("%w: models %d and %d", ErrRelationTypeUndeclared, subnetSet.Type.ID, addressSet.Type.ID)
+	}
+
 	subnetID := in.SubnetID
 	cdr := in.CIDR
 	if subnetID != 0 {
@@ -1111,14 +1122,17 @@ func (u *Usecase) AssignAddresses(ctx context.Context, in AddressAssignInput) (*
 	}
 
 	change := AddressChange{
-		SubnetID:     subnetID,
-		SubnetTypeID: addressSet.Type.ID,
-		IPs:          in.IPs,
-		CIDR:         cdr,
-		Hosts:        hosts,
-		Attributes:   map[model.ID]any{},
-		AddressSpecs: u.plannerSpecs(addressSet),
-		SubnetSpecs:  u.plannerSpecs(subnetSet),
+		SubnetID:       subnetID,
+		SubnetTypeID:   subnetSet.Type.ID,
+		AddressTypeID:  addressSet.Type.ID,
+		RelationTypeID: rule.RelationTypeID,
+		Constraint:     rule.Constraint,
+		IPs:            in.IPs,
+		CIDR:           cdr,
+		Hosts:          hosts,
+		Attributes:     map[model.ID]any{},
+		AddressSpecs:   u.plannerSpecs(addressSet),
+		SubnetSpecs:    u.plannerSpecs(subnetSet),
 		Attrs: AddressAttrs{
 			IP:           addressSet.SpecsAttrID(AttrIP),
 			AssignStatus: addressSet.SpecsAttrID(AttrAssignStatus),
@@ -1415,6 +1429,8 @@ func (u *Usecase) MoveSubnet(ctx context.Context, id, targetParentID model.ID, a
 	if targetParentID == id {
 		return fmt.Errorf("%w: %d", ErrSubnetMoveIntoSelf, id)
 	}
+	var targetTypeID, relationTypeID model.ID
+	var constraint model.Constraint
 	if targetParentID != 0 {
 		target, err := u.loadInstance(ctx, targetParentID)
 		if err != nil {
@@ -1423,6 +1439,14 @@ func (u *Usecase) MoveSubnet(ctx context.Context, id, targetParentID model.ID, a
 		if target.TypeID != scope.Type.ID && target.TypeID != subnet.Type.ID {
 			return fmt.Errorf("%w: %d is neither a scope nor a subnet", ErrSubnetNotFound, targetParentID)
 		}
+		rule, ok, err := u.types.RelationBetween(ctx, target.TypeID, subnet.Type.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%w: models %d and %d", ErrRelationTypeUndeclared, target.TypeID, subnet.Type.ID)
+		}
+		targetTypeID, relationTypeID, constraint = target.TypeID, rule.RelationTypeID, rule.Constraint
 		// Into its own descendant: the branch would detach from the tree.
 		descendants, err := u.subnetDescendants(ctx, subnet, id)
 		if err != nil {
@@ -1447,9 +1471,12 @@ func (u *Usecase) MoveSubnet(ctx context.Context, id, targetParentID model.ID, a
 
 	return u.repo.MoveSubnet(ctx, SubnetMove{
 		SubnetID: id, SubnetTypeID: subnet.Type.ID,
-		TargetParentID: targetParentID,
-		ScopeTypeID:    scope.Type.ID,
-		Attrs:          SubnetWriteAttrs{CIDR: attrIDOf(subnet, AttrCIDR)},
+		TargetParentID:     targetParentID,
+		TargetParentTypeID: targetTypeID,
+		RelationTypeID:     relationTypeID,
+		Constraint:         constraint,
+		ScopeTypeID:        scope.Type.ID,
+		Attrs:              SubnetWriteAttrs{CIDR: attrIDOf(subnet, AttrCIDR)},
 		History: IPAMHistoryEntry{
 			CIDR: stored, Operate: cimodel.OperateMoveSubnet,
 			Description: "move to " + describeID(targetParentID),

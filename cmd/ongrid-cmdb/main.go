@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 	cmdbdiscoverybiz "github.com/ongridio/ongrid/internal/cmdb/biz/discovery"
 	cmdbfilebiz "github.com/ongridio/ongrid/internal/cmdb/biz/file"
 	cmdbdata "github.com/ongridio/ongrid/internal/cmdb/data"
+	cistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/dbx"
@@ -40,6 +42,7 @@ const (
 )
 
 func main() {
+	var cleanupRelations, cleanupDryRun bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -55,7 +58,15 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "--cleanup-relations":
+			cleanupRelations = true
+		case "--dry-run":
+			cleanupDryRun = true
 		}
+	}
+	if cleanupDryRun && !cleanupRelations {
+		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations")
+		os.Exit(1)
 	}
 
 	// The standalone binary's defaults are its own ports, not the manager's
@@ -128,6 +139,22 @@ func main() {
 	// two processes from AutoMigrating the same schema at once.
 	if err := dbx.RunMigrationsLocked(rootCtx, db, 60*time.Second, log, cmdbdata.Migrate); err != nil {
 		fatal(log, "run cmdb migrations", err)
+	}
+
+	// The Phase 2 relation cleanup is an EXPLICIT operator command, not a
+	// startup side effect. It prints a JSON report; --dry-run skips the edge
+	// writes, though the migrations above still ran.
+	if cleanupRelations {
+		report, err := cistore.CleanupRelations(rootCtx, db, cleanupDryRun)
+		if err != nil {
+			fatal(log, "cleanup relations", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode cleanup report", err)
+		}
+		return
 	}
 
 	// A malformed dedicated signing seed must stop the process: continuing

@@ -76,6 +76,20 @@ func (a *attrRepo) DeleteTypeRelation(_ context.Context, in TypeRelationDeleteSp
 	return nil
 }
 
+func (a *attrRepo) EnsureRelationType(_ context.Context, name string) (*citypemodel.RelationType, error) {
+	for _, rt := range a.relationTypes {
+		if rt.Name == name {
+			copied := rt
+			return &copied, nil
+		}
+	}
+	id := model.ID(len(a.relationTypes) + 100)
+	rt := citypemodel.RelationType{Name: name, Color: "#1890ff"}
+	rt.ID = id
+	a.relationTypes[id] = rt
+	return &rt, nil
+}
+
 func (a *attrRepo) RelationTypesByID(_ context.Context, ids []model.ID) (map[model.ID]citypemodel.RelationType, error) {
 	out := map[model.ID]citypemodel.RelationType{}
 	for _, id := range ids {
@@ -129,6 +143,15 @@ func TestSaveTypeRelationValidatesItsInputs(t *testing.T) {
 		_, err := attrUsecase(relRepo()).SaveTypeRelation(ctx, in)
 		if !errors.Is(err, ErrRelationSelfLoop) {
 			t.Fatalf("error = %v, want ErrRelationSelfLoop", err)
+		}
+	})
+
+	t.Run("structural self loop allowed", func(t *testing.T) {
+		in := relInput()
+		in.ChildRef = "10"
+		in.AllowSelf = true
+		if _, err := attrUsecase(relRepo()).SaveTypeRelation(ctx, in); err != nil {
+			t.Fatalf("SaveTypeRelation(AllowSelf) error = %v, want nil", err)
 		}
 	})
 

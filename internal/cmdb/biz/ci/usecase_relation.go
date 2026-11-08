@@ -280,6 +280,15 @@ type Neighbours struct {
 	TypeID         model.ID `json:"type_id"`
 	RelationTypeID model.ID `json:"relation_type_id"`
 	AncestorIDs    string   `json:"ancestor_ids,omitempty"`
+
+	// The vocabulary of the edge, resolved once per page. A caller that has a
+	// neighbour should not need a second request to learn what the edge means;
+	// AIOps also uses these fields to decide whether the edge propagates.
+	RelationTypeName       string  `json:"relation_type_name,omitempty"`
+	RelationTypeCategory   string  `json:"relation_type_category,omitempty"`
+	RelationTypeDirection  string  `json:"relation_type_direction,omitempty"`
+	RelationTypePropagates bool    `json:"relation_type_propagates"`
+	RelationTypeWeight     float64 `json:"relation_type_weight"`
 }
 
 // NeighbourPage is one page of an instance's neighbours.
@@ -334,6 +343,18 @@ func (u *Usecase) neighbours(ctx context.Context, ciID, relationTypeID model.ID,
 	if err != nil {
 		return nil, err
 	}
+	relationTypeIDs := make([]model.ID, 0, len(rows))
+	seenRelationType := make(map[model.ID]bool, len(rows))
+	for _, row := range rows {
+		if !seenRelationType[row.RelationTypeID] {
+			seenRelationType[row.RelationTypeID] = true
+			relationTypeIDs = append(relationTypeIDs, row.RelationTypeID)
+		}
+	}
+	relationTypes, err := u.repo.RelationTypesByID(ctx, relationTypeIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	out := &NeighbourPage{Items: make([]Neighbours, 0, len(rows)), NumFound: total, Page: page}
 	for _, row := range rows {
@@ -346,6 +367,13 @@ func (u *Usecase) neighbours(ctx context.Context, ciID, relationTypeID model.ID,
 		}
 		if row.AncestorIDs != nil {
 			item.AncestorIDs = *row.AncestorIDs
+		}
+		if rt, ok := relationTypes[row.RelationTypeID]; ok {
+			item.RelationTypeName = rt.Name
+			item.RelationTypeCategory = rt.Category
+			item.RelationTypeDirection = rt.Direction
+			item.RelationTypePropagates = rt.PropagatesDefault
+			item.RelationTypeWeight = rt.WeightDefault
 		}
 		out.Items = append(out.Items, item)
 	}
