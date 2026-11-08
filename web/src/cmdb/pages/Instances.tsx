@@ -7,6 +7,7 @@ import {
   Eye,
   FileUp,
   Folder,
+  Layers,
   LayoutGrid,
   Network,
   Pencil,
@@ -2160,6 +2161,23 @@ function InstanceDrawer({
     [attributes, groups, tr],
   );
 
+  // PROGRESS COUNTS ONLY WHAT THE FORM CAN VERIFY. A computed value is not
+  // typed here, and a secret is never read back, so counting either would show
+  // every saved instance as permanently incomplete.
+  const countable = useMemo(
+    () => attributes.filter((attribute) => !attribute.is_computed && !attribute.is_password),
+    [attributes],
+  );
+  const progress = useMemo(() => {
+    const required = countable.filter((attribute) => attribute.is_required);
+    return {
+      total: countable.length,
+      filled: countable.filter((attribute) => !isEmptyValue(values[attribute.name])).length,
+      requiredTotal: required.length,
+      requiredDone: required.filter((attribute) => !isEmptyValue(values[attribute.name])).length,
+    };
+  }, [countable, values]);
+
   const submit = async () => {
     setSubmitting(true);
     setErr(null);
@@ -2181,6 +2199,7 @@ function InstanceDrawer({
     }
   };
 
+  const modelName = model.alias || model.name;
   const label = displayValue(values[model.unique_key ?? '']) || (creating ? tr('新实例', 'New instance') : `#${instanceID}`);
 
   return (
@@ -2188,20 +2207,36 @@ function InstanceDrawer({
       open
       onClose={onClose}
       size="lg"
-      title={label}
+      icon={<CMDBIcon value={model.icon} size={16} label={modelName} />}
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{label}</span>
+          <Chip dense className="shrink-0">{modelName}</Chip>
+        </span>
+      }
       description={
         creating
-          ? tr(`在「${model.alias || model.name}」下新建一条实例`, `A new instance of “${model.alias || model.name}”`)
+          ? tr(`在「${modelName}」下新建一条实例`, `A new instance of “${modelName}”`)
           : tr(`#${instanceID}`, `#${instanceID}`)
       }
       footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
-            {tr('取消', 'Cancel')}
-          </Button>
-          <Button variant="primary" type="button" onClick={() => void submit()} disabled={submitting || loading}>
-            {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
-          </Button>
+        <div className="flex items-center gap-3">
+          {!loading && progress.total > 0 && (
+            <span className="min-w-0 flex-1 truncate text-[11px] text-text-faint">
+              {tr(
+                `已填 ${progress.filled}/${progress.total} · 必填 ${progress.requiredDone}/${progress.requiredTotal}`,
+                `${progress.filled}/${progress.total} filled · ${progress.requiredDone}/${progress.requiredTotal} required`,
+              )}
+            </span>
+          )}
+          <div className="ml-auto flex shrink-0 justify-end gap-2">
+            <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
+              {tr('取消', 'Cancel')}
+            </Button>
+            <Button variant="primary" type="button" onClick={() => void submit()} disabled={submitting || loading}>
+              {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+            </Button>
+          </div>
         </div>
       }
     >
@@ -2219,109 +2254,129 @@ function InstanceDrawer({
             event.preventDefault();
             void submit();
           }}
-          className="flex flex-col gap-4"
+          className="flex flex-col gap-2.5"
         >
-          {sections.map((section) => (
-            <fieldset key={section.key}>
-              <legend className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-faint">{section.name}</legend>
-              <div className="flex flex-col gap-3">
-                {section.items.map((attribute) => {
-                  const id = `cmdb-instance-${attribute.id}`;
-                  const type = isValueTypeCode(attribute.value_type) ? attribute.value_type : '2';
-                  const referenceModel =
-                    attribute.is_reference && attribute.reference_type_id
-                      ? models.find((candidate) => Number(candidate.id) === Number(attribute.reference_type_id))
-                      : undefined;
-                  return (
-                    <div key={attribute.id}>
-                      <Label htmlFor={id}>
-                        {attribute.alias || attribute.name}
-                        {attribute.is_required && <span className="ml-1 text-red-400">*</span>}
-                        {attribute.inherited && (
-                          <Chip tone="info" dense className="ml-2">
-                            {attribute.inherited_from}
-                          </Chip>
+          {sections.map((section) => {
+            const requiredCount = section.items.filter((attribute) => attribute.is_required).length;
+            return (
+              <section key={section.key} className="rounded-lg border border-border bg-card">
+                <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+                  <span className="grid size-5 shrink-0 place-items-center rounded bg-bg text-text-muted">
+                    <Layers size={12} aria-hidden="true" />
+                  </span>
+                  <h3 className="text-xs font-semibold text-text">{section.name}</h3>
+                  <span className="ml-auto text-[10px] text-text-faint">
+                    {tr(
+                      `${section.items.length} 项`,
+                      section.items.length === 1 ? '1 field' : `${section.items.length} fields`,
+                    )}
+                  </span>
+                  {requiredCount > 0 && (
+                    <Chip dense>{tr(`必填 ${requiredCount}`, `Required ${requiredCount}`)}</Chip>
+                  )}
+                </header>
+                <div className="grid grid-cols-1 gap-x-3 gap-y-2.5 p-3 sm:grid-cols-2">
+                  {section.items.map((attribute) => {
+                    const id = `cmdb-instance-${attribute.id}`;
+                    const type = isValueTypeCode(attribute.value_type) ? attribute.value_type : '2';
+                    const referenceModel =
+                      attribute.is_reference && attribute.reference_type_id
+                        ? models.find((candidate) => Number(candidate.id) === Number(attribute.reference_type_id))
+                        : undefined;
+                    // A LONG-VALUE CONTROL TAKES THE WHOLE ROW: a JSON box made
+                    // half-width is unusable at the drawer's 44rem.
+                    const wide = attribute.is_file || type === '6';
+                    return (
+                      <div key={attribute.id} className={cn(wide && 'sm:col-span-2')}>
+                        <Label htmlFor={id}>
+                          {attribute.alias || attribute.name}
+                          {attribute.is_required && <span className="ml-1 text-red-400">*</span>}
+                          {attribute.inherited && (
+                            <Chip tone="info" dense className="ml-2">
+                              {attribute.inherited_from}
+                            </Chip>
+                          )}
+                        </Label>
+                        <div className="mt-1">
+                          {attribute.is_file ? (
+                            <FileField
+                              attribute={attribute}
+                              value={values[attribute.name]}
+                              disabled={attribute.is_computed}
+                              onChange={async (_files, serialized) => {
+                                setValues((current) => ({ ...current, [attribute.name]: serialized }));
+                                // An attachment is already an uploaded object, not
+                                // a draft. Save its reference now so a refresh (or
+                                // closing the form) cannot leave it invisible.
+                                if (instanceID === null) return;
+                                try {
+                                  await updateInstance(instanceID, {
+                                    values: { [attribute.name]: serialized },
+                                  });
+                                  onFileSaved?.();
+                                } catch (error) {
+                                  setErr(
+                                    describeError(
+                                      error,
+                                      tr('文件已上传，但保存到实例失败', 'The file was uploaded but could not be attached'),
+                                    ),
+                                  );
+                                  throw error;
+                                }
+                              }}
+                            />
+                          ) : referenceModel ? (
+                            <ReferencePicker
+                              id={id}
+                              attribute={attribute}
+                              target={referenceModel}
+                              labels={referenceLabels}
+                              value={values[attribute.name]}
+                              onChange={(next) => setValues((current) => ({ ...current, [attribute.name]: next }))}
+                              disabled={attribute.is_computed}
+                              required={attribute.is_required}
+                              placeholder={attribute.alias || attribute.name}
+                            />
+                          ) : (
+                            <AttributeControl
+                              id={id}
+                              type={type}
+                              isList={attribute.is_list}
+                              disabled={attribute.is_computed}
+                              required={attribute.is_required}
+                              value={values[attribute.name]}
+                              onChange={(next) => setValues((current) => ({ ...current, [attribute.name]: next }))}
+                              placeholder={attribute.alias || attribute.name}
+                            />
+                          )}
+                        </div>
+                        {attribute.is_file && (
+                          <p className="mt-1 text-[11px] text-text-faint">
+                            {creating
+                              ? tr(
+                                  '文件引用会随新建实例一起保存；请点击底部保存。',
+                                  'File references are saved with the new instance; use Save below.',
+                                )
+                              : tr('文件的上传和删除会立即保存。', 'File uploads and deletions are saved immediately.')}
+                          </p>
                         )}
-                      </Label>
-                      <div className="mt-1">
-                        {attribute.is_file ? (
-                          <FileField
-                            attribute={attribute}
-                            value={values[attribute.name]}
-                            disabled={attribute.is_computed}
-                            onChange={async (_files, serialized) => {
-                              setValues((current) => ({ ...current, [attribute.name]: serialized }));
-                              // An attachment is already an uploaded object, not
-                              // a draft. Save its reference now so a refresh (or
-                              // closing the form) cannot leave it invisible.
-                              if (instanceID === null) return;
-                              try {
-                                await updateInstance(instanceID, {
-                                  values: { [attribute.name]: serialized },
-                                });
-                                onFileSaved?.();
-                              } catch (error) {
-                                setErr(
-                                  describeError(
-                                    error,
-                                    tr('文件已上传，但保存到实例失败', 'The file was uploaded but could not be attached'),
-                                  ),
-                                );
-                                throw error;
-                              }
-                            }}
-                          />
-                        ) : referenceModel ? (
-                          <ReferencePicker
-                            id={id}
-                            attribute={attribute}
-                            target={referenceModel}
-                            labels={referenceLabels}
-                            value={values[attribute.name]}
-                            onChange={(next) => setValues((current) => ({ ...current, [attribute.name]: next }))}
-                            disabled={attribute.is_computed}
-                            required={attribute.is_required}
-                            placeholder={attribute.alias || attribute.name}
-                          />
-                        ) : (
-                          <AttributeControl
-                            id={id}
-                            type={type}
-                            isList={attribute.is_list}
-                            disabled={attribute.is_computed}
-                            required={attribute.is_required}
-                            value={values[attribute.name]}
-                            onChange={(next) => setValues((current) => ({ ...current, [attribute.name]: next }))}
-                            placeholder={attribute.alias || attribute.name}
-                          />
+                        {attribute.is_computed && (
+                          <p className="mt-1 text-[11px] text-text-faint">
+                            {tr('这个属性由模型计算，不能直接填。', 'The model derives this attribute; it cannot be typed.')}
+                          </p>
+                        )}
+                        {attribute.is_password && (
+                          <p className="mt-1 text-[11px] text-text-faint">
+                            {tr('密码保存后不会再显示；留空表示保持不变。', 'A saved secret is never shown again; leave it empty to keep the current one.')}
+                          </p>
                         )}
                       </div>
-                      {attribute.is_file && (
-                        <p className="mt-1 text-[11px] text-text-faint">
-                          {creating
-                            ? tr(
-                                '文件引用会随新建实例一起保存；请点击底部保存。',
-                                'File references are saved with the new instance; use Save below.',
-                              )
-                            : tr('文件的上传和删除会立即保存。', 'File uploads and deletions are saved immediately.')}
-                        </p>
-                      )}
-                      {attribute.is_computed && (
-                        <p className="mt-1 text-[11px] text-text-faint">
-                          {tr('这个属性由模型计算，不能直接填。', 'The model derives this attribute; it cannot be typed.')}
-                        </p>
-                      )}
-                      {attribute.is_password && (
-                        <p className="mt-1 text-[11px] text-text-faint">
-                          {tr('密码保存后不会再显示；留空表示保持不变。', 'A saved secret is never shown again; leave it empty to keep the current one.')}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </fieldset>
-          ))}
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
         </form>
       )}
     </Drawer>
@@ -2342,13 +2397,16 @@ function InstanceDrawer({
  * Everything else is sent as it stands, including a `null` the operator emptied
  * on purpose — that is what clearing a field means.
  */
+function isEmptyValue(value: unknown): boolean {
+  return value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
 function buildValues(attributes: TypeAttribute[], values: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const attribute of attributes) {
     if (attribute.is_computed) continue;
     const value = values[attribute.name];
-    const empty = value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
-    if (attribute.is_password && empty) continue;
+    if (attribute.is_password && isEmptyValue(value)) continue;
     out[attribute.name] = value ?? null;
   }
   return out;

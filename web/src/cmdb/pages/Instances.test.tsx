@@ -1004,6 +1004,94 @@ describe('the form in the drawer', () => {
     });
   });
 
+  it('groups the form into counted section cards', async () => {
+    const user = userEvent.setup();
+    handlers([]);
+    server.use(
+      // `is_required` comes from the BINDING, so the section's required count
+      // reads the attribute list rather than the group's own copies.
+      http.get('/api/v1/cmdb/ci-types/host/attributes', () =>
+        HttpResponse.json({
+          type_id: 1,
+          unique_id: 10,
+          unique: 'hostname',
+          attributes: [
+            attribute(10, 'hostname', { is_required: true }),
+            attribute(11, 'note'),
+            attribute(12, 'root_password', { is_password: true }),
+          ],
+        }),
+      ),
+      http.get('/api/v1/cmdb/ci-types/host/attribute-groups', () =>
+        HttpResponse.json([
+          {
+            id: 1,
+            name: '基本信息',
+            type_id: 1,
+            order: 0,
+            inherited: false,
+            is_other: false,
+            attributes: [attribute(10, 'hostname', { is_required: true })],
+          },
+          {
+            id: 2,
+            name: '访问信息',
+            type_id: 1,
+            order: 1,
+            inherited: false,
+            is_other: false,
+            attributes: [
+              attribute(11, 'note'),
+              attribute(12, 'root_password', { is_password: true }),
+            ],
+          },
+        ]),
+      ),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /新建实例/ }));
+    const drawer = await screen.findByRole('dialog');
+
+    expect(within(drawer).getByRole('heading', { name: '基本信息' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('heading', { name: '访问信息' })).toBeInTheDocument();
+    // The count belongs to the section, so an operator can see how much the
+    // group asks of them before scrolling the drawer.
+    expect(within(drawer).getByText('1 项')).toBeInTheDocument();
+    expect(within(drawer).getByText('2 项')).toBeInTheDocument();
+    expect(within(drawer).getByText('必填 1')).toBeInTheDocument();
+  });
+
+  it('shows the filled and required progress in the footer', async () => {
+    const user = userEvent.setup();
+    handlers([]);
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/host/attributes', () =>
+        HttpResponse.json({
+          type_id: 1,
+          unique_id: 10,
+          unique: 'hostname',
+          attributes: [
+            attribute(10, 'hostname', { is_required: true }),
+            attribute(11, 'note'),
+            attribute(12, 'root_password', { is_password: true }),
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /新建实例/ }));
+    const drawer = await screen.findByRole('dialog');
+
+    // A secret is never read back, so it cannot count toward “filled”: counting
+    // it would show every saved instance as permanently incomplete.
+    expect(within(drawer).getByText('已填 0/2 · 必填 0/1')).toBeInTheDocument();
+
+    await user.type(within(drawer).getByLabelText(/hostname/), 'web-02');
+    expect(within(drawer).getByText('已填 1/2 · 必填 1/1')).toBeInTheDocument();
+  });
+
   it('selects a reference by searching the referenced model and saves its id', async () => {
     const user = userEvent.setup();
     const members = { ...model, id: 54, name: 'members', alias: '人员', unique_key: 'userid', show_name: 'name' };
