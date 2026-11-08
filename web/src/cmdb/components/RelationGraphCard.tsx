@@ -258,6 +258,8 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
               edges={flowEdges}
               nodeTypes={nodeTypes}
               fitView
+              fitViewOptions={{ padding: 0.2 }}
+              minZoom={0.2}
               nodesDraggable={false}
               nodesConnectable={false}
               elementsSelectable={false}
