@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { useSearchParams } from 'react-router-dom';
 import { ListTree, Loader2, RefreshCw, ShieldAlert, Table2 } from 'lucide-react';
 
@@ -95,6 +96,17 @@ export default function OperationHistoryPage() {
   const [typeRows, setTypeRows] = useState<TypeHistoryItem[]>([]);
   const [triggerRows, setTriggerRows] = useState<TriggerHistoryItem[]>([]);
   const [selection, setSelection] = useState<HistorySelection | null>(null);
+  useCMDBAssistantFacts({
+    tab,
+    page,
+    start: filters.start,
+    end: filters.end,
+    uid: filters.uid,
+    type_id: filters.typeID,
+    operate: filters.operate,
+    shown: count.shown,
+    total: count.total,
+  });
 
   useEffect(() => {
     if (!isAdmin) return;

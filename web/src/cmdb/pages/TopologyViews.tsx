@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import {
   ChevronRight,
   FolderPlus,
@@ -75,6 +76,12 @@ export default function TopologyViewsPage() {
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphErr, setGraphErr] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<TopoSelectedNode | null>(null);
+  useCMDBAssistantFacts({
+    view_id: selectedID,
+    views: views.length,
+    selected_node_id: selectedNode?.id,
+    selected_node_name: selectedNode?.name,
+  });
 
   const [drawer, setDrawer] = useState<TopologyView | 'new' | null>(null);
   const [newViewGroupID, setNewViewGroupID] = useState<number | null>(null);

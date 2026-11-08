@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -56,6 +57,7 @@ export default function RelationTypesPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const [form, setForm] = useState<{ mode: 'create' } | { mode: 'edit'; row: RelationType } | null>(null);
+  useCMDBAssistantFacts({ relation_type_count: items.length, editing: form ? form.mode : undefined });
 
   const load = useCallback(
     async (quiet = false) => {

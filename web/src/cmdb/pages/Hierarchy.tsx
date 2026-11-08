@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -41,6 +42,7 @@ export default function HierarchyPage() {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  useCMDBAssistantFacts({ model: typeRef, max_level: maxLevel, picked_ci_id: picked?._id });
 
   useEffect(() => {
     void listCITypes()

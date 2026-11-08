@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { createPortal } from 'react-dom';
 import {
   ChevronDown,
@@ -238,6 +239,13 @@ export default function SubscriptionsPage({
     () => treeViews.filter((view) => !hiddenTypeIDs.has(view.type_id)),
     [treeViews, hiddenTypeIDs],
   );
+  useCMDBAssistantFacts({
+    query,
+    catalog_view: catalogView,
+    models: visibleModels.length,
+    tree_views: visibleTreeViews.length,
+    editing_model: editing?.model.name,
+  });
 
   // The subscriptions in their grouped display order. This is both the left
   // pane's data and the source of the summary count and unsubscribe lookup.

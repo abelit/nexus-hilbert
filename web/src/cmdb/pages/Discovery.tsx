@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
@@ -25,6 +26,7 @@ type Tab = 'rules' | 'targets' | 'catalog' | 'templates';
 export default function DiscoveryPage() {
   const { tr } = useI18n();
   const [tab, setTab] = useState<Tab>('rules');
+  useCMDBAssistantFacts({ tab });
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
