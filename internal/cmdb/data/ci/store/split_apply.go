@@ -13,12 +13,14 @@ import (
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 )
 
-// The Phase 2 split for the direction-safe part of the vocabulary.
+// The Phase 2 split for the vocabulary that can be reclassified without
+// flipping a one2many endpoint.
 //
-// contain is deliberately excluded: its structural targets read part -> whole
-// while CMDB stores whole -> part, and 36 of its rules are one2many. It keeps
-// its existing type + inverse_of=PART_OF. This command handles deploy/run,
-// depend and connect only.
+// deploy/run, depend and connect are direction-compatible (the power chain is
+// many2many/one2one and is safely flipped). contain is structural: its targets
+// read part -> whole while CMDB stores whole -> part, so it is split into
+// inverse CMDB names (CONTAINS, HAS_MEMBER, ...) that declare inverse_of. No
+// contain edge is flipped; the 36 one2many rules stay one2many.
 type SplitApplyReport struct {
 	DryRun            bool            `json:"dry_run"`
 	CreatedTypes      []string        `json:"created_types,omitempty"`
@@ -37,6 +39,7 @@ type SplitApplyRow struct {
 	ParentModel string `json:"parent_model"`
 	ChildModel  string `json:"child_model"`
 	Target      string `json:"target"`
+	InverseOf   string `json:"inverse_of,omitempty"`
 	Rules       int    `json:"rules"`
 	Edges       int64  `json:"edges"`
 	Flip        bool   `json:"flip,omitempty"`
@@ -47,7 +50,9 @@ type splitTypeSpec struct {
 	Name, Category, Direction string
 	DisplayZH, DisplayEN      string
 	Description               string
+	InverseOf                 string
 	Propagates                bool
+	Transitive                bool
 	Weight                    float64
 }
 
@@ -76,16 +81,49 @@ var splitTypeSpecs = map[string]splitTypeSpec{
 		Description: "逻辑连接：协议与调用语义待 APM 证据补充。",
 		Propagates:  true, Weight: 0.6,
 	},
+	// Structural types are the CMDB-side inverse of the topocortex target:
+	// CMDB stores whole -> part, topocortex PART_OF reads part -> whole.
+	"CONTAINS": {
+		Name: "CONTAINS", Category: "structure", Direction: "src_to_dst",
+		DisplayZH: "包含", DisplayEN: "Contains",
+		Description: "结构包含：整体由部分组成，不传播故障。",
+		InverseOf:   "PART_OF", Transitive: true, Weight: 0,
+	},
+	"HAS_MEMBER": {
+		Name: "HAS_MEMBER", Category: "structure", Direction: "src_to_dst",
+		DisplayZH: "含有成员", DisplayEN: "Has member",
+		Description: "成员聚合：聚合体含有成员，不传播故障。",
+		InverseOf:   "MEMBER_OF", Weight: 0,
+	},
+	"HAS_BELONGING": {
+		Name: "HAS_BELONGING", Category: "structure", Direction: "src_to_dst",
+		DisplayZH: "含有归属", DisplayEN: "Has belonging",
+		Description: "业务归属：分组含有归属资源，不传播故障。",
+		InverseOf:   "BELONGS_TO", Weight: 0,
+	},
+	"HAS_LOCATION": {
+		Name: "HAS_LOCATION", Category: "structure", Direction: "src_to_dst",
+		DisplayZH: "含有位置", DisplayEN: "Has location",
+		Description: "物理位置：位置含有设备，不传播故障。",
+		InverseOf:   "LOCATED_IN", Weight: 0,
+	},
+	"ALLOCATES": {
+		Name: "ALLOCATES", Category: "structure", Direction: "src_to_dst",
+		DisplayZH: "分配", DisplayEN: "Allocates",
+		Description: "地址分配：子网分配地址，不传播故障。",
+		InverseOf:   "ALLOCATED_TO", Weight: 0,
+	},
 }
 
-var splitSourceTypes = []string{"deploy", "run", "depend", "connect"}
+var splitSourceTypes = []string{"deploy", "run", "depend", "connect", "contain"}
 
 var splitReplacements = map[string]string{
-	"deploy": "RUNS_ON", "run": "RUNS_ON", "depend": "DEPENDS_ON", "connect": "CONNECTS_TO",
+	"deploy": "RUNS_ON", "run": "RUNS_ON", "depend": "DEPENDS_ON",
+	"connect": "CONNECTS_TO", "contain": "CONTAINS",
 }
 
-// ApplyRelationSplit reclassifies the direction-safe vocabulary. A dry run
-// reports the same rows and counts without writing.
+// ApplyRelationSplit reclassifies the overloaded vocabulary. A dry run reports
+// the same rows and counts without writing.
 func ApplyRelationSplit(ctx context.Context, db *gorm.DB, dryRun bool) (*SplitApplyReport, error) {
 	if db == nil {
 		return nil, errNilDB
@@ -120,9 +158,12 @@ type splitRuleRow struct {
 	ParentModel  string
 	ChildModel   string
 	Target       string
-	Flip         bool
-	Delete       bool
-	EdgeCount    int64
+	// InverseOf is set for structural targets: the CMDB-side name keeps the
+	// whole -> part direction and declares the topocortex name it mirrors.
+	InverseOf string
+	Flip      bool
+	Delete    bool
+	EdgeCount int64
 }
 
 func loadSplitRules(ctx context.Context, db *gorm.DB) ([]splitRuleRow, error) {
@@ -154,7 +195,7 @@ func loadSplitRules(ctx context.Context, db *gorm.DB) ([]splitRuleRow, error) {
 			SourceTypeID: rule.RelationTypeID,
 			ParentModel:  typeNames[rule.ParentID], ChildModel: typeNames[rule.ChildID],
 		}
-		row.Target, row.Flip, row.Delete = splitApplyTarget(row.SourceType, row.ParentModel, row.ChildModel)
+		row.Target, row.InverseOf, row.Flip, row.Delete = splitApplyTarget(row.SourceType, row.ParentModel, row.ChildModel)
 		out = append(out, row)
 	}
 	return out, nil
@@ -185,14 +226,21 @@ func loadCITypeNames(db *gorm.DB, rules []citypemodel.CITypeRelation) (map[model
 	return out, nil
 }
 
-func splitApplyTarget(source, parent, child string) (target string, flip, delete bool) {
+func splitApplyTarget(source, parent, child string) (target, inverseOf string, flip, delete bool) {
 	if source == "connect" && (parent == "demo111" || parent == "hello1111") {
-		return "", false, true
+		return "", "", false, true
 	}
 	target, _, inverted := splitTarget(splitRow{
 		RelationType: source, ParentModel: parent, ChildModel: child,
 	})
-	return target, inverted, false
+	if source == "contain" {
+		// CMDB stores whole -> part. The split keeps the stored direction and
+		// creates the inverse CMDB name, so nothing is flipped and the 36
+		// one2many rules stay one2many.
+		target, inverseOf = containMirror(target)
+		return target, inverseOf, false, false
+	}
+	return target, "", inverted, false
 }
 
 func inspectSplitApply(ctx context.Context, db *gorm.DB) (*SplitApplyReport, error) {
@@ -233,7 +281,8 @@ func applyRow(row splitRuleRow) SplitApplyRow {
 	}
 	return SplitApplyRow{
 		SourceType: row.SourceType, ParentModel: row.ParentModel, ChildModel: row.ChildModel,
-		Target: target, Rules: 1, Edges: row.EdgeCount, Flip: row.Flip, Delete: row.Delete,
+		Target: target, InverseOf: row.InverseOf, Rules: 1, Edges: row.EdgeCount,
+		Flip: row.Flip, Delete: row.Delete,
 	}
 }
 
@@ -243,8 +292,17 @@ func applySplitTx(ctx context.Context, tx *gorm.DB) (*SplitApplyReport, error) {
 		return nil, err
 	}
 	report := &SplitApplyReport{Rows: make([]SplitApplyRow, 0, len(rules))}
+	needed := map[string]bool{}
+	for _, row := range rules {
+		if row.Target != "" && !row.Delete {
+			needed[row.Target] = true
+		}
+	}
 	typeIDs := map[string]model.ID{}
 	for name, spec := range splitTypeSpecs {
+		if !needed[name] {
+			continue
+		}
 		id, created, err := ensureSplitType(tx, spec)
 		if err != nil {
 			return nil, err
@@ -275,6 +333,9 @@ func applySplitTx(ctx context.Context, tx *gorm.DB) (*SplitApplyReport, error) {
 			continue
 		}
 		targetID := typeIDs[row.Target]
+		if targetID == 0 {
+			return nil, fmt.Errorf("cmdb ci: split: no target type %s", row.Target)
+		}
 		reassigned, flipped, err := reclassifySplitRule(tx, row, targetID)
 		if err != nil {
 			return nil, err
@@ -300,11 +361,19 @@ func ensureSplitType(tx *gorm.DB, spec splitTypeSpec) (model.ID, bool, error) {
 		Name: spec.Name, Color: "#1890ff",
 		Category: spec.Category, Direction: spec.Direction,
 		PropagatesDefault: spec.Propagates, WeightDefault: spec.Weight,
+		InverseOf: spec.InverseOf, Transitive: spec.Transitive,
 		DisplayNameZH: spec.DisplayZH, DisplayNameEN: spec.DisplayEN,
 		Description: spec.Description, Revision: 1,
 	}
 	if err := tx.Create(&row).Error; err != nil {
 		return 0, false, fmt.Errorf("cmdb ci: split: create type %s: %w", spec.Name, err)
+	}
+	// GORM substitutes the column default (1) for a zero WeightDefault, so a
+	// structural type's explicit 0 has to be written back.
+	if spec.Weight == 0 {
+		if err := tx.Model(&row).Update("weight_default", spec.Weight).Error; err != nil {
+			return 0, false, fmt.Errorf("cmdb ci: split: set weight for %s: %w", spec.Name, err)
+		}
 	}
 	return row.ID, true, nil
 }

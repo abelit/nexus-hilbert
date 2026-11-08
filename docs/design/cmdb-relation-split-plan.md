@@ -22,8 +22,10 @@ ongrid-cmdb --plan-relation-split
       "constraint": "0",
       "edges": 471,
       "target": "ALLOCATED_TO",
+      "cmdb_name": "ALLOCATES",
+      "inverse_of": "ALLOCATED_TO",
       "review": false,
-      "direction_inverted": false
+      "direction_inverted": true
     }
   ],
   "totals": {"ALLOCATED_TO": 471},
@@ -37,21 +39,24 @@ ongrid-cmdb --plan-relation-split
 - `edges` 只统计活跃的、两端 CI 也活跃的实例边；
 - `review=true` 表示该模型对的语义需要业务确认，不能直接迁移；
 - `direction_inverted=true` 表示目标类型的方向与当前存储方向相反，需要 inverse 适配；
+- `cmdb_name` / `inverse_of` 只对 `contain` 出现：CMDB 保留 `整体→部分` 的存储方向，创建反向命名的类型并声明 `inverse_of`，由 connector 反转端点；
 - `UNRESOLVED` 表示没有映射，必须补规则后才能迁移。
 
 ## 目标词汇原则
 
-| 当前类型 | 目标 | 判定 |
-|---|---|---|
-| `contain` | `PART_OF` | 技术组成：子件属于整体 |
-| `contain` | `MEMBER_OF` | 成员属于聚合：集群→实例、团队→成员 |
-| `contain` | `BELONGS_TO` | 业务/组织归属：产品线→产品、部门→团队 |
-| `contain` | `LOCATED_IN` | 物理位置：机房→机柜→设备 |
-| `contain` | `ALLOCATED_TO` | IPAM 分配：子网→地址 |
-| `deploy` / `run` | `RUNS_ON` | 工作负载→宿主 |
-| `depend` | `DEPENDS_ON` | 运行时依赖 |
-| `connect` | `POWERED_BY` | 供电链；当前方向是 provider→consumer，目标方向相反 |
-| `connect` | `CONNECTS_TO` | 逻辑连接；有 APM 证据后再细化为 `CALLS` |
+| 当前类型 | 目标 | CMDB 类型（`inverse_of`） | 判定 |
+|---|---|---|---|
+| `contain` | `PART_OF` | `CONTAINS`（`PART_OF`） | 技术组成：子件属于整体 |
+| `contain` | `MEMBER_OF` | `HAS_MEMBER`（`MEMBER_OF`） | 成员属于聚合：集群→实例、团队→成员 |
+| `contain` | `BELONGS_TO` | `HAS_BELONGING`（`BELONGS_TO`） | 业务/组织归属：产品线→产品、部门→团队 |
+| `contain` | `LOCATED_IN` | `HAS_LOCATION`（`LOCATED_IN`） | 物理位置：机房→机柜→设备 |
+| `contain` | `ALLOCATED_TO` | `ALLOCATES`（`ALLOCATED_TO`） | IPAM 分配：子网→地址 |
+| `deploy` / `run` | `RUNS_ON` | `RUNS_ON` | 工作负载→宿主 |
+| `depend` | `DEPENDS_ON` | `DEPENDS_ON` | 运行时依赖 |
+| `connect` | `POWERED_BY` | `POWERED_BY` | 供电链；当前方向是 provider→consumer，目标方向相反 |
+| `connect` | `CONNECTS_TO` | `CONNECTS_TO` | 逻辑连接；有 APM 证据后再细化为 `CALLS` |
+
+结构类目标（`PART_OF` / `MEMBER_OF` / `BELONGS_TO` / `LOCATED_IN` / `ALLOCATED_TO`）读作 `部分→整体`，与 CMDB 现有 `contain` 的存储方向相反。直接改名会反转 1634 条边，并且 36 条 one2many 规则会变成 CMDB 不支持的 many2one；因此拆分保留存储方向，用反向命名的 CMDB 类型 + `inverse_of` 适配。
 
 ## 需要人工确认的行
 
@@ -84,16 +89,18 @@ ongrid-cmdb --split-relations
 3. `depend` 改为 `DEPENDS_ON`；
 4. 供电链改为 `POWERED_BY`，模型规则端点与实例边端点同时交换（供电链是 many2many / one2one，翻转安全）；
 5. `connect service→service` 改为 `CONNECTS_TO`；
-6. `demo111` / `hello1111` 的规则和边软删除，CI 类型与实例保留；
-7. 旧类型 `deploy`/`run`/`depend`/`connect` 在没有活跃规则和边后标记 deprecated，并写 `replacement`。
+6. `contain` 按模型对改为 `CONTAINS` / `HAS_MEMBER` / `HAS_BELONGING` / `HAS_LOCATION` / `ALLOCATES`，只改关系类型、不交换端点；新类型声明对应的 `inverse_of`，`CONTAINS` 同时标记 `transitive`；
+7. `demo111` / `hello1111` 的规则和边软删除，CI 类型与实例保留；
+8. 旧类型 `deploy`/`run`/`depend`/`connect`/`contain` 在没有活跃规则和边后标记 deprecated，并写 `replacement`。
 
 命令是幂等的：第二次执行应返回 0 重分类、0 删除。
+只在有对应规则时才创建目标类型，因此不含 `contain` 规则的库不会产生 5 个空的结构类型。
 
 ### 执行前
 
 1. 全量备份 MySQL 并记录 binlog 位点；
 2. 在 staging 用生产快照执行 `--split-relations --dry-run`，核对行数和边数；
-3. 确认 `contain`/`manage` 不在本次范围内（它们依赖 `inverse_of` 适配）；
+3. 确认 `manage` 不在本次范围内（它同样依赖 `inverse_of` 适配，尚未拆分）；
 4. 生产执行放在低峰窗口；命令是一个事务，失败整体回滚。
 
 ### 回滚
@@ -106,5 +113,5 @@ ongrid-cmdb --split-relations
 
 - `bind`：保留 `inverse_of=UNDER_CONTRACT` 适配，或单独决定；
 - `install`：无引用，标记 deprecated/删除；
-- `manage` / `contain` 的数据方向：由 `inverse_of` 适配，不翻转；
+- `manage` 的数据方向：由 `inverse_of` 适配，不翻转；
 - 实例边迁移本身：需要备份、dry-run、双写/对账和回滚，不能在规划器里执行。
