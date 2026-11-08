@@ -1,6 +1,6 @@
 # CMDB ↔ nexus-topocortex 关系方向映射
 
-CMDB 里有两类关系的存储方向与 topocortex 的目标词汇相反。**不要翻转 CMDB 的实例边或模型规则**；由 connector 根据 `c_relation_types.inverse_of` 反向读取。
+CMDB 里有三类关系的存储方向与 topocortex 的目标词汇相反。**不要翻转 CMDB 的实例边或模型规则**；由 connector 根据 `c_relation_types.inverse_of` 反向读取。
 
 ## 映射
 
@@ -8,8 +8,9 @@ CMDB 里有两类关系的存储方向与 topocortex 的目标词汇相反。**�
 |---|---|---|---|---|
 | `contain` | 整体 → 部分 | `PART_OF` | 部分 → 整体 | `PART_OF` |
 | `manage` | 人员/团队 → 资源 | `OWNED_BY` | 资源 → 负责人/团队 | `OWNED_BY` |
+| `bind` / `COVERS` | 合同/SLA → 资源 | `UNDER_CONTRACT` | 资源 → 合同 | `UNDER_CONTRACT` |
 
-其余类型（`deploy`、`run`、`depend`、`connect`、`bind`）的存储方向与当前 topocortex 映射一致或为双向，不声明 inverse。
+其余类型（`deploy`、`run`、`depend`、`connect`）的存储方向与当前 topocortex 映射一致或为双向，不声明 inverse。`bind` 已由拆分命令迁移为 `COVERS`；拆分前它同样是合同→资源，方向映射不变。
 
 ## 为什么不能直接翻转
 
@@ -19,8 +20,9 @@ CMDB 里有两类关系的存储方向与 topocortex 的目标词汇相反。**�
 |---|---:|---:|
 | `contain` | 36 | 6 |
 | `manage` | 6 | 4 |
+| `bind` | 1 | 0 |
 
-CMDB 的 `constraint` 只有 `0` 一对多、`1` 一对一、`2` 多对多（`internal/cmdb/model/const.go`），没有 many2one。翻转后 42 条一对多规则会变成 CMDB 无法表达的 many2one，写入校验和层级查询都会失真。
+CMDB 的 `constraint` 只有 `0` 一对多、`1` 一对一、`2` 多对多（`internal/cmdb/model/const.go`），没有 many2one。翻转后 43 条一对多规则会变成 CMDB 无法表达的 many2one，写入校验和层级查询都会失真。
 
 ## Connector 行为
 
@@ -41,14 +43,21 @@ CMDB 的 `constraint` 只有 `0` 一对多、`1` 一对一、`2` 多对多（`in
 - 只在 `revision < 2` 时把 revision 提到 2；
 - 已有 `inverse_of`（例如 topocortex 同步写入）不会被覆盖。
 
+`COVERS` 是由 `--split-relations` 创建的新类型，创建时直接写入 `inverse_of=UNDER_CONTRACT`，不经过启动回填。回填列表不需要加入 `bind`，因为迁移后它只剩 deprecated 别名。
+
 验证：
 
 ```sql
 SELECT name, inverse_of, revision
 FROM c_relation_types
-WHERE name IN ('contain', 'manage');
+WHERE name IN ('contain', 'manage', 'COVERS');
 -- contain | PART_OF  | 2
 -- manage  | OWNED_BY | 2
+-- COVERS  | UNDER_CONTRACT | 1
 ```
+
+### topocortex 前置条件
+
+`COVERS.inverse_of=UNDER_CONTRACT` 是 CMDB 侧的目标映射记录。topocortex 目前只在 `docs/examples/enterprise-aiops` 示例中声明 `UNDER_CONTRACT`，运行时 seed 尚未包含该类型，也没有 `Service→Contract` 的反向端点对。connector 在导出 OWL `inverseOf` 或做反向推理前，需要 topocortex 先声明该类型和端点对；否则 CMDB 的 `inverse_of` 只能在本地读取，不能完成 topocortex 侧的 `NX-INVERSE-01` 校验。
 
 API `GET /v1/cmdb/relation-types` 与 AIOps 工具 `cmdb_list_relation_types` 都会返回 `inverse_of`。

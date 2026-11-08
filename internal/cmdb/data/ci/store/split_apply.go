@@ -19,8 +19,10 @@ import (
 // deploy/run, depend and connect are direction-compatible (the power chain is
 // many2many/one2one and is safely flipped). contain is structural: its targets
 // read part -> whole while CMDB stores whole -> part, so it is split into
-// inverse CMDB names (CONTAINS, HAS_MEMBER, ...) that declare inverse_of. No
-// contain edge is flipped; the 36 one2many rules stay one2many.
+// inverse CMDB names (CONTAINS, HAS_MEMBER, ...) that declare inverse_of. bind
+// stores contract -> resource (sla -> service) while topocortex UNDER_CONTRACT
+// reads resource -> contract, so it becomes COVERS with inverse_of. No contain
+// or bind edge is flipped; the one2many rules stay one2many.
 type SplitApplyReport struct {
 	DryRun            bool            `json:"dry_run"`
 	CreatedTypes      []string        `json:"created_types,omitempty"`
@@ -113,12 +115,18 @@ var splitTypeSpecs = map[string]splitTypeSpec{
 		Description: "地址分配：子网分配地址，不传播故障。",
 		InverseOf:   "ALLOCATED_TO", Weight: 0,
 	},
+	"COVERS": {
+		Name: "COVERS", Category: "ownership", Direction: "src_to_dst",
+		DisplayZH: "合同覆盖", DisplayEN: "Covers",
+		Description: "合同覆盖：SLA/合同覆盖资源，不传播故障。",
+		InverseOf:   "UNDER_CONTRACT", Weight: 0,
+	},
 }
 
-var splitSourceTypes = []string{"deploy", "run", "depend", "connect", "contain"}
+var splitSourceTypes = []string{"bind", "deploy", "run", "depend", "connect", "contain"}
 
 var splitReplacements = map[string]string{
-	"deploy": "RUNS_ON", "run": "RUNS_ON", "depend": "DEPENDS_ON",
+	"bind": "COVERS", "deploy": "RUNS_ON", "run": "RUNS_ON", "depend": "DEPENDS_ON",
 	"connect": "CONNECTS_TO", "contain": "CONTAINS",
 }
 
@@ -238,6 +246,13 @@ func splitApplyTarget(source, parent, child string) (target, inverseOf string, f
 		// creates the inverse CMDB name, so nothing is flipped and the 36
 		// one2many rules stay one2many.
 		target, inverseOf = containMirror(target)
+		return target, inverseOf, false, false
+	}
+	if source == "bind" {
+		// CMDB stores contract -> resource (sla -> service). COVERS reads the
+		// same way and declares UNDER_CONTRACT as its inverse; the one2many
+		// rule is never flipped.
+		target, inverseOf = contractMirror(target)
 		return target, inverseOf, false, false
 	}
 	return target, "", inverted, false

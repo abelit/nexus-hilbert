@@ -288,6 +288,128 @@ func newContainSplitApplyFixture(t *testing.T) (*gorm.DB, containSplitFixture) {
 	return db, fx
 }
 
+// bind stores SLA -> service, i.e. contract -> resource, while topocortex
+// UNDER_CONTRACT reads resource -> contract. The CMDB-side name is COVERS and
+// declares UNDER_CONTRACT as inverse_of; no endpoint is flipped.
+func TestApplyRelationSplitBindCoversContract(t *testing.T) {
+	db, fx := newBindSplitApplyFixture(t)
+	ctx := context.Background()
+
+	dry, err := ApplyRelationSplit(ctx, db, true)
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if dry.ReclassifiedRules != 1 || dry.ReclassifiedEdges != 1 || dry.FlippedEdges != 0 {
+		t.Fatalf("dry report = %+v, want 1 rule/1 edge, 0 flipped", dry)
+	}
+	if len(dry.CreatedTypes) != 0 || len(dry.DeprecatedTypes) != 0 {
+		t.Fatalf("dry run wrote metadata: created=%v deprecated=%v", dry.CreatedTypes, dry.DeprecatedTypes)
+	}
+	if got := countRelationTypes(t, db, "COVERS"); got != 0 {
+		t.Fatalf("dry run created COVERS: %d", got)
+	}
+	if len(dry.Rows) != 1 || dry.Rows[0].Target != "COVERS" || dry.Rows[0].InverseOf != "UNDER_CONTRACT" {
+		t.Fatalf("dry row = %+v, want COVERS inverse_of UNDER_CONTRACT", dry.Rows)
+	}
+
+	report, err := ApplyRelationSplit(ctx, db, false)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if report.ReclassifiedRules != 1 || report.ReclassifiedEdges != 1 || report.FlippedEdges != 0 {
+		t.Fatalf("report = %+v, want 1 rule/1 edge, 0 flipped", report)
+	}
+	if len(report.CreatedTypes) != 1 || report.CreatedTypes[0] != "COVERS" {
+		t.Fatalf("created types = %v, want [COVERS]", report.CreatedTypes)
+	}
+	if len(report.DeprecatedTypes) != 1 || report.DeprecatedTypes[0] != "bind" {
+		t.Fatalf("deprecated types = %v, want [bind]", report.DeprecatedTypes)
+	}
+
+	covers := relationTypeID(t, db, "COVERS")
+	if covers == 0 {
+		t.Fatal("COVERS was not created")
+	}
+	assertTypeSemantics(t, db, covers, "ownership", "src_to_dst", false, 0)
+	assertTypeInverse(t, db, "COVERS", "UNDER_CONTRACT", false)
+
+	assertRuleType(t, db, fx.ruleID, covers)
+	assertRuleEndpoints(t, db, fx.ruleID, fx.slaTypeID, fx.serviceTypeID)
+	assertLiveEdgeType(t, db, fx.edgeID, covers)
+	assertEdgeEndpoints(t, db, fx.edgeID, fx.slaCIID, fx.serviceCIID)
+	if !relationTypeDeprecated(t, db, "bind") {
+		t.Fatal("bind was not deprecated")
+	}
+
+	again, err := ApplyRelationSplit(ctx, db, false)
+	if err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if again.ReclassifiedRules != 0 || again.ReclassifiedEdges != 0 ||
+		again.FlippedEdges != 0 || len(again.CreatedTypes) != 0 || len(again.DeprecatedTypes) != 0 {
+		t.Fatalf("second apply = %+v, want an idempotent no-op", again)
+	}
+}
+
+type bindSplitFixture struct {
+	ruleID, edgeID           model.ID
+	slaTypeID, serviceTypeID model.ID
+	slaCIID, serviceCIID     model.ID
+}
+
+func newBindSplitApplyFixture(t *testing.T) (*gorm.DB, bindSplitFixture) {
+	t.Helper()
+	db := newTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.AutoMigrate(&citypemodel.CIType{}, &citypemodel.CITypeRelation{}); err != nil {
+		t.Fatalf("migrate dictionary: %v", err)
+	}
+
+	bind := citypemodel.RelationType{Name: "bind"}
+	bind.ID = 206
+	if err := db.Create(&bind).Error; err != nil {
+		t.Fatalf("seed bind: %v", err)
+	}
+
+	typeIDs := map[string]model.ID{"sla": 1, "service": 2}
+	for name, id := range typeIDs {
+		ct := citypemodel.CIType{Name: name, Alias: name, UniqueID: 1, Enabled: true}
+		ct.ID = id
+		if err := db.Create(&ct).Error; err != nil {
+			t.Fatalf("seed ci type %s: %v", name, err)
+		}
+	}
+	constraint := "0"
+	fx := bindSplitFixture{slaTypeID: typeIDs["sla"], serviceTypeID: typeIDs["service"]}
+	rule := citypemodel.CITypeRelation{
+		ParentID: fx.slaTypeID, ChildID: fx.serviceTypeID,
+		RelationTypeID: bind.ID, Constraint: &constraint,
+	}
+	if err := db.Create(&rule).Error; err != nil {
+		t.Fatalf("seed rule: %v", err)
+	}
+	fx.ruleID = rule.ID
+
+	ciIDs := map[string]model.ID{"sla": 3001, "service": 3002}
+	ciTypes := map[string]model.ID{"sla": fx.slaTypeID, "service": fx.serviceTypeID}
+	for name, id := range ciIDs {
+		ci := cimodel.CI{TypeID: ciTypes[name], PropsJSON: "{}"}
+		ci.ID = id
+		if err := db.Create(&ci).Error; err != nil {
+			t.Fatalf("seed ci %s: %v", name, err)
+		}
+	}
+	fx.slaCIID, fx.serviceCIID = ciIDs["sla"], ciIDs["service"]
+	edge := cimodel.Relation{FirstCIID: fx.slaCIID, SecondCIID: fx.serviceCIID, RelationTypeID: bind.ID}
+	if err := db.Create(&edge).Error; err != nil {
+		t.Fatalf("seed edge: %v", err)
+	}
+	fx.edgeID = edge.ID
+	return db, fx
+}
+
 type splitApplyFixture struct {
 	upsTypeID, powerSourceTypeID model.ID
 	deployRuleID, runRuleID      model.ID
