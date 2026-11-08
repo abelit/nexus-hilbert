@@ -19,12 +19,17 @@ import (
 // reviewed row as approved; the direction-inverted rows need an inverse
 // adapter, just like contain/manage.
 type SplitPlanRow struct {
-	RelationType      string `json:"relation_type"`
-	ParentModel       string `json:"parent_model"`
-	ChildModel        string `json:"child_model"`
-	Constraint        string `json:"constraint"`
-	Edges             int64  `json:"edges"`
-	Target            string `json:"target"`
+	RelationType string `json:"relation_type"`
+	ParentModel  string `json:"parent_model"`
+	ChildModel   string `json:"child_model"`
+	Constraint   string `json:"constraint"`
+	Edges        int64  `json:"edges"`
+	Target       string `json:"target"`
+	// CmdbName is the CMDB-side type to create when Target reads in the
+	// opposite direction. For example CMDB whole->part becomes CONTAINS and
+	// declares inverse_of=PART_OF.
+	CmdbName          string `json:"cmdb_name,omitempty"`
+	InverseOf         string `json:"inverse_of,omitempty"`
 	Review            bool   `json:"review,omitempty"`
 	DirectionInverted bool   `json:"direction_inverted,omitempty"`
 }
@@ -88,12 +93,19 @@ func PlanRelationSplit(ctx context.Context, db *gorm.DB) (*SplitPlanReport, erro
 			report.UnresolvedRules++
 			report.UnresolvedEdges += row.Edges
 		}
-		report.Rows = append(report.Rows, SplitPlanRow{
+		planRow := SplitPlanRow{
 			RelationType: row.RelationType, ParentModel: row.ParentModel,
 			ChildModel: row.ChildModel, Constraint: row.Constraint,
 			Edges: row.Edges, Target: target, Review: review,
 			DirectionInverted: inverted,
-		})
+		}
+		if row.RelationType == "contain" {
+			planRow.CmdbName, planRow.InverseOf = containMirror(target)
+			if planRow.CmdbName != "" {
+				planRow.DirectionInverted = true
+			}
+		}
+		report.Rows = append(report.Rows, planRow)
 		report.Totals[target] += row.Edges
 		report.TargetRules[target]++
 		report.TotalEdges += row.Edges
@@ -172,6 +184,26 @@ var containReview = map[[2]string]bool{
 	{"dcim_server_room", "circuit"}:      true,
 	{"dcim_server_room", "power_source"}: true,
 	{"dcim_server_room", "ups"}:          true,
+}
+
+// containMirror is the CMDB-side inverse of a structural topocortex target.
+// CMDB stores whole -> part, so a type named PART_OF would read backwards;
+// the connector sees inverse_of and reverses the endpoints.
+func containMirror(target string) (cmdbName, inverseOf string) {
+	switch target {
+	case "PART_OF":
+		return "CONTAINS", "PART_OF"
+	case "MEMBER_OF":
+		return "HAS_MEMBER", "MEMBER_OF"
+	case "BELONGS_TO":
+		return "HAS_BELONGING", "BELONGS_TO"
+	case "LOCATED_IN":
+		return "HAS_LOCATION", "LOCATED_IN"
+	case "ALLOCATED_TO":
+		return "ALLOCATES", "ALLOCATED_TO"
+	default:
+		return "", ""
+	}
 }
 
 func containSplitTarget(parent, child string) (string, bool, bool) {

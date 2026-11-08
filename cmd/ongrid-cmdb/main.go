@@ -42,7 +42,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, cleanupDryRun, planRelationSplit bool
+	var cleanupRelations, dryRun, planRelationSplit, splitRelations bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -61,17 +61,19 @@ func main() {
 		case "--cleanup-relations":
 			cleanupRelations = true
 		case "--dry-run":
-			cleanupDryRun = true
+			dryRun = true
 		case "--plan-relation-split":
 			planRelationSplit = true
+		case "--split-relations":
+			splitRelations = true
 		}
 	}
-	if cleanupDryRun && !cleanupRelations {
-		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations")
+	if dryRun && !cleanupRelations && !splitRelations {
+		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations or --split-relations")
 		os.Exit(1)
 	}
-	if cleanupRelations && planRelationSplit {
-		fmt.Fprintln(os.Stderr, "--cleanup-relations and --plan-relation-split are separate commands")
+	if (cleanupRelations && splitRelations) || (cleanupRelations && planRelationSplit) || (splitRelations && planRelationSplit) {
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split")
 		os.Exit(1)
 	}
 
@@ -151,7 +153,7 @@ func main() {
 	// startup side effect. It prints a JSON report; --dry-run skips the edge
 	// writes, though the migrations above still ran.
 	if cleanupRelations {
-		report, err := cistore.CleanupRelations(rootCtx, db, cleanupDryRun)
+		report, err := cistore.CleanupRelations(rootCtx, db, dryRun)
 		if err != nil {
 			fatal(log, "cleanup relations", err)
 		}
@@ -159,6 +161,18 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode cleanup report", err)
+		}
+		return
+	}
+	if splitRelations {
+		report, err := cistore.ApplyRelationSplit(rootCtx, db, dryRun)
+		if err != nil {
+			fatal(log, "split relations", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode split report", err)
 		}
 		return
 	}
