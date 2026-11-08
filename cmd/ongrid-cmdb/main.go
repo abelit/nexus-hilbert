@@ -42,7 +42,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, cleanupDryRun bool
+	var cleanupRelations, cleanupDryRun, planRelationSplit bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -62,10 +62,16 @@ func main() {
 			cleanupRelations = true
 		case "--dry-run":
 			cleanupDryRun = true
+		case "--plan-relation-split":
+			planRelationSplit = true
 		}
 	}
 	if cleanupDryRun && !cleanupRelations {
 		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations")
+		os.Exit(1)
+	}
+	if cleanupRelations && planRelationSplit {
+		fmt.Fprintln(os.Stderr, "--cleanup-relations and --plan-relation-split are separate commands")
 		os.Exit(1)
 	}
 
@@ -153,6 +159,18 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode cleanup report", err)
+		}
+		return
+	}
+	if planRelationSplit {
+		report, err := cistore.PlanRelationSplit(rootCtx, db)
+		if err != nil {
+			fatal(log, "plan relation split", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode relation split plan", err)
 		}
 		return
 	}

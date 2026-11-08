@@ -1,0 +1,73 @@
+# CMDB 关系类型拆分规划
+
+`contain`、`connect`、`depend`、`deploy`、`run` 承载了多种语义。拆分前先运行只读规划器，确认每个模型对的目标类型、边数和需人工确认项；**规划器不写任何数据**。
+
+## 命令
+
+```bash
+ongrid-cmdb --plan-relation-split
+```
+
+命令会先执行幂等迁移，再输出 JSON 并退出，不启动 HTTP 服务。
+
+## 输出
+
+```json
+{
+  "rows": [
+    {
+      "relation_type": "contain",
+      "parent_model": "ipam_subnet",
+      "child_model": "ipam_address",
+      "constraint": "0",
+      "edges": 471,
+      "target": "ALLOCATED_TO",
+      "review": false,
+      "direction_inverted": false
+    }
+  ],
+  "totals": {"ALLOCATED_TO": 471},
+  "target_rules": {"ALLOCATED_TO": 1},
+  "total_edges": 3574,
+  "unresolved_rules": 0,
+  "unresolved_edges": 0
+}
+```
+
+- `edges` 只统计活跃的、两端 CI 也活跃的实例边；
+- `review=true` 表示该模型对的语义需要业务确认，不能直接迁移；
+- `direction_inverted=true` 表示目标类型的方向与当前存储方向相反，需要 inverse 适配；
+- `UNRESOLVED` 表示没有映射，必须补规则后才能迁移。
+
+## 目标词汇原则
+
+| 当前类型 | 目标 | 判定 |
+|---|---|---|
+| `contain` | `PART_OF` | 技术组成：子件属于整体 |
+| `contain` | `MEMBER_OF` | 成员属于聚合：集群→实例、团队→成员 |
+| `contain` | `BELONGS_TO` | 业务/组织归属：产品线→产品、部门→团队 |
+| `contain` | `LOCATED_IN` | 物理位置：机房→机柜→设备 |
+| `contain` | `ALLOCATED_TO` | IPAM 分配：子网→地址 |
+| `deploy` / `run` | `RUNS_ON` | 工作负载→宿主 |
+| `depend` | `DEPENDS_ON` | 运行时依赖 |
+| `connect` | `POWERED_BY` | 供电链；当前方向是 provider→consumer，目标方向相反 |
+| `connect` | `CONNECTS_TO` | 逻辑连接；有 APM 证据后再细化为 `CALLS` |
+
+## 需要人工确认的行
+
+规划器会把这些行标为 `review`：
+
+- `connect` 供电链：`power_source/ups/breaker/pdu/dcim_rack`，方向需要反转；
+- `connect service→service`：可能是 `CALLS`，但当前没有 APM 证据；
+- `depend service→application`：业务归属 `BELONGS_TO` 还是运行时依赖 `DEPENDS_ON`；
+- `application` 下的 `circuit/env_monitor/accounts/apple_profiles/certificate`：归属还是其他关联；
+- `db_cluster→database`：组成还是成员；
+- `dcim_server_room` 下的供电设备：位置还是供电依赖；
+- `demo111` / `hello1111`：测试数据，应优先清理而不是迁移。
+
+## 不在本规划内
+
+- `bind`：保留 `inverse_of=UNDER_CONTRACT` 适配，或单独决定；
+- `install`：无引用，标记 deprecated/删除；
+- `manage` / `contain` 的数据方向：由 `inverse_of` 适配，不翻转；
+- 实例边迁移本身：需要备份、dry-run、双写/对账和回滚，不能在规划器里执行。
