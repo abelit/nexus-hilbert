@@ -1,9 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw-server';
+
+beforeEach(() => localStorage.setItem('ongrid-locale', 'zh-CN'));
 import { selectOption } from '@/test/select-option';
 import { ProviderConfig } from './ProviderConfig';
 import type { Rule } from '../../api/discovery';

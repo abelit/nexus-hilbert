@@ -1,12 +1,14 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { server } from '@/test/msw-server';
 import { useAuth } from '@/store/auth';
 import { ToastProvider } from '../components/Toast';
 import { ModelForm } from './Models';
+
+beforeEach(() => localStorage.setItem('ongrid-locale', 'zh-CN'));
 
 const attribute = {
   id: 1,
