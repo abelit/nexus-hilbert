@@ -55,6 +55,7 @@ import { QueryBar, type QueryAttribute } from '../components/QueryBar';
 import { SearchInstanceDrawer } from '../components/SearchInstanceDrawer';
 import { useToast } from '../components/Toast';
 import type { ExportColumn } from '../lib/export';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { displayValue, isValueTypeCode } from '../lib/valuetype';
 
 // 资源搜索 — a keyword-first search over every readable model.
@@ -167,6 +168,17 @@ export default function SearchPage() {
   const [saveName, setSaveName] = useState('');
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useCMDBAssistantFacts({
+    types: selectedTypes.join(','),
+    keyword,
+    expression,
+    page: page + 1,
+    num_found: result?.numfound,
+    searched,
+    open_ci_id: detail?.ciID,
+    open_ci_name: detail?.title,
+  });
   const requestSeq = useRef(0);
   const lastQuery = useRef('');
   const booted = useRef(false);

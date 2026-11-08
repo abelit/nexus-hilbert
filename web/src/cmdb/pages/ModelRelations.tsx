@@ -33,6 +33,7 @@ import { CMDBIcon } from '../components/CMDBIcon';
 import { DataTable, type Column } from '../components/DataTable';
 import { useToast } from '../components/Toast';
 import { RelationAttributePairs, type AttributePair } from '../components/RelationAttributePairs';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 
 // 模型关系 — every parent → child pair in the estate, in one table.
 //
@@ -60,6 +61,8 @@ export default function ModelRelationsPage() {
   const [models, setModels] = useState<CIType[]>([]);
   const [relationTypes, setRelationTypes] = useState<RelationType[]>([]);
   const [formLoading, setFormLoading] = useState(false);
+
+  useCMDBAssistantFacts({ query, relation_count: rows.length });
 
   const load = useCallback(
     async (quiet = false) => {

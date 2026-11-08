@@ -1,10 +1,12 @@
-import { lazy, Suspense, type ReactNode } from 'react';
+import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Boxes, Database, FileUp, GitBranch, History, Inbox, ListTree, Network, Radar, Rss, Search, Server, Share2, Waypoints } from 'lucide-react';
 
 import type { IconType } from '@/lib/icon';
 import { useAssistantPage } from '@/lib/assistantPage';
 import { useI18n } from '@/i18n/locale';
+
+import { CMDBAssistantFactsContext, type CMDBAssistantFacts } from './lib/assistantFacts';
 
 import './styles.css';
 import { ToastProvider } from './components/Toast';
@@ -62,20 +64,23 @@ function assistantPageLabel(tr: (zh: string, en: string) => string, pathname: st
 export function PageShell({ children }: { children: ReactNode }) {
   const { tr } = useI18n();
   const location = useLocation();
+  const [facts, setFacts] = useState<CMDBAssistantFacts>({});
   const page = assistantPageLabel(tr, location.pathname);
-  useAssistantPage(page, page, { route: location.pathname });
+  useAssistantPage(page, page, { ...facts, route: location.pathname });
   return (
-    <ToastProvider>
-      <Suspense
-        fallback={
-          <div className="flex h-full items-center justify-center text-xs text-text-muted">
-            {tr('加载中…', 'Loading…')}
-          </div>
-        }
-      >
-        {children}
-      </Suspense>
-    </ToastProvider>
+    <CMDBAssistantFactsContext.Provider value={setFacts}>
+      <ToastProvider>
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-xs text-text-muted">
+              {tr('加载中…', 'Loading…')}
+            </div>
+          }
+        >
+          {children}
+        </Suspense>
+      </ToastProvider>
+    </CMDBAssistantFactsContext.Provider>
   );
 }
 

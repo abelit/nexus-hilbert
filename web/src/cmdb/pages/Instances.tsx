@@ -76,6 +76,7 @@ import type { ExportColumn } from '../lib/export';
 import { instanceSearchQuery, searchRowToInstance } from '../lib/instance-search';
 import { groupModels, orderModelsBySubscription } from '../lib/model-groups';
 import { referenceRawText, referenceText, useReferenceLabels, type ReferenceLabels } from '../lib/reference-labels';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { displayValue, isValueTypeCode } from '../lib/valuetype';
 
 // 资源数据 — the instances of one model.
@@ -257,6 +258,17 @@ export default function InstancesPage() {
   const [viewing, setViewing] = useState<{ id: number; tab: 'overview' | 'topology' } | null>(() => {
     const ci = Number(params.get('ci'));
     return Number.isSafeInteger(ci) && ci > 0 ? { id: ci, tab: 'overview' } : null;
+  });
+
+  useCMDBAssistantFacts({
+    model: typeRef,
+    search,
+    condition,
+    page: page + 1,
+    num_found: numFound,
+    loaded_rows: rows.length,
+    open_ci_id: viewing?.id,
+    open_ci_tab: viewing?.tab,
   });
   // SELECTION IS THE OPERATOR'S INTENT, NOT A PAGE FACT. Checked instances stay
   // selected while paging; changing the model or the query starts a new set.

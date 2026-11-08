@@ -61,6 +61,7 @@ import { ModelConfigShell } from '../components/ModelConfigShell';
 import { GroupedSortable, type DragSource, type SortableHandle } from '../components/GroupedSortable';
 import { useModelGroupsSync, useModelTreeRefresh } from '../components/model-tree-context';
 import { useToast } from '../components/Toast';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { groupModels, type ModelGroupSection } from '../lib/model-groups';
 import { groupIDFromSlotKey, mergeGroupMembership, sharedDragPlan } from '../lib/group-drag';
 import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
@@ -213,6 +214,16 @@ export default function ModelsPage() {
     () => (groupedView ? visible : visible.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)),
     [groupedView, safePage, visible],
   );
+  useCMDBAssistantFacts({
+    query,
+    status,
+    page: safePage + 1,
+    page_count: pageCount,
+    models_total: models.length,
+    models_visible: visible.length,
+    grouped: groupedView,
+    view,
+  });
   const modelCountLabel = (count: number) =>
     count === 1 ? tr('1 个模型', '1 model') : tr(`${count} 个模型`, `${count} models`);
 
