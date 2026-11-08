@@ -198,8 +198,30 @@ func TestBackfillRelationTypeSemantics(t *testing.T) {
 			got.PropagatesDefault != w.propagates || got.WeightDefault != w.weight ||
 			got.Transitive != w.transitive || got.Deprecated != w.deprecated ||
 			got.Replacement != w.replacement || got.DisplayNameZH != w.zh ||
-			got.Revision != 1 {
+			got.Revision < 1 {
 			t.Fatalf("%s = %+v, want %+v", name, got, w)
+		}
+	}
+
+	// The two direction-inverted types carry their topocortex inverse. Flipping
+	// the CMDB data instead would turn 42 one2many rules into the unsupported
+	// many2one shape.
+	for name, inverse := range map[string]string{"contain": "PART_OF", "manage": "OWNED_BY"} {
+		var got citypemodel.RelationType
+		if err := db.Where("name = ?", name).First(&got).Error; err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if got.InverseOf != inverse || got.Revision != 2 {
+			t.Fatalf("%s inverse = %q revision = %d, want %q / 2", name, got.InverseOf, got.Revision, inverse)
+		}
+	}
+	for _, name := range []string{"deploy", "install", "connect", "bind", "depend", "run"} {
+		var got citypemodel.RelationType
+		if err := db.Where("name = ?", name).First(&got).Error; err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if got.InverseOf != "" || got.Revision != 1 {
+			t.Fatalf("%s inverted unexpectedly: %+v", name, got)
 		}
 	}
 
@@ -207,7 +229,8 @@ func TestBackfillRelationTypeSemantics(t *testing.T) {
 	if err := db.Where("name = ?", "CALLS").First(&gotCustom).Error; err != nil {
 		t.Fatal(err)
 	}
-	if gotCustom.Category != "association" || gotCustom.WeightDefault != 0.5 || gotCustom.Revision != 9 {
+	if gotCustom.Category != "association" || gotCustom.WeightDefault != 0.5 ||
+		gotCustom.Revision != 9 || gotCustom.InverseOf != "" {
 		t.Fatalf("an ontology-managed row was overwritten: %+v", gotCustom)
 	}
 

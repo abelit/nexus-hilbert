@@ -57,7 +57,38 @@ func Migrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
-	return backfillRelationTypeSemantics(db)
+	if err := backfillRelationTypeSemantics(db); err != nil {
+		return err
+	}
+	return backfillInverseRelationTypes(db)
+}
+
+// The two vocabulary words whose CMDB storage direction is the INVERSE of the
+// topocortex relation they map to.
+//
+// DO NOT FLIP THE EDGES. manage has 6 one2many rules and contain has 36; a flip
+// would turn them into many2one, which the CMDB constraint model does not have.
+// The ontology connector reverses the endpoints using this field instead.
+func backfillInverseRelationTypes(db *gorm.DB) error {
+	inverses := []struct{ name, inverse string }{
+		{"contain", "PART_OF"},
+		{"manage", "OWNED_BY"},
+	}
+	for _, seed := range inverses {
+		if err := db.Model(&citypemodel.RelationType{}).
+			Where("name = ? AND inverse_of = '' AND revision >= 1", seed.name).
+			Update("inverse_of", seed.inverse).Error; err != nil {
+			return fmt.Errorf("cmdb citype: backfill inverse for %q: %w", seed.name, err)
+		}
+		// Bump the revision only forward; a later ontology sync may already
+		// have a higher revision.
+		if err := db.Model(&citypemodel.RelationType{}).
+			Where("name = ? AND inverse_of = ? AND revision < 2", seed.name, seed.inverse).
+			Update("revision", 2).Error; err != nil {
+			return fmt.Errorf("cmdb citype: bump revision for %q: %w", seed.name, err)
+		}
+	}
+	return nil
 }
 
 // The first semantic values for the eight live vocabulary words.
