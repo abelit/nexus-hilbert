@@ -65,6 +65,43 @@ ongrid-cmdb --plan-relation-split
 - `dcim_server_room` 下的供电设备：位置还是供电依赖；
 - `demo111` / `hello1111`：测试数据，应优先清理而不是迁移。
 
+## 执行拆分
+
+确认规划后，用同一个二进制执行：
+
+```bash
+# 只报告，不写
+ongrid-cmdb --split-relations --dry-run
+
+# 真实执行（单事务）
+ongrid-cmdb --split-relations
+```
+
+执行内容：
+
+1. 创建 `RUNS_ON`、`DEPENDS_ON`、`POWERED_BY`、`CONNECTS_TO`（已存在则保留）；
+2. `deploy`/`run` 的模型规则和实例边改为 `RUNS_ON`；
+3. `depend` 改为 `DEPENDS_ON`；
+4. 供电链改为 `POWERED_BY`，模型规则端点与实例边端点同时交换（供电链是 many2many / one2one，翻转安全）；
+5. `connect service→service` 改为 `CONNECTS_TO`；
+6. `demo111` / `hello1111` 的规则和边软删除，CI 类型与实例保留；
+7. 旧类型 `deploy`/`run`/`depend`/`connect` 在没有活跃规则和边后标记 deprecated，并写 `replacement`。
+
+命令是幂等的：第二次执行应返回 0 重分类、0 删除。
+
+### 执行前
+
+1. 全量备份 MySQL 并记录 binlog 位点；
+2. 在 staging 用生产快照执行 `--split-relations --dry-run`，核对行数和边数；
+3. 确认 `contain`/`manage` 不在本次范围内（它们依赖 `inverse_of` 适配）；
+4. 生产执行放在低峰窗口；命令是一个事务，失败整体回滚。
+
+### 回滚
+
+- 规则和实例边是原地更新，没有保留旧值；回滚依赖执行前的备份；
+- demo/test 的边和规则是软删除，可用 `deleted_at = NULL, delete_marker = 0` 按 ID 恢复；
+- 新类型可以保留（未被引用的类型不参与图），旧类型的 deprecated 标记可清除。
+
 ## 不在本规划内
 
 - `bind`：保留 `inverse_of=UNDER_CONTRACT` 适配，或单独决定；
