@@ -3,6 +3,7 @@ package citype
 import (
 	"context"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 )
@@ -45,9 +46,11 @@ type TypeRelationRepo interface {
 	RelationTypesByID(ctx context.Context, ids []model.ID) (map[model.ID]citypemodel.RelationType, error)
 
 	// EnsureRelationType returns the live relation type with this name, creating
-	// it with the default colour when absent. It is the bootstrap's entry point:
-	// the feature knows the vocabulary word, the dictionary owns the row.
-	EnsureRelationType(ctx context.Context, name string) (*citypemodel.RelationType, error)
+	// it with the vocabulary semantics when absent. It is the bootstrap's entry
+	// point: the feature knows the vocabulary word, the dictionary owns the row.
+	// An existing row is returned untouched, so an ontology-managed or
+	// operator-edited vocabulary wins.
+	EnsureRelationType(ctx context.Context, spec cibiz.RelationTypeSpec) (*citypemodel.RelationType, error)
 }
 
 // TypeRelationFilter narrows a relation listing.

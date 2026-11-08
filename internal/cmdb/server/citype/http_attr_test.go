@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	citypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -146,7 +147,7 @@ func (noAttrStub) DeleteTypeRelation(context.Context, citypebiz.TypeRelationDele
 func (noAttrStub) RelationTypesByID(context.Context, []model.ID) (map[model.ID]citypemodel.RelationType, error) {
 	return nil, stubNotImplemented()
 }
-func (noAttrStub) EnsureRelationType(context.Context, string) (*citypemodel.RelationType, error) {
+func (noAttrStub) EnsureRelationType(context.Context, cibiz.RelationTypeSpec) (*citypemodel.RelationType, error) {
 	return nil, stubNotImplemented()
 }
 

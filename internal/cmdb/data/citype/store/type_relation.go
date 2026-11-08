@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	citypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -211,10 +212,11 @@ func (r *Repo) DeleteTypeRelation(ctx context.Context, in citypebiz.TypeRelation
 }
 
 // EnsureRelationType returns the live relation type with this name, creating
-// it when absent. It is deliberately a read-then-create, not an upsert: an
-// existing row's colour and semantic mirror must be left alone.
-func (r *Repo) EnsureRelationType(ctx context.Context, name string) (*citypemodel.RelationType, error) {
-	name = strings.TrimSpace(name)
+// it with the vocabulary semantics when absent. It is deliberately a
+// read-then-create, not an upsert: an existing row's colour and semantic mirror
+// must be left alone.
+func (r *Repo) EnsureRelationType(ctx context.Context, spec cibiz.RelationTypeSpec) (*citypemodel.RelationType, error) {
+	name := strings.TrimSpace(spec.Name)
 	if name == "" {
 		return nil, fmt.Errorf("%w: relation type name is required", errs.ErrInvalid)
 	}
@@ -224,9 +226,23 @@ func (r *Repo) EnsureRelationType(ctx context.Context, name string) (*citypemode
 	case err == nil:
 		return &rt, nil
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		rt = citypemodel.RelationType{Name: name, Color: "#1890ff"}
+		rt = citypemodel.RelationType{
+			Name: name, Color: "#1890ff",
+			Category: spec.Category, Direction: spec.Direction,
+			PropagatesDefault: spec.Propagates, WeightDefault: spec.Weight,
+			InverseOf: spec.InverseOf, Transitive: spec.Transitive,
+			DisplayNameZH: spec.DisplayZH, DisplayNameEN: spec.DisplayEN,
+			Description: spec.Description, Revision: 1,
+		}
 		if err := r.db.WithContext(ctx).Create(&rt).Error; err != nil {
 			return nil, fmt.Errorf("cmdb type relation: create relation type %q: %w", name, err)
+		}
+		// GORM substitutes the column default (1) for a zero WeightDefault, so a
+		// structural type's explicit 0 has to be written back.
+		if spec.Weight == 0 {
+			if err := r.db.WithContext(ctx).Model(&rt).Update("weight_default", spec.Weight).Error; err != nil {
+				return nil, fmt.Errorf("cmdb type relation: set weight for %q: %w", name, err)
+			}
 		}
 		return &rt, nil
 	default:
