@@ -9,6 +9,7 @@ import {
   type Edge,
   type Node,
   type NodeProps,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ChevronDown, ChevronRight, Loader2, Network, Plus } from 'lucide-react';
@@ -106,6 +107,21 @@ function MoreNode({ data }: NodeProps) {
 
 const nodeTypes = { ci: RelationNodeCard, more: MoreNode };
 
+// The tool result is re-parsed into a new object on every chat re-render. A
+// content signature lets the card tell "same graph, new object" apart from a
+// genuinely new tool result, so an expansion is not wiped by a streaming token.
+function graphSignature(graph: RelationGraph): string {
+  const nodes = graph.nodes
+    .map((node) => node.id)
+    .sort((a, b) => a - b)
+    .join(',');
+  const edges = graph.edges
+    .map((edge) => `${edge.source}>${edge.target}`)
+    .sort()
+    .join(',');
+  return `${graph.root.id}|${nodes}|${edges}|${graph.counts.upstream}/${graph.counts.downstream}|${graph.truncated}`;
+}
+
 export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
   const { tr } = useI18n();
   const [current, setCurrent] = useState(graph);
@@ -117,12 +133,32 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
 
   const labelMap = useRef(new Map<string, string>());
   const labelsLoaded = useRef<Promise<void> | null>(null);
+  const lastSignature = useRef('');
+  const flowRef = useRef<ReactFlowInstance<FlowNode, Edge> | null>(null);
 
   useEffect(() => {
+    const next = graphSignature(graph);
+    if (next === lastSignature.current) return;
+    lastSignature.current = next;
     setCurrent(graph);
     setExpanded(new Set());
     setError(null);
   }, [graph]);
+
+  // `fitView` on ReactFlow only runs on mount. An expansion adds a column
+  // outside the current viewport, which looks like a no-op on narrow screens
+  // unless we re-fit after the new node set renders.
+  useEffect(() => {
+    const instance = flowRef.current;
+    if (!instance) return;
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const frame = window.requestAnimationFrame(() => {
+      void instance.fitView({ padding: 0.2, duration: reduceMotion ? 0 : 220 });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [current]);
 
   const ensureLabels = useCallback(async () => {
     if (!labelsLoaded.current) {
@@ -260,6 +296,9 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
               fitView
               fitViewOptions={{ padding: 0.2 }}
               minZoom={0.2}
+              onInit={(instance) => {
+                flowRef.current = instance;
+              }}
               nodesDraggable={false}
               nodesConnectable={false}
               elementsSelectable={false}

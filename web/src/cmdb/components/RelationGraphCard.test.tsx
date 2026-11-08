@@ -28,6 +28,7 @@ vi.mock('./InstanceDetailPeek', () => ({
 
 const flow = vi.hoisted(() => ({
   nodes: [] as Array<{ id: string; type?: string; data?: unknown }>,
+  fitView: vi.fn(),
 }));
 
 vi.mock('@xyflow/react', async () => {
@@ -36,11 +37,14 @@ vi.mock('@xyflow/react', async () => {
     ReactFlow: ({
       nodes,
       nodeTypes,
+      onInit,
     }: {
       nodes: typeof flow.nodes;
       nodeTypes?: Record<string, React.ComponentType<{ data: unknown }>>;
+      onInit?: (instance: { fitView: typeof flow.fitView }) => void;
     }) => {
       flow.nodes = nodes;
+      onInit?.({ fitView: flow.fitView });
       return (
         <div data-testid="relation-graph-flow">
           {nodes.map((node) => {
@@ -113,6 +117,39 @@ describe('RelationGraphCard', () => {
 
     await waitFor(() => expect(flow.nodes.some((node) => node.id === '7')).toBe(true));
     expect(searchHierarchy).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an expansion when the parent re-renders with an equal graph', async () => {
+    searchHierarchy.mockImplementation((request: { reverse?: boolean }) =>
+      Promise.resolve(
+        request.reverse
+          ? { result: [] }
+          : { result: [{ _id: 7, _type: 4, name: 'db-02', ci_type: 'mysql', ci_type_alias: 'mysql' }] },
+      ),
+    );
+    const { rerender } = render(<RelationGraphCard graph={graphFixture()} />);
+
+    await userEvent.click(screen.getByRole('button', { name: '展开 app-01 一跳' }));
+    await waitFor(() => expect(flow.nodes.some((node) => node.id === '7')).toBe(true));
+
+    rerender(<RelationGraphCard graph={graphFixture()} />);
+    expect(flow.nodes.some((node) => node.id === '7')).toBe(true);
+  });
+
+  it('re-fits the view after an expansion', async () => {
+    searchHierarchy.mockImplementation((request: { reverse?: boolean }) =>
+      Promise.resolve(
+        request.reverse
+          ? { result: [] }
+          : { result: [{ _id: 7, _type: 4, name: 'db-02', ci_type: 'mysql', ci_type_alias: 'mysql' }] },
+      ),
+    );
+    render(<RelationGraphCard graph={graphFixture()} />);
+    flow.fitView.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: '展开 app-01 一跳' }));
+
+    await waitFor(() => expect(flow.fitView).toHaveBeenCalled());
   });
 
   it('opens the read-only CI peek from a node', async () => {

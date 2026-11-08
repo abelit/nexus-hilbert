@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw-server';
 
@@ -10,6 +10,12 @@ import type { CIType, RelatedType, TypeAttribute } from '../../api/citype';
 import type { SearchRow } from '../../api/instance';
 import { ToastProvider } from '../Toast';
 import { InstanceRelations } from './InstanceRelations';
+
+vi.mock('./InstanceDetailDrawer', () => ({
+  InstanceDetailDrawer: (props: { readOnly?: boolean }) => (
+    <div data-testid="nested-detail" data-readonly={String(props.readOnly)} />
+  ),
+}));
 
 const host: CIType = {
   id: 1,
@@ -211,5 +217,15 @@ describe('read-only peek', () => {
 
     await screen.findByText('业务服务 A');
     expect(screen.queryByRole('button', { name: /^添加/ })).not.toBeInTheDocument();
+  });
+
+  it('opens the nested detail read-only when the relations are read-only', async () => {
+    mocks();
+    renderRelations(true);
+
+    await screen.findByText('业务服务 A');
+    await userEvent.click(screen.getByRole('button', { name: '查看 业务服务 A 详情' }));
+
+    expect(screen.getByTestId('nested-detail')).toHaveAttribute('data-readonly', 'true');
   });
 });

@@ -551,7 +551,8 @@ export function InstanceRelations({
           instanceID={peek.row._id}
           initialTab={peek.tab}
           onClose={() => setPeek(null)}
-          onInstanceSaved={() => void load()}
+          readOnly={readOnly}
+          onInstanceSaved={readOnly ? undefined : () => void load()}
         />
       )}
     </section>

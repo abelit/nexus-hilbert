@@ -153,9 +153,18 @@ export function InstanceOverview({
                         <FileField
                           attribute={attribute}
                           value={value}
-                          disabled={!onSaveValue || attribute.is_computed}
-                          onChange={(_files, serialized) =>
-                            onSaveValue ? onSaveValue(attribute.name, serialized) : undefined
+                          // The field has its own view-only mode: it hides
+                          // upload/delete but keeps preview and download.
+                          // `disabled` would block the trigger entirely, which
+                          // is the opposite of a read-only peek.
+                          readOnly={readOnly || !onSaveValue}
+                          disabled={attribute.is_computed}
+                          onChange={
+                            readOnly || !onSaveValue
+                              ? undefined
+                              : (_files, serialized) => {
+                                  void onSaveValue?.(attribute.name, serialized);
+                                }
                           }
                         />
                       ) : editingRow ? (
