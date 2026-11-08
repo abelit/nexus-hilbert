@@ -642,16 +642,17 @@ func newGetCIHistoryTool(c *Client) basetool.BaseTool {
 var relationGraphSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "ci_id": {"type": "integer", "minimum": 1},
-    "direction": {"type": "string", "enum": ["down", "up", "both"], "default": "down"},
+    "ci_id": {"type": "integer", "minimum": 1, "description": "Root CI id; preferred when known."},
+    "q": {"type": "string", "description": "Root search expression used when ci_id is absent, e.g. hostname:web-01."},
+    "direction": {"type": "string", "enum": ["down", "up", "both"], "default": "both"},
     "depth": {"type": "integer", "minimum": 1, "maximum": 3, "default": 1, "description": "Hops to walk; capped at 3."},
     "max_nodes": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20, "description": "Cap on returned nodes; capped at 50."}
-  },
-  "required": ["ci_id"]
+  }
 }`)
 
 type relationGraphArgs struct {
 	CIID      int    `json:"ci_id"`
+	Q         string `json:"q"`
 	Direction string `json:"direction"`
 	Depth     int    `json:"depth"`
 	MaxNodes  int    `json:"max_nodes"`
@@ -673,25 +674,48 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 			if err := json.Unmarshal(raw, &args); err != nil {
 				return nil, fmt.Errorf("cmdb_relation_graph: bad args: %w", err)
 			}
-			if args.CIID <= 0 {
-				return nil, errors.New("cmdb_relation_graph: ci_id is required")
+			ciID := args.CIID
+			if ciID <= 0 {
+				q := strings.TrimSpace(args.Q)
+				if q == "" {
+					return nil, errors.New("cmdb_relation_graph: ci_id or q is required")
+				}
+				data, err := c.Get(ctx, "/ci/s", url.Values{"q": {q}, "count": {"1"}})
+				if err != nil {
+					return nil, err
+				}
+				var page struct {
+					Result []map[string]any `json:"result"`
+				}
+				if err := json.Unmarshal(data, &page); err != nil {
+					return nil, fmt.Errorf("cmdb_relation_graph: decode search: %w", err)
+				}
+				if len(page.Result) == 0 {
+					return nil, fmt.Errorf("cmdb_relation_graph: no CI matches %q", q)
+				}
+				id, ok := number(page.Result[0]["_id"])
+				if !ok {
+					return nil, errors.New("cmdb_relation_graph: search result has no _id")
+				}
+				ciID = int(id)
 			}
+
 			direction := strings.ToLower(strings.TrimSpace(args.Direction))
 			if direction == "" {
-				direction = "down"
+				direction = "both"
 			}
 			var sides []graphSide
 			switch direction {
 			case "up":
 				sides = []graphSide{{path: "parents", incoming: true}}
-			case "both":
+			case "down":
+				sides = []graphSide{{path: "children", incoming: false}}
+			default:
+				direction = "both"
 				sides = []graphSide{
 					{path: "children", incoming: false},
 					{path: "parents", incoming: true},
 				}
-			default:
-				direction = "down"
-				sides = []graphSide{{path: "children", incoming: false}}
 			}
 
 			depth := args.Depth
@@ -709,14 +733,24 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 				maxNodes = 50
 			}
 
-			order, edges, truncated, err := walkRelationGraph(ctx, c, args.CIID, sides, depth, maxNodes)
+			order, rawEdges, counts, truncated, err := walkRelationGraph(ctx, c, ciID, sides, depth, maxNodes)
 			if err != nil {
 				return nil, err
 			}
 
+			typeNames := fetchCITypeNames(ctx, c)
+			relationLabels := fetchRelationTypeLabels(ctx, c)
+			edges := make([]map[string]any, 0, len(rawEdges))
+			for _, e := range rawEdges {
+				edges = append(edges, map[string]any{
+					"source": e.From, "target": e.To,
+					"label": relationLabels[e.RelationTypeID],
+				})
+			}
+
 			nodes := make([]map[string]any, 0, len(order))
 			for _, id := range order {
-				node := map[string]any{"ci_id": id}
+				node := map[string]any{"id": id}
 				data, err := c.Get(ctx, fmt.Sprintf("/instances/%d", id), nil)
 				if err != nil {
 					var apiErr *APIError
@@ -727,7 +761,10 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 					var dto map[string]any
 					if err := json.Unmarshal(data, &dto); err == nil {
 						if typeID, ok := number(dto["type_id"]); ok {
-							node["ci_type"] = int(typeID)
+							node["type_id"] = int(typeID)
+							if name := typeNames[int(typeID)]; name != "" {
+								node["type_name"] = name
+							}
 						}
 						if name := displayName(dto); name != "" {
 							node["name"] = name
@@ -737,10 +774,18 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 				nodes = append(nodes, node)
 			}
 
-			return map[string]any{
-				"nodes": nodes, "edges": edges,
-				"direction": direction, "truncated": truncated,
-			}, nil
+			out := map[string]any{
+				"root":      nodes[0],
+				"nodes":     nodes,
+				"edges":     edges,
+				"counts":    map[string]any{"upstream": counts.Upstream, "downstream": counts.Downstream},
+				"direction": direction,
+				"truncated": truncated,
+			}
+			if truncated {
+				out["note"] = "Results truncated: the card aggregates the overflow; open a node or narrow the query."
+			}
+			return out, nil
 		},
 	}
 }
@@ -795,17 +840,36 @@ func displayName(dto map[string]any) string {
 	return ""
 }
 
+type rawGraphEdge struct {
+	From           int
+	To             int
+	RelationID     int
+	RelationTypeID int
+}
+
+type graphCounts struct {
+	Upstream   int
+	Downstream int
+}
+
 // walkRelationGraph expands up to depth levels around ciID. It bounds BOTH
 // nodes and edges: an unbounded edge list is how a 3-hop fan-out turns into
 // hundreds of thousands of tokens. Edges are deduplicated by
 // (from,to,relation_id) and only kept when both endpoints are in the returned
 // node set, so direction=both cannot produce duplicate or dangling edges.
-func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSide, depth, maxNodes int) ([]int, []map[string]any, bool, error) {
+//
+// counts are the FIRST hop's numfound numbers — the true direct neighbour
+// counts, not the rows this walk happened to keep. truncated is also set when
+// numfound exceeds the rows fetched, because the card must be able to say
+// "there is more".
+func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSide, depth, maxNodes int) ([]int, []rawGraphEdge, graphCounts, bool, error) {
 	maxEdges := maxNodes * 2
 	visited := map[int]bool{ciID: true}
 	order := []int{ciID}
-	edges := make([]map[string]any, 0, maxEdges)
+	edges := make([]rawGraphEdge, 0, maxEdges)
 	edgeSeen := make(map[string]struct{}, maxEdges)
+	var counts graphCounts
+	firstHopReturned := map[string]int{}
 	truncated := false
 	frontier := []int{ciID}
 
@@ -817,13 +881,22 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 				query := url.Values{"page": {"1"}, "count": {strconv.Itoa(maxNodes)}}
 				data, err := c.Get(ctx, fmt.Sprintf("/ci-relations/%d/%s", id, side.path), query)
 				if err != nil {
-					return nil, nil, false, err
+					return nil, nil, counts, false, err
 				}
 				var page struct {
-					Items []neighbour `json:"items"`
+					Items    []neighbour `json:"items"`
+					NumFound int         `json:"numfound"`
 				}
 				if err := json.Unmarshal(data, &page); err != nil {
-					return nil, nil, false, fmt.Errorf("cmdb_relation_graph: decode neighbours: %w", err)
+					return nil, nil, counts, false, fmt.Errorf("cmdb_relation_graph: decode neighbours: %w", err)
+				}
+				if level == 0 {
+					if side.path == "children" {
+						counts.Downstream = page.NumFound
+					} else {
+						counts.Upstream = page.NumFound
+					}
+					firstHopReturned[side.path] = len(page.Items)
 				}
 				for _, n := range page.Items {
 					if n.CIID <= 0 {
@@ -854,9 +927,9 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 						break
 					}
 					edgeSeen[key] = struct{}{}
-					edges = append(edges, map[string]any{
-						"from": from, "to": to,
-						"relation_id": n.RelationID, "relation_type_id": n.RelationTypeID,
+					edges = append(edges, rawGraphEdge{
+						From: from, To: to,
+						RelationID: n.RelationID, RelationTypeID: n.RelationTypeID,
 					})
 				}
 				if stop {
@@ -872,5 +945,75 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 		}
 		frontier = next
 	}
-	return order, edges, truncated, nil
+	if counts.Downstream > firstHopReturned["children"] || counts.Upstream > firstHopReturned["parents"] {
+		truncated = true
+	}
+	return order, edges, counts, truncated, nil
+}
+
+// fetchCITypeNames maps model id -> display name. Best-effort: the graph is
+// still useful without labels, so a failed metadata read does not fail the
+// tool.
+func fetchCITypeNames(ctx context.Context, c *Client) map[int]string {
+	out := map[int]string{}
+	data, err := c.Get(ctx, "/ci-types", nil)
+	if err != nil {
+		return out
+	}
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	if json.Unmarshal(data, &page) != nil {
+		return out
+	}
+	for _, item := range page.Items {
+		id, ok := number(item["id"])
+		if !ok {
+			continue
+		}
+		name, _ := item["alias"].(string)
+		if name == "" {
+			name, _ = item["name"].(string)
+		}
+		if name != "" {
+			out[int(id)] = name
+		}
+	}
+	return out
+}
+
+// fetchRelationTypeLabels maps relation type id -> name for edge labels.
+// Best-effort for the same reason as fetchCITypeNames.
+func fetchRelationTypeLabels(ctx context.Context, c *Client) map[int]string {
+	out := map[int]string{}
+	data, err := c.Get(ctx, "/ci-type-relations", nil)
+	if err != nil {
+		return out
+	}
+	type relationTypeRef struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+	var page struct {
+		Items []struct {
+			Parent struct {
+				RelationType relationTypeRef `json:"relation_type"`
+			} `json:"parent"`
+			Child struct {
+				RelationType relationTypeRef `json:"relation_type"`
+			} `json:"child"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(data, &page) != nil {
+		return out
+	}
+	for _, item := range page.Items {
+		if item.Parent.RelationType.ID > 0 && item.Parent.RelationType.Name != "" {
+			out[item.Parent.RelationType.ID] = item.Parent.RelationType.Name
+		}
+		if item.Child.RelationType.ID > 0 && item.Child.RelationType.Name != "" {
+			out[item.Child.RelationType.ID] = item.Child.RelationType.Name
+		}
+	}
+	return out
 }
