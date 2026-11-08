@@ -49,17 +49,20 @@ const DIALECT_LABELS: Record<QueryDialect, string> = {
   logql: 'LogQL',
   traceql: 'TraceQL',
   promql: 'PromQL',
+  cmdb: 'CMDB',
 };
 
 const DIALECT_PLACEHOLDERS_ZH: Record<QueryDialect, string> = {
   logql: '例：主机 1 最近 OOM 相关日志',
   traceql: '例：最近 5 分钟出错且超过 1s 的 trace',
   promql: '例：内存使用率最高的 5 台设备',
+  cmdb: '例：生产环境 CPU 大于 8 核的主机',
 };
 const DIALECT_PLACEHOLDERS_EN: Record<QueryDialect, string> = {
   logql: 'e.g. recent OOM logs on host 1',
   traceql: 'e.g. errored traces over 1 s in the last 5 min',
   promql: 'e.g. top 5 devices by memory usage',
+  cmdb: 'e.g. production hosts with more than 8 CPU cores',
 };
 
 export type NLQueryHelperProps = {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { RefreshCw, ScrollText } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -64,6 +65,7 @@ export default function DiscoveryPoolPage() {
 
   const [raw, setRaw] = useState<PoolEntry | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  useCMDBAssistantFacts({ type_id: selected, status, page, total, loaded_entries: entries.length });
 
   // A RESPONSE BELONGS TO THE MODEL THAT ASKED FOR IT. Switching models
   // invalidates every in-flight counter, column and row request; without this

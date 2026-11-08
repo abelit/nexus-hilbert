@@ -1,9 +1,12 @@
-import { lazy, Suspense, type ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { lazy, Suspense, useState, type ReactNode } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 import { Boxes, Database, FileUp, GitBranch, History, Inbox, ListTree, Network, Radar, Rss, Search, Server, Share2, Waypoints } from 'lucide-react';
 
 import type { IconType } from '@/lib/icon';
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useI18n } from '@/i18n/locale';
+
+import { CMDBAssistantFactsContext, type CMDBAssistantFacts } from './lib/assistantFacts';
 
 import './styles.css';
 import { ToastProvider } from './components/Toast';
@@ -42,20 +45,42 @@ const IPAMPage = lazy(() => import('./pages/IPAM'));
 /** The first page an operator lands on when they open the module. */
 export const CMDB_HOME = '/cmdb/models';
 
-function PageShell({ children }: { children: ReactNode }) {
+/**
+ * The assistant's page label. The CMDB module registers a page snapshot on
+ * every route so the floating assistant can ask about the current view; without
+ * this, `needsSource` blocks sending until the operator explicitly chooses
+ * "普通提问". The nav labels are the single source of truth for the names.
+ */
+function assistantPageLabel(tr: (zh: string, en: string) => string, pathname: string): string {
+  let best: { to: string; label: string } | undefined;
+  for (const item of cmdbNavSection(tr).items) {
+    if (pathname === item.to || pathname.startsWith(item.to + '/')) {
+      if (!best || item.to.length > best.to.length) best = item;
+    }
+  }
+  return best?.label ?? tr('CMDB 资源管理平台', 'CMDB');
+}
+
+export function PageShell({ children }: { children: ReactNode }) {
   const { tr } = useI18n();
+  const location = useLocation();
+  const [facts, setFacts] = useState<CMDBAssistantFacts>({});
+  const page = assistantPageLabel(tr, location.pathname);
+  useAssistantPage(page, page, { ...facts, route: location.pathname });
   return (
-    <ToastProvider>
-      <Suspense
-        fallback={
-          <div className="flex h-full items-center justify-center text-xs text-text-muted">
-            {tr('加载中…', 'Loading…')}
-          </div>
-        }
-      >
-        {children}
-      </Suspense>
-    </ToastProvider>
+    <CMDBAssistantFactsContext.Provider value={setFacts}>
+      <ToastProvider>
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-xs text-text-muted">
+              {tr('加载中…', 'Loading…')}
+            </div>
+          }
+        >
+          {children}
+        </Suspense>
+      </ToastProvider>
+    </CMDBAssistantFactsContext.Provider>
   );
 }
 

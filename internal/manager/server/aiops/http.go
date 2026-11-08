@@ -33,6 +33,7 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/mentions"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
+	cmdb "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/cmdb"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	svc "github.com/ongridio/ongrid/internal/manager/service/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -116,6 +117,9 @@ type Handler struct {
 	agents     AgentLister
 	userAgents UserAgentManager
 	llmClient  llm.Client // for /v1/aiops/query-translate; nil = endpoint 503
+	// cmdb is the caller-authenticated CMDB client used by the form-assist
+	// endpoint to fetch the authoritative model schema. Nil = endpoint 503.
+	cmdb       *cmdb.Client
 	operations OperationReader
 	opAction   OperationActionExecutor
 }
@@ -135,6 +139,10 @@ func (h *Handler) SetModelCatalog(c ModelCatalog) { h.catalog = c }
 // (the natural-language → LogQL/TraceQL/PromQL helper). Optional —
 // when nil the endpoint returns 503 and the SPA hides the ✨ button.
 func (h *Handler) SetLLMClient(c llm.Client) { h.llmClient = c }
+
+// SetCMDBFormAssist wires the caller-authenticated CMDB client used by
+// /v1/aiops/cmdb/form-assist. Nil disables the endpoint (503).
+func (h *Handler) SetCMDBFormAssist(c *cmdb.Client) { h.cmdb = c }
 
 // SetAgentLister wires the chatruntime AgentRegistry post-construction
 // so /v1/agents can list loaded personas. Nil is allowed; the endpoint
@@ -167,6 +175,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/aiops/mentions/search", h.searchMentions)
 	r.Get("/v1/aiops/models", h.listModels)
 	r.Post("/v1/aiops/query-translate", h.queryTranslate)
+	r.Post("/v1/aiops/cmdb/form-assist", h.cmdbFormAssist)
 	r.Get("/v1/agents", h.listAgents)
 	r.Get("/v1/agents/{name}", h.getAgent)
 	r.Post("/v1/agents/custom", h.createUserAgent)

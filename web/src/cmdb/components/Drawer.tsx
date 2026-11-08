@@ -31,6 +31,8 @@ type Props = {
   title: ReactNode;
   /** A one-line explanation under the title. */
   description?: ReactNode;
+  /** An optional glyph ahead of the title, typically the subject's model icon. */
+  icon?: ReactNode;
   /** Replaces the default title/description header; the caller supplies the close control. */
   header?: ReactNode;
   /** Sticky footer, typically the save / cancel pair. */
@@ -39,7 +41,7 @@ type Props = {
   children: ReactNode;
 };
 
-export function Drawer({ open, onClose, title, description, header, footer, size = 'md', children }: Props) {
+export function Drawer({ open, onClose, title, description, icon, header, footer, size = 'md', children }: Props) {
   const { tr } = useI18n();
 
   return (
@@ -52,11 +54,18 @@ export function Drawer({ open, onClose, title, description, header, footer, size
       <DialogContent placement="right" className={cn('max-w-none gap-0', WIDTHS[size])}>
         {header ?? (
           <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-            <div className="min-w-0">
-              <DialogTitle className="truncate text-sm font-semibold text-text">{title}</DialogTitle>
-              {description && (
-                <DialogDescription className="mt-0.5 text-xs text-text-muted">{description}</DialogDescription>
+            <div className="flex min-w-0 items-start gap-2.5">
+              {icon && (
+                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-bg">
+                  {icon}
+                </span>
               )}
+              <div className="min-w-0">
+                <DialogTitle className="truncate text-sm font-semibold text-text">{title}</DialogTitle>
+                {description && (
+                  <DialogDescription className="mt-0.5 text-xs text-text-muted">{description}</DialogDescription>
+                )}
+              </div>
             </div>
             {/* A NAMED CLOSE BUTTON. An icon-only control still needs an
                 accessible name, and Escape alone is not discoverable. */}

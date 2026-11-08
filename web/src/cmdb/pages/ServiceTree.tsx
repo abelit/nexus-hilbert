@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import {
   ChevronRight,
   CircleDot,
@@ -104,6 +105,13 @@ export default function ServiceTreePage() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
+  useCMDBAssistantFacts({
+    tree_id: selectedID,
+    definitions: definitions.length,
+    layout: layoutMode,
+    edit_mode: editMode,
+    selected_models: selectedModels.size,
+  });
   const [pairEditor, setPairEditor] = useState<{ tree: ServiceTree | null; pairs: TypePair[] } | null>(null);
   const [pairSaving, setPairSaving] = useState(false);
   const [pairErr, setPairErr] = useState<string | null>(null);

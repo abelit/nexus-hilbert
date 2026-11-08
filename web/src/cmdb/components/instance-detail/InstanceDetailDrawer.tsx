@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock3, Fingerprint, Hash, History, Info, Network, Pencil, UserRound, X, Zap } from 'lucide-react';
+import { Clock3, Fingerprint, Hash, History, Info, Network, Pencil, UserRound, X, Zap, BookOpen } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
@@ -7,6 +7,10 @@ import { DialogDescription, DialogTitle } from '@/components/ui/Dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { listUsers, type User } from '@/api/users';
 import { useI18n } from '@/i18n/locale';
+import { openAssistant } from '@/lib/assistantIntent';
+
+import { AIActionButton } from '../AIActionButton';
+import { explainCIsPrompt, relationsPrompt } from '../../lib/aiPrompts';
 import { cn } from '@/lib/cn';
 import { usePermissions } from '@/store/me';
 
@@ -19,7 +23,9 @@ import { choiceText } from '../../lib/choice-labels';
 import { displayValue } from '../../lib/valuetype';
 import { CMDBIcon } from '../CMDBIcon';
 import { Drawer } from '../Drawer';
+import { KnowledgeImportDialog } from '../KnowledgeImportDialog';
 import { useToast } from '../Toast';
+import { cmdbKnowledgeItem } from '../../lib/knowledge-card';
 import { InstanceHistory } from './InstanceHistory';
 import { InstanceOverview } from './InstanceOverview';
 import { InstanceTopology } from './InstanceTopology';
@@ -61,6 +67,7 @@ export function InstanceDetailDrawer({
   onClose,
   onEdit,
   onInstanceSaved,
+  readOnly = false,
 }: {
   model: CIType;
   models: CIType[];
@@ -73,8 +80,14 @@ export function InstanceDetailDrawer({
   onEdit?(instanceID: number): void;
   /** Lets the list or relation table behind the drawer refresh after an edit. */
   onInstanceSaved?(instanceID: number): void;
+  /**
+   * Removes every write affordance: inline edit, file upload, add-relation,
+   * the footer Edit and rollback. Used by the assistant's relation-graph peek;
+   * the console drawer keeps its default false.
+   */
+  readOnly?: boolean;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const { isAdmin, canMutate } = usePermissions();
   const toast = useToast();
   const [tab, setTab] = useState<TabKey>(initialTab);
@@ -103,6 +116,11 @@ export function InstanceDetailDrawer({
     [nav, instanceID, model, attributes, groups],
   );
   const instance = loaded?.id === subject.id ? loaded.instance : null;
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const knowledgeItems = useMemo(
+    () => (instance ? [cmdbKnowledgeItem({ model: subject.model, attributes: subject.attributes, instance })] : []),
+    [instance, subject],
+  );
 
   useEffect(() => {
     let live = true;
@@ -273,7 +291,7 @@ export function InstanceDetailDrawer({
   const statusStopped = ['inactive', 'offline', 'disabled', 'error', '停用', '异常'].includes(statusLower);
   // Editing opens the page's form for the page's model, so it stays available
   // only while the drawer still shows that model; a cross-model jump is read-only.
-  const canEdit = Boolean(onEdit) && Number(subject.model.id) === Number(model.id);
+  const canEdit = !readOnly && Boolean(onEdit) && Number(subject.model.id) === Number(model.id);
   const updatedAt = headerDateTime(instance?.updated_at);
   // cantor stored a nickname; this service writes the caller's email. Resolve
   // that email to the IAM display name when the viewer may read the user list,
@@ -346,6 +364,40 @@ export function InstanceDetailDrawer({
               )}
             </DialogDescription>
           </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <AIActionButton
+              zh="AI 解读"
+              en="AI explain"
+              iconOnly
+              onClick={() =>
+                openAssistant({
+                  prompt: explainCIsPrompt([subject.id], subject.model.name, locale),
+                })
+              }
+            />
+            <AIActionButton
+              zh="AI 影响面"
+              en="AI impact"
+              iconOnly
+              onClick={() =>
+                openAssistant({
+                  prompt: relationsPrompt(subject.id, 'both', 2, locale),
+                })
+              }
+            />
+            {canMutate && instance && (
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                onClick={() => setKnowledgeOpen(true)}
+                aria-label={tr('导入知识库', 'Import to knowledge base')}
+                title={tr('导入知识库', 'Import to knowledge base')}
+              >
+                <BookOpen size={13} aria-hidden="true" />
+              </Button>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -412,7 +464,8 @@ export function InstanceDetailDrawer({
               loading={loading}
               error={error}
               onRetry={() => setRetryKey((key) => key + 1)}
-              onSaveValue={saveAttribute}
+              onSaveValue={readOnly ? undefined : saveAttribute}
+              readOnly={readOnly}
             />
           )}
         </TabsContent>
@@ -452,6 +505,11 @@ export function InstanceDetailDrawer({
           {tab === 'triggers' && <InstanceTriggers ciID={subject.id} userLabel={userLabel} />}
         </TabsContent>
       </Tabs>
+      <KnowledgeImportDialog
+        open={knowledgeOpen}
+        items={knowledgeItems}
+        onClose={() => setKnowledgeOpen(false)}
+      />
     </Drawer>
   );
 }

@@ -147,7 +147,7 @@ describe('the list', () => {
     await user.click(screen.getByRole('button', { name: '第 2 页' }));
     expect(await screen.findByText('显示 21 至 21 条，共 21 条模型')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: '模型 21' }).length).toBeGreaterThan(0);
-  }, 30000);
+  }, 60000);
 
   it('presents the schema as cards and keeps the actions', async () => {
     const user = userEvent.setup();

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -95,6 +96,7 @@ export default function BatchImportPage() {
   const [fileSize, setFileSize] = useState(0);
   const [sheetErr, setSheetErr] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
+  useCMDBAssistantFacts({ model: modelRef, policy, has_sheet: Boolean(sheet), rows: sheet?.rows.length ?? 0 });
   const [dragOver, setDragOver] = useState(false);
 
   const [preview, setPreview] = useState<ImportPreview | null>(null);

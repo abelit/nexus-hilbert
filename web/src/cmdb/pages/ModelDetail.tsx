@@ -48,6 +48,7 @@ import { ModelAutoDiscovery } from '../components/discovery/ModelAutoDiscovery';
 import { ModelForm } from './Models';
 import { ConstraintsTab, RelationsTab, TriggersTab } from '../components/ModelRuleTabs';
 import { useToast } from '../components/Toast';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
 
 // 模型配置 · 单个模型.
@@ -93,6 +94,15 @@ export default function ModelDetailPage() {
   const [editingAttribute, setEditingAttribute] = useState<TypeAttribute | null>(null);
   const [dictionaryOpen, setDictionaryOpen] = useState(false);
   const [definitionOpen, setDefinitionOpen] = useState(false);
+
+  useCMDBAssistantFacts({
+    model_id: params.id,
+    model_name: model?.name,
+    model_alias: model?.alias,
+    attributes: attributes.length,
+    groups: groups.length,
+    tab,
+  });
 
   const load = useCallback(
     async (quiet = false) => {
@@ -378,6 +388,7 @@ export default function ModelDetailPage() {
         >
           <AttributeForm
             attribute={editingAttribute}
+            modelRef={ref}
             onClose={() => setEditingAttribute(null)}
             onSaved={async (message) => {
               setEditingAttribute(null);
@@ -390,6 +401,7 @@ export default function ModelDetailPage() {
 
       <AttributeDictionary
         open={dictionaryOpen}
+        modelRef={ref}
         onClose={() => setDictionaryOpen(false)}
         onChanged={() => void load(true)}
       />

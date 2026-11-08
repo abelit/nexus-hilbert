@@ -20,13 +20,15 @@ type Props = {
   size?: 'sm' | 'md' | 'lg' | 'xl';
   /** 允许用户拖动面板左右边缘调整宽度（长文阅读类弹窗用）。 */
   resizable?: boolean;
+  /** 叠在另一个弹窗之上时使用，保证遮罩和面板都高于底层弹窗。 */
+  layer?: 'elevated';
 };
 
 // 拖拽调宽边界：太窄排版崩坏，太宽盖满遮罩失去弹窗语义。
 const RESIZE_MIN_PX = 440;
 const RESIZE_MAX_VW = 0.95;
 
-export function Modal({ open, onClose, title, children, footer, size = 'md', resizable }: Props) {
+export function Modal({ open, onClose, title, children, footer, size = 'md', resizable, layer }: Props) {
   const { tr } = useI18n();
   const panelRef = useRef<HTMLDivElement | null>(null);
   // null = 跟随 size 预设的 max-w；拖过一次之后宽度由用户接管。
@@ -59,6 +61,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md', res
       <DialogContent
         aria-label={title ?? tr('对话框', 'Dialog')}
         ref={panelRef}
+        layer={layer}
         style={userWidth != null ? { width: userWidth, maxWidth: 'none' } : undefined}
         className={cn(
           size === 'sm' && 'max-w-sm',

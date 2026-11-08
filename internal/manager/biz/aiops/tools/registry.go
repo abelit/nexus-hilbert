@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/cmdb"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	topologybiz "github.com/ongridio/ongrid/internal/manager/biz/topology"
@@ -114,6 +115,9 @@ type Registry struct {
 	k8sSnapshot           K8sSnapshotReader
 	packetCapture         PacketCaptureCreator
 	packetOperationCreate PacketCaptureOperationCreator
+	// cmdb is the read-only CMDB client (ADR-037). nil means the deployment
+	// has no CMDB configured, so no cmdb_* tool is registered.
+	cmdb *cmdb.Client
 
 	log *slog.Logger
 }
@@ -162,6 +166,10 @@ func (r *Registry) SetConfigManager(m ConfigManager) { r.configManager = m }
 
 // SetPacketCaptureCreator wires capture_pcap into the BaseTool registry.
 func (r *Registry) SetPacketCaptureCreator(p PacketCaptureCreator) { r.packetCapture = p }
+
+// SetCMDB wires the read-only CMDB tools (ADR-037). A nil client keeps the
+// tools out of the bag, so an unconfigured deployment never advertises them.
+func (r *Registry) SetCMDB(c *cmdb.Client) { r.cmdb = c }
 
 // NewRegistry stores dependencies used by BuildBaseTools.
 func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Usecase,
@@ -436,6 +444,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	if r.caller != nil && r.edges != nil && r.devices != nil {
 		out = append(out, NewFindLargeFilesTool(r.caller, r.edges, r.devices, r.log), NewDuSummaryTool(r.caller, r.edges, r.devices, r.log), NewStatFileTool(r.caller, r.edges, r.devices, r.log))
 	}
+	out = append(out, cmdb.Tools(r.cmdb)...)
 	out = r.appendSafeSkillTools(out)
 
 	threshold := envIntDefault("ONGRID_TOOLBAG_DEFERRAL_THRESHOLD", defaultDeferralThreshold)

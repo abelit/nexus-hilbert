@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw-server';
+import { useAuth } from '@/store/auth';
 import { selectOption } from '@/test/select-option';
 import { AttributeForm } from './AttributeForm';
 
@@ -19,10 +20,37 @@ function renderForm(attribute: Parameters<typeof AttributeForm>[0]['attribute'] 
 }
 
 beforeEach(() => {
+  // CI auto-detects en-US; this suite asserts the Chinese labels.
+  localStorage.setItem('ongrid-locale', 'zh-CN');
   server.use(http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: models, total: models.length })));
 });
 
 describe('the full attribute editor', () => {
+  it('seeds the form from an AI attribute suggestion', async () => {
+    useAuth.setState({ token: null, role: 'admin' });
+    const user = userEvent.setup();
+    server.use(
+      http.post('/api/v1/aiops/cmdb/form-assist', () =>
+        HttpResponse.json({
+          kind: 'attribute',
+          attributes: [{ name: 'room', alias: '机房', value_type: '2', choice_values: ['A', 'B'] }],
+        }),
+      ),
+    );
+    renderForm();
+
+    await user.click(screen.getByRole('button', { name: 'AI 生成属性' }));
+    await user.type(screen.getByLabelText('描述你要填写的内容'), '增加机房属性');
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    await screen.findByText('机房');
+    await user.click(screen.getByRole('button', { name: '接受选中' }));
+
+    expect(screen.getByLabelText('属性名')).toHaveValue('room');
+    expect(screen.getByLabelText('别名')).toHaveValue('机房');
+    // The form is filled, not saved.
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
+  });
+
   it('creates flags, static choices, validation and presentation options', async () => {
     const user = userEvent.setup();
     let posted: Record<string, unknown> | null = null;

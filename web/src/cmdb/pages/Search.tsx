@@ -11,6 +11,7 @@ import {
   Loader2,
   RefreshCw,
   Search as SearchIcon,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -23,6 +24,9 @@ import { Label } from '@/components/ui/Label';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PaginationFooter } from '@/components/ui/PaginationFooter';
 import { useDialogs } from '@/components/ui/useDialogs';
+import { openAssistant } from '@/lib/assistantIntent';
+
+import { explainCIsPrompt } from '../lib/aiPrompts';
 import { Modal } from '@/components/Modal';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
@@ -55,6 +59,7 @@ import { QueryBar, type QueryAttribute } from '../components/QueryBar';
 import { SearchInstanceDrawer } from '../components/SearchInstanceDrawer';
 import { useToast } from '../components/Toast';
 import type { ExportColumn } from '../lib/export';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { displayValue, isValueTypeCode } from '../lib/valuetype';
 
 // 资源搜索 — a keyword-first search over every readable model.
@@ -131,7 +136,7 @@ function optionTypes(option: SearchOption, models: CIType[]): string[] {
 }
 
 export default function SearchPage() {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const navigate = useNavigate();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
@@ -167,6 +172,17 @@ export default function SearchPage() {
   const [saveName, setSaveName] = useState('');
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useCMDBAssistantFacts({
+    types: selectedTypes.join(','),
+    keyword,
+    expression,
+    page: page + 1,
+    num_found: result?.numfound,
+    searched,
+    open_ci_id: detail?.ciID,
+    open_ci_name: detail?.title,
+  });
   const requestSeq = useRef(0);
   const lastQuery = useRef('');
   const booted = useRef(false);
@@ -696,7 +712,12 @@ export default function SearchPage() {
 
             {advancedOpen && (
               <div className="rounded-lg border border-border/60 bg-card/40 p-2.5">
-                <QueryBar attributes={attributes} value={expression} onChange={setExpression} />
+                <QueryBar
+                  attributes={attributes}
+                  value={expression}
+                  onChange={setExpression}
+                  aiContext={{ models: selectedTypes.join(','), keyword }}
+                />
               </div>
             )}
           </div>
@@ -783,6 +804,24 @@ export default function SearchPage() {
                 }
                 actions={(row) => (
                   <span className="flex items-center gap-1">
+                    <Button
+                      variant="plain"
+                      size="sm"
+                      type="button"
+                      onClick={() =>
+                        openAssistant({
+                          prompt: explainCIsPrompt(
+                            [row._id],
+                            row.ci_type_alias || row.ci_type || '',
+                            locale,
+                          ),
+                        })
+                      }
+                      aria-label={tr(`AI 解读资源 ${row._id}`, `AI explain resource ${row._id}`)}
+                      title={tr('AI 解读', 'AI explain')}
+                    >
+                      <Sparkles size={13} aria-hidden="true" />
+                    </Button>
                     <Button
                       variant="plain"
                       size="sm"

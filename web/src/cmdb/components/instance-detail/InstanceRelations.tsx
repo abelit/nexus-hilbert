@@ -128,6 +128,7 @@ function RelationTable({
   tr,
   onAdd,
   onPeek,
+  readOnly = false,
 }: {
   group: Group;
   attributes: TypeAttribute[];
@@ -135,6 +136,7 @@ function RelationTable({
   tr: (zh: string, en: string) => string;
   onAdd(group: Group): void;
   onPeek(group: Group, row: SearchRow, tab: 'overview' | 'topology'): void;
+  readOnly?: boolean;
 }) {
   // Search rows are flat; the shared label resolver reads `values`.
   const labelRows = useMemo(
@@ -212,17 +214,19 @@ function RelationTable({
         <h4 className="text-xs font-semibold text-text">{typeLabel}</h4>
         <Chip dense>{String(group.rows.length)}</Chip>
         <span className="text-[10px] text-text-faint">{relationTypeLabel(tr, group.related)}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          type="button"
-          onClick={() => onAdd(group)}
-          aria-label={tr(`添加${typeLabel}关联`, `Add ${typeLabel} relation`)}
-          className="ml-auto inline-flex items-center gap-1 text-[11px]"
-        >
-          <Plus size={12} aria-hidden="true" />
-          {tr('添加', 'Add')}
-        </Button>
+        {!readOnly && (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() => onAdd(group)}
+            aria-label={tr(`添加${typeLabel}关联`, `Add ${typeLabel} relation`)}
+            className="ml-auto inline-flex items-center gap-1 text-[11px]"
+          >
+            <Plus size={12} aria-hidden="true" />
+            {tr('添加', 'Add')}
+          </Button>
+        )}
       </div>
       <div className="cmdb-relation-table overflow-hidden rounded-lg border border-border bg-bg/30">
         <DataTable
@@ -279,10 +283,13 @@ export function InstanceRelations({
   ciID,
   modelRef,
   models,
+  readOnly = false,
 }: {
   ciID: number;
   modelRef: string;
   models: CIType[];
+  /** Hides every "add relation" affordance for a read-only peek. */
+  readOnly?: boolean;
 }) {
   const { tr } = useI18n();
   const toast = useToast();
@@ -494,7 +501,9 @@ export function InstanceRelations({
             {shownGroups.length === 0 ? (
               <div className="flex min-h-28 flex-col items-center justify-center gap-1 text-center text-xs text-text-faint">
                 <GitBranch size={18} aria-hidden="true" />
-                {tr('暂无关联实例；选择左侧类型即可添加。', 'No related instances; choose a type on the left to add one.')}
+                {readOnly
+                  ? tr('暂无关联实例', 'No related instances')
+                  : tr('暂无关联实例；选择左侧类型即可添加。', 'No related instances; choose a type on the left to add one.')}
               </div>
             ) : (
               <div className="flex flex-col gap-4">
@@ -507,6 +516,7 @@ export function InstanceRelations({
                     tr={tr}
                     onAdd={setAddGroup}
                     onPeek={(nextGroup, row, tab) => setPeek({ group: nextGroup, row, tab })}
+                    readOnly={readOnly}
                   />
                 ))}
               </div>
@@ -515,7 +525,7 @@ export function InstanceRelations({
         </div>
       )}
 
-      {addGroup && (
+      {!readOnly && addGroup && (
         <RelationAddDialog
           open
           currentCIID={ciID}
@@ -541,7 +551,8 @@ export function InstanceRelations({
           instanceID={peek.row._id}
           initialTab={peek.tab}
           onClose={() => setPeek(null)}
-          onInstanceSaved={() => void load()}
+          readOnly={readOnly}
+          onInstanceSaved={readOnly ? undefined : () => void load()}
         />
       )}
     </section>

@@ -494,3 +494,36 @@ describe('the history tab rollback entry', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe('read-only peek', () => {
+  it('hides every edit affordance when readOnly is set', async () => {
+    mocks();
+    render(
+      <ToastProvider>
+        <InstanceDetailDrawer
+          model={host}
+          models={[host, switchModel]}
+          attributes={hostAttributes}
+          groups={[]}
+          instanceID={5}
+          initialTab="overview"
+          onClose={() => undefined}
+          readOnly
+        />
+      </ToastProvider>,
+    );
+
+    const drawer = await screen.findByRole('dialog');
+    await waitFor(() => expect(within(drawer).getAllByText('web-01').length).toBeGreaterThan(0));
+    expect(within(drawer).queryByRole('button', { name: /^编辑/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps inline editing when readOnly is omitted', async () => {
+    mocks();
+    renderDrawer(vi.fn(), 'overview');
+
+    const drawer = await screen.findByRole('dialog');
+    await waitFor(() => expect(within(drawer).getAllByText('web-01').length).toBeGreaterThan(0));
+    expect(within(drawer).getAllByRole('button', { name: /^编辑/ }).length).toBeGreaterThan(0);
+  });
+});

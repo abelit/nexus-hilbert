@@ -120,6 +120,9 @@ services:
       # tools get redacted schemas (LLM must call ToolSearch to expand).
       # Default 30 is fine until marketplace grows the bag past it.
       ONGRID_TOOLBAG_DEFERRAL_THRESHOLD: ${ONGRID_TOOLBAG_DEFERRAL_THRESHOLD:-30}
+      # Read-only CMDB tools for the assistant (ADR-037). An explicitly empty
+      # value disables them; unset uses the compose-network service root.
+      ONGRID_CMDB_API_URL: ${ONGRID_CMDB_API_URL-http://ongrid-cmdb:8082}
       # Knowledge base / RAG: qdrant vector store + embedding provider.
       # ONGRID_QDRANT_URL is the qdrant HTTP endpoint (in-cluster, no
       # external port). ONGRID_EMBEDDING_PROVIDER picks the embedding

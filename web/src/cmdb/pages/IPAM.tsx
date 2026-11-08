@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -52,6 +53,12 @@ function IPAMShell() {
     subnetTypeID,
   } = useIPAM();
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  useCMDBAssistantFacts({
+    tab,
+    selected_node_id: selectedID,
+    selected_is_subnet: selectedIsSubnet,
+    dialog: dialog?.kind,
+  });
 
   const openCreate = (kind: 'scope' | 'subnet', parent: IPAMNode | null) => {
     // A group cannot sit inside a range: the range already names the space.

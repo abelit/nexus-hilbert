@@ -38,6 +38,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	skillcore "github.com/ongridio/ongrid/internal/skill"
@@ -177,6 +178,9 @@ func classifyToolClass(info *aiopstoolsbase.ToolInfo) skillcore.Class {
 // ...). Best-effort string sniffing; unknowns get "agent" so they
 // group on /skills under one chip.
 func classifyToolCategory(name string) string {
+	if strings.HasPrefix(name, "cmdb_") {
+		return "cmdb"
+	}
 	switch name {
 	case "host_bash":
 		return "shell"

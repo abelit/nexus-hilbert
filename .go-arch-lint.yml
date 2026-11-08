@@ -39,6 +39,7 @@ components:
   cmdb_biz:    { in: internal/cmdb/biz/** }
   cmdb_data:   { in: internal/cmdb/data/** }
   cmdb_model:  { in: internal/cmdb/model/** }
+  cmdb_proto:  { in: internal/cmdb/proto/** }
 
   observability_preview: { in: scripts/agent-observability/** }
   test_harness: { in: tests/** }
@@ -125,6 +126,10 @@ deps:
     mayDependOn: [cmdb_data, cmdb_biz, cmdb_model, shared_pkg]
   cmdb_model:
     mayDependOn: [cmdb_model, shared_pkg]
+  # Generated protobuf/grpc code; it has no project imports, only vendor.
+  cmdb_proto:
+    mayDependOn: [cmdb_proto]
+    anyVendorDeps: true
 
   # ---------------- 共享 ----------------
   shared_pkg:

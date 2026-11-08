@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   DndContext,
@@ -146,6 +147,14 @@ export default function TreeViewsPage() {
   const [viewsErr, setViewsErr] = useState<string | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
   const [tableErr, setTableErr] = useState<string | null>(null);
+  useCMDBAssistantFacts({
+    type_id: typeId,
+    view_id: activeID,
+    path: path.join(' / '),
+    page: page + 1,
+    total,
+    search,
+  });
   const [retryKey, setRetryKey] = useState(0);
   const [attributes, setAttributes] = useState<TypeAttribute[]>([]);
   const [groups, setGroups] = useState<AttributeGroup[]>([]);

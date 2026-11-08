@@ -26,6 +26,7 @@ import { Button, Chip } from '@/components/ui';
 import { executeOperationAction, getOperation, type Operation } from '@/api/operations';
 import { getPacketCaptureSession } from '@/api/packetCaptures';
 import { Modal } from '@/components/Modal';
+import { RelationGraphCard, parseRelationGraph } from '@/cmdb';
 
 export type ConfigDraftResult = {
   kind: 'config_draft';
@@ -257,6 +258,10 @@ function ToolCallSummaryBlock({
     return <OperationCard operation={operation} />;
   }
   const configDraft = !isError ? asConfigDraft(call.result) : null;
+  if (call.name === 'cmdb_relation_graph' && !isError) {
+    const graph = parseRelationGraph(call.result);
+    if (graph) return <RelationGraphCard graph={graph} />;
+  }
   return (
     <div
       className={cn(

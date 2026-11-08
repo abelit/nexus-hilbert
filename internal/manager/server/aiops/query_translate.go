@@ -97,6 +97,19 @@ var dialectGuide = map[string]string{
 "主机 3 的 CPU 使用率" → 100 - (avg by(device_id) (rate(node_cpu_seconds_total{mode="idle",device_id="3"}[5m])) * 100)
 "内存使用率最高的 5 台" → topk(5, host_mem_pct)
 "磁盘使用率超过 80% 的设备" → host_disk_used_pct > 80`,
+
+	"cmdb": `CMDB 查询语言（不是 Lucene，也不是 SQL）。规则：
+- 相等：attr:value；成员：attr:(v1;v2)（分号，不是逗号）
+- 区间：attr:[from _TO_ to]；比较：attr:>5、>=、<、<=
+- 有值：attr:*；值内通配：web*；取反：~term
+- 连接："," 是 AND；以 "-" 开头的 token 是 OR（不是取反）；"-~" 是 OR-NOT
+- 值里的逗号用 "\\," 转义；值里不能出现 ( ) ; [ ]
+- 属性名必须来自上下文给出的模型属性（name 或 alias），严禁编造
+示例：
+"生产环境的主机" → env:生产
+"CPU 大于 8 核且内存 >= 32" → cpu:>8,memory:>=32
+"北京或上海的资源" → site:北京-site:上海
+"没有负责人的实例" → ~owner:*`,
 }
 
 func (h *Handler) queryTranslate(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +131,7 @@ func (h *Handler) queryTranslate(w http.ResponseWriter, r *http.Request) {
 	dialect := strings.TrimSpace(strings.ToLower(req.Dialect))
 	guide, ok := dialectGuide[dialect]
 	if !ok {
-		writeErr(w, fmt.Errorf("%w: unsupported dialect %q (want logql|traceql|promql)", errs.ErrInvalid, req.Dialect))
+		writeErr(w, fmt.Errorf("%w: unsupported dialect %q (want logql|traceql|promql|cmdb)", errs.ErrInvalid, req.Dialect))
 		return
 	}
 	prompt := strings.TrimSpace(req.Prompt)

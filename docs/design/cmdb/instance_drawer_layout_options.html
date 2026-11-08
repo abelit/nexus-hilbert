@@ -1,0 +1,1291 @@
+<meta charset="utf-8">
+<title>实例抽屉布局方案</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/*
+ * Layout: workbar -> [brief | console stage]. The stage is a mock of the CMDB
+ * page with the instance drawer open on the right; switching a tab swaps only
+ * the drawer's internal layout.
+ * Palette: taken from web/src/styles/index.css (zinc-purple neutrals, indigo
+ * primary), so the options read as the product rather than a separate mock.
+ * Type: Inter for UI, ui-monospace for IDs.
+ */
+:root {
+  --font-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --bg: 244 245 248;
+  --card: 255 255 255;
+  --field: 255 255 255;
+  --border: 209 213 219;
+  --border-soft: 226 232 240;
+  --text: 17 24 39;
+  --text-muted: 71 85 105;
+  --text-faint: 100 116 139;
+  --accent: 109 87 217;
+  --primary: 79 70 229;
+  --primary-hover: 99 102 241;
+  --ok: 4 120 87;
+  --warn: 180 83 9;
+  --danger: 185 28 28;
+  --info: 14 116 144;
+  --scrim: 15 23 42;
+  --shadow: 0 18px 45px rgb(15 23 42 / .12);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: 11 11 17;
+    --card: 23 23 32;
+    --field: 16 16 24;
+    --border: 40 40 50;
+    --border-soft: 40 40 50;
+    --text: 244 244 245;
+    --text-muted: 161 161 170;
+    --text-faint: 113 113 122;
+    --accent: 140 109 240;
+    --primary: 79 70 229;
+    --primary-hover: 99 102 241;
+    --ok: 16 185 129;
+    --warn: 245 158 11;
+    --danger: 239 68 68;
+    --info: 48 166 208;
+    --scrim: 0 0 0;
+    --shadow: 0 18px 50px rgb(0 0 0 / .45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: 11 11 17;
+  --card: 23 23 32;
+  --field: 16 16 24;
+  --border: 40 40 50;
+  --border-soft: 40 40 50;
+  --text: 244 244 245;
+  --text-muted: 161 161 170;
+  --text-faint: 113 113 122;
+  --accent: 140 109 240;
+  --primary: 79 70 229;
+  --primary-hover: 99 102 241;
+  --ok: 16 185 129;
+  --warn: 245 158 11;
+  --danger: 239 68 68;
+  --info: 48 166 208;
+  --scrim: 0 0 0;
+  --shadow: 0 18px 50px rgb(0 0 0 / .45);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: rgb(var(--bg)); }
+body {
+  margin: 0;
+  background: rgb(var(--bg));
+  color: rgb(var(--text));
+  font: 12px/1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 40;
+  background: rgb(var(--card));
+}
+h1, h2, h3, p, dl, dd { margin: 0; }
+button { font-family: inherit; }
+.ic {
+  width: 14px; height: 14px; flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+:focus-visible { outline: 2px solid rgb(var(--primary)); outline-offset: 2px; }
+
+/* ---------- top workbar ---------- */
+.workbar {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 30;
+  background: rgb(var(--card) / .94);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgb(var(--border));
+}
+.workbar-in {
+  max-width: 1480px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand-mark {
+  width: 30px; height: 30px; flex: none;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--accent) / .25);
+  background: rgb(var(--accent) / .12);
+  color: rgb(var(--accent));
+  display: grid; place-items: center;
+}
+.brand h1 { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.brand p { font-size: 11px; color: rgb(var(--text-faint)); margin-top: 1px; }
+.tools { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.tool-btn {
+  height: 30px; padding: 0 9px;
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  background: rgb(var(--card));
+  color: rgb(var(--text-muted));
+  font-size: 11px; font-weight: 500;
+  cursor: pointer;
+}
+.tool-btn:hover { background: rgb(var(--text) / .05); color: rgb(var(--text)); }
+
+.tabs-in {
+  max-width: 1480px;
+  margin: 0 auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 9px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  scrollbar-width: none;
+}
+.tabs-in::-webkit-scrollbar { display: none; }
+.tabs {
+  display: flex; gap: 2px;
+  padding: 3px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  background: rgb(var(--text) / .03);
+  flex: none;
+}
+.tab {
+  height: 30px; padding: 0 12px;
+  border: 0; border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--text-muted));
+  font-size: 12px; white-space: nowrap;
+  cursor: pointer;
+}
+.tab:hover { color: rgb(var(--text)); }
+.tab[aria-selected="true"] {
+  background: rgb(var(--card));
+  color: rgb(var(--text));
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .14);
+}
+
+/* ---------- workspace ---------- */
+.workspace {
+  max-width: 1480px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 296px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  padding-block: 18px 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.brief {
+  position: sticky;
+  top: 128px;
+  align-self: start;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--card));
+  padding: 14px;
+}
+.pick-row { display: flex; align-items: center; gap: 8px; }
+.pick-badge {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid rgb(var(--accent) / .3);
+  background: rgb(var(--accent) / .1);
+  color: rgb(var(--accent));
+  font-size: 10px; font-weight: 600;
+  white-space: nowrap;
+}
+.brief h2 { font-size: 14px; font-weight: 600; }
+.tagline { font-size: 11px; color: rgb(var(--text-faint)); margin-top: 4px; }
+.facts { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.facts dt { font-size: 10px; color: rgb(var(--text-faint)); letter-spacing: .03em; margin-bottom: 2px; }
+.facts dd { font-size: 12px; color: rgb(var(--text-muted)); line-height: 1.55; }
+.brief-note { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgb(var(--border)); }
+.brief-note h3 { font-size: 11px; font-weight: 600; margin-bottom: 6px; }
+.brief-note ul { margin: 0; padding-left: 14px; font-size: 11px; line-height: 1.75; color: rgb(var(--text-faint)); }
+.reco {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--border));
+  background: rgb(var(--text) / .025);
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+  line-height: 1.55;
+}
+.reco strong { color: rgb(var(--text)); font-weight: 600; }
+
+.stage { min-width: 0; }
+.app-mock {
+  position: relative;
+  display: flex;
+  height: clamp(600px, 74vh, 820px);
+  border: 1px solid rgb(var(--border));
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgb(var(--bg));
+  box-shadow: var(--shadow);
+}
+.app-rail {
+  width: 52px; flex: none;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 0;
+  background: rgb(var(--card));
+  border-right: 1px solid rgb(var(--border));
+}
+.rail-btn {
+  width: 32px; height: 32px;
+  border: 0; border-radius: 7px;
+  background: transparent;
+  color: rgb(var(--text-faint));
+  display: grid; place-items: center;
+  cursor: pointer;
+}
+.rail-btn:hover { background: rgb(var(--text) / .05); color: rgb(var(--text)); }
+.rail-btn[aria-current="true"] { background: rgb(var(--text) / .07); color: rgb(var(--text)); }
+.app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.page-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding: 16px 16px 12px;
+}
+.page-title h2 { font-size: 14px; font-weight: 600; }
+.page-title p { font-size: 11px; color: rgb(var(--text-faint)); margin-top: 2px; }
+.page-tools { display: flex; align-items: center; gap: 8px; }
+.search-box { position: relative; }
+.search-box input {
+  width: 200px; height: 34px;
+  padding: 0 10px 0 30px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  background: rgb(var(--field));
+  color: rgb(var(--text));
+  font: 12px var(--font-ui);
+}
+.search-box .ic {
+  position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  width: 13px; height: 13px; color: rgb(var(--text-faint)); pointer-events: none;
+}
+.table-card {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  margin: 0 16px 16px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--card));
+  overflow: hidden;
+}
+.table-scroll { flex: 1; min-height: 0; overflow: auto; }
+table { width: 100%; min-width: 700px; border-collapse: collapse; }
+th {
+  position: sticky; top: 0; z-index: 1;
+  padding: 8px 12px;
+  background: rgb(var(--card));
+  border-bottom: 1px solid rgb(var(--border));
+  color: rgb(var(--text-faint));
+  font-size: 11px; font-weight: 500; text-align: left;
+  white-space: nowrap;
+}
+td { padding: 9px 12px; border-bottom: 1px solid rgb(var(--border) / .7); color: rgb(var(--text-muted)); }
+td.name { color: rgb(var(--text)); font-weight: 500; }
+tbody tr:hover td { background: rgb(var(--text) / .03); }
+tr[data-selected] td { background: rgb(99 102 241 / .09); }
+tr[data-selected]:hover td { background: rgb(99 102 241 / .13); }
+.status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; white-space: nowrap; }
+.status i { width: 5px; height: 5px; border-radius: 50%; background: rgb(var(--text-faint)); }
+.status[data-tone="ok"] i { background: rgb(var(--ok)); }
+.status[data-tone="warn"] { color: rgb(var(--warn)); }
+.status[data-tone="warn"] i { background: rgb(var(--warn)); }
+.row-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.row-btn {
+  width: 24px; height: 24px;
+  border: 0; border-radius: 5px;
+  background: transparent; color: rgb(var(--text-faint));
+  display: grid; place-items: center; cursor: pointer;
+}
+.row-btn:hover { background: rgb(var(--text) / .06); color: rgb(var(--text)); }
+
+/* ---------- overlay + drawer shell ---------- */
+.scrim {
+  position: absolute; inset: 0; z-index: 2;
+  background: rgb(var(--scrim) / .35);
+  transition: opacity .2s ease;
+}
+.app-mock[data-open="false"] .scrim { opacity: 0; pointer-events: none; }
+.drawer {
+  position: absolute; inset: 0 0 0 auto; z-index: 3;
+  width: min(44rem, 100%);
+  display: flex; flex-direction: column;
+  background: rgb(var(--card));
+  border-left: 1px solid rgb(var(--border));
+  box-shadow: -24px 0 60px rgb(0 0 0 / .18);
+  transition: transform .24s ease;
+  container-type: inline-size;
+}
+.app-mock[data-open="false"] .drawer { transform: translateX(100%); }
+.drawer.v-b { width: min(60rem, 100%); }
+.closed-hint {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 1;
+  display: none;
+  padding: 6px 12px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 999px;
+  background: rgb(var(--card));
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.app-mock[data-open="false"] .closed-hint { display: block; }
+
+.dw-head {
+  flex: none;
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgb(var(--border));
+}
+.dw-head.plain { padding: 16px; }
+.model-icon {
+  width: 34px; height: 34px; flex: none;
+  display: grid; place-items: center;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  background: rgb(var(--text) / .03);
+  color: rgb(var(--text-muted));
+}
+.dw-titles { flex: 1; min-width: 0; }
+.dw-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dw-title-row h2 {
+  font-size: 14px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dw-title { font-size: 14px; font-weight: 600; }
+.dw-sub { font-size: 11px; color: rgb(var(--text-faint)); margin-top: 2px; }
+.tag {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 4px;
+  background: rgb(var(--text) / .03);
+  color: rgb(var(--text-muted));
+  font-size: 10px; font-weight: 500;
+  white-space: nowrap;
+}
+.tag-new {
+  border-color: rgb(var(--info) / .3);
+  background: rgb(var(--info) / .08);
+  color: rgb(var(--info));
+}
+.icon-btn {
+  width: 28px; height: 28px; flex: none;
+  display: grid; place-items: center;
+  border: 0; border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--text-faint));
+  cursor: pointer;
+}
+.icon-btn:hover { background: rgb(var(--text) / .06); color: rgb(var(--text)); }
+.dw-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; }
+.dw-foot {
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid rgb(var(--border));
+}
+.foot-hint {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  color: rgb(var(--text-faint));
+  font-size: 11px;
+}
+.foot-hint .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: rgb(var(--ok)); }
+
+.btn {
+  height: 34px; padding: 0 12px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px; font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn.primary { background: rgb(var(--primary)); border-color: rgb(var(--primary)); color: #fff; }
+.btn.primary:hover { background: rgb(var(--primary-hover)); border-color: rgb(var(--primary-hover)); }
+.btn.ghost { background: rgb(var(--card)); border-color: rgb(var(--border)); color: rgb(var(--text)); }
+.btn.ghost:hover { background: rgb(var(--text) / .05); }
+
+/* ---------- fields ---------- */
+.field { min-width: 0; }
+.field.span-2 { grid-column: 1 / -1; }
+.flabel {
+  display: block;
+  margin-bottom: 4px;
+  color: rgb(var(--text-muted));
+  font-size: 12px;
+  line-height: 1.4;
+}
+.star { color: rgb(var(--danger)); margin-left: 2px; }
+.ctl {
+  width: 100%; height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  background: rgb(var(--field));
+  color: rgb(var(--text));
+  font: 12px/1.4 var(--font-ui);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.ctl:hover { border-color: rgb(var(--text-faint)); }
+.ctl:focus-visible { outline: none; border-color: rgb(var(--primary)); box-shadow: 0 0 0 3px rgb(99 102 241 / .15); }
+.ctl-area { height: auto; min-height: 64px; padding: 8px 10px; resize: vertical; }
+.ctl.mono, .mono { font-family: var(--font-mono); font-size: 11px; }
+.ctl-wrap { position: relative; }
+.ctl-wrap select { appearance: none; padding-right: 28px; cursor: pointer; }
+.sel-chev {
+  position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  width: 12px; height: 12px;
+  color: rgb(var(--text-faint));
+  pointer-events: none;
+}
+.field-ic {
+  position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  width: 13px; height: 13px;
+  color: rgb(var(--text-faint));
+  pointer-events: none;
+}
+.ctl-icon-right { padding-right: 30px; }
+.fhint { margin-top: 4px; color: rgb(var(--text-faint)); font-size: 10px; line-height: 1.4; }
+.star, .fhint { pointer-events: none; }
+
+/* ---------- A: two-column cards ---------- */
+.fcard {
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--card));
+  padding: 12px;
+}
+.a-form .fcard + .fcard { margin-top: 10px; }
+.fcard-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.gicon {
+  width: 22px; height: 22px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 6px;
+  background: rgb(var(--text) / .04);
+  color: rgb(var(--text-muted));
+}
+.gicon .ic { width: 12px; height: 12px; }
+.fcard-head h3 { font-size: 12px; font-weight: 600; }
+.fcount { margin-left: auto; color: rgb(var(--text-faint)); font-size: 10px; white-space: nowrap; }
+.reqcount {
+  padding: 1px 5px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 4px;
+  color: rgb(var(--text-faint));
+  font-size: 10px;
+  white-space: nowrap;
+}
+.fgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+
+/* ---------- B: anchor rail ---------- */
+.v-b .dw-body { display: flex; padding: 0; overflow: hidden; }
+.b-rail {
+  width: 184px; flex: none;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 10px;
+  border-right: 1px solid rgb(var(--border));
+  background: rgb(var(--text) / .015);
+  overflow-y: auto;
+}
+.rail-title {
+  padding: 2px 6px 6px;
+  color: rgb(var(--text-faint));
+  font-size: 10px; font-weight: 500;
+  letter-spacing: .06em;
+}
+.rail-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; height: 30px; padding: 0 8px;
+  border: 0; border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--text-muted));
+  font-size: 12px; text-align: left;
+  cursor: pointer;
+}
+.rail-item:hover { background: rgb(var(--text) / .05); }
+.rail-item[aria-current="true"] {
+  background: rgb(99 102 241 / .12);
+  color: rgb(var(--text));
+  font-weight: 500;
+}
+.rail-item span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-item .n { margin-left: auto; color: rgb(var(--text-faint)); font-size: 10px; }
+.rail-spacer { flex: 1; }
+.rail-progress {
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  background: rgb(var(--card));
+}
+.rail-progress p { color: rgb(var(--text-faint)); font-size: 10px; }
+.rail-progress strong { display: block; margin-top: 2px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.b-form { flex: 1; min-width: 0; overflow-y: auto; padding: 14px 16px; }
+.b-form .fcard + .fcard { margin-top: 10px; }
+
+/* ---------- C: accordion + progress ---------- */
+.progress-card {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--text) / .02);
+}
+.progress-top {
+  display: flex; align-items: baseline; justify-content: space-between;
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+}
+.progress-top strong { color: rgb(var(--text)); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pbar { height: 4px; margin: 8px 0 6px; border-radius: 2px; background: rgb(var(--text) / .08); overflow: hidden; }
+.pbar i { display: block; height: 100%; border-radius: 2px; background: rgb(var(--primary)); }
+.progress-note { color: rgb(var(--text-faint)); font-size: 10px; }
+.acc {
+  margin-bottom: 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--card));
+  overflow: hidden;
+}
+.acc-head {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 9px 10px;
+  border: 0; background: transparent;
+  color: rgb(var(--text));
+  font-size: 12px; text-align: left;
+  cursor: pointer;
+}
+.acc-head:hover { background: rgb(var(--text) / .03); }
+.acc-name { font-weight: 500; }
+.acc-count { margin-left: auto; color: rgb(var(--text-faint)); font-size: 10px; font-variant-numeric: tabular-nums; }
+.chev { color: rgb(var(--text-faint)); transition: transform .18s ease; }
+.acc[data-open="false"] .chev { transform: rotate(-90deg); }
+.acc-body { padding: 0 10px 10px; }
+.acc[data-open="false"] .acc-body { display: none; }
+.cstack { display: flex; flex-direction: column; gap: 10px; }
+
+/* ---------- D: compact single column ---------- */
+.dsection + .dsection { margin-top: 16px; }
+.dsection-head {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px; padding: 6px 0 7px;
+  background: rgb(var(--card));
+  border-bottom: 1px solid rgb(var(--border));
+}
+.dsection-head h3 { font-size: 12px; font-weight: 600; }
+.dstack { display: flex; flex-direction: column; gap: 10px; }
+
+/* ---------- current baseline ---------- */
+.cur-form { display: flex; flex-direction: column; gap: 16px; }
+.cur-section { margin: 0; padding: 0; border: 0; }
+.cur-section legend {
+  display: block;
+  margin-bottom: 8px; padding: 0;
+  color: rgb(var(--text-faint));
+  font-size: 11px; font-weight: 500;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.cur-stack { display: flex; flex-direction: column; gap: 12px; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 940px) {
+  .workspace { grid-template-columns: 1fr; }
+  .stage { order: 1; }
+  .brief { order: 2; position: static; }
+  .app-mock { height: 640px; }
+  .search-box input { width: 150px; }
+}
+@media (max-width: 620px) {
+  .workbar-in { padding-block: 8px; }
+  .brand p { display: none; }
+  .app-rail { display: none; }
+  .page-head { padding: 12px 12px 10px; }
+  .table-card { margin: 0 12px 12px; }
+  .search-box input { width: 132px; }
+  .dw-body { padding: 12px; }
+}
+
+@container (max-width: 760px) {
+  .v-b .dw-body { display: block; overflow-y: auto; padding: 0; }
+  .v-b .b-rail {
+    width: auto;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 8px 10px;
+    border-right: 0;
+    border-bottom: 1px solid rgb(var(--border));
+  }
+  .v-b .rail-title, .v-b .rail-spacer, .v-b .rail-progress, .v-b .rail-item .n { display: none; }
+  .v-b .rail-item { width: auto; flex: none; padding: 0 10px; }
+  .v-b .b-form { padding: 12px; }
+}
+@container (max-width: 560px) {
+  .fgrid { grid-template-columns: 1fr; }
+  .field.span-2 { grid-column: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+
+<svg aria-hidden="true" width="0" height="0" style="position:absolute">
+  <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  <symbol id="i-network" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="6" rx="1.5"/><rect x="2" y="16" width="6" height="6" rx="1.5"/><rect x="16" y="16" width="6" height="6" rx="1.5"/><path d="M12 8v4M5 16v-2a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L20 8a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9 6.3 6.3M17.7 17.7l1.4 1.4M19.1 4.9 17.7 6.3M6.3 17.7l-1.4 1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5Z"/></symbol>
+</svg>
+
+<header class="workbar">
+  <div class="workbar-in">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg class="ic"><use href="#i-layout"/></svg>
+      </span>
+      <div>
+        <h1 data-zh="实例抽屉布局方案" data-en="Instance drawer layouts">实例抽屉布局方案</h1>
+        <p data-zh="Ongrid CMDB · 资源实例新增 / 编辑" data-en="Ongrid CMDB · Create / edit a resource instance">Ongrid CMDB · 资源实例新增 / 编辑</p>
+      </div>
+    </div>
+    <div class="tools">
+      <button class="tool-btn" id="themeBtn" type="button" aria-label="切换主题">
+        <svg class="ic" id="themeIcon"><use href="#i-sun"/></svg>
+        <span id="themeLabel" data-zh="浅色" data-en="Light">浅色</span>
+      </button>
+      <button class="tool-btn" id="langBtn" type="button" aria-label="Switch language">
+        <span id="langLabel">EN</span>
+      </button>
+    </div>
+  </div>
+  <div class="tabs-in">
+    <div class="tabs" role="tablist" aria-label="布局方案">
+      <button class="tab" data-variant="current" role="tab" data-zh="现状" data-en="Current">现状</button>
+      <button class="tab" data-variant="A" role="tab" data-zh="A · 双列卡片" data-en="A · Two-column">A · 双列卡片</button>
+      <button class="tab" data-variant="B" role="tab" data-zh="B · 锚点导航" data-en="B · Anchor rail">B · 锚点导航</button>
+      <button class="tab" data-variant="C" role="tab" data-zh="C · 折叠分区" data-en="C · Accordion">C · 折叠分区</button>
+      <button class="tab" data-variant="D" role="tab" data-zh="D · 紧凑单栏" data-en="D · Compact">D · 紧凑单栏</button>
+    </div>
+  </div>
+</header>
+
+<main class="workspace">
+  <aside class="brief">
+    <div class="pick-row">
+      <span class="pick-badge" id="vBadge">方案 A</span>
+    </div>
+    <h2 id="vName" style="margin-top:8px">双列卡片</h2>
+    <p class="tagline" id="vTagline"></p>
+    <dl class="facts">
+      <div><dt data-zh="布局概念" data-en="Layout">布局概念</dt><dd id="fConcept"></dd></div>
+      <div><dt data-zh="适合" data-en="Best for">适合</dt><dd id="fFit"></dd></div>
+      <div><dt data-zh="取舍" data-en="Trade-off">取舍</dt><dd id="fTradeoff"></dd></div>
+      <div><dt data-zh="改动量" data-en="Effort">改动量</dt><dd id="fEffort"></dd></div>
+    </dl>
+    <div class="brief-note">
+      <h3 data-zh="共同保留" data-en="Kept in every option">共同保留</h3>
+      <ul>
+        <li data-zh="底部固定保存 / 取消，失败保留输入" data-en="Sticky save / cancel; input survives a failure">底部固定保存 / 取消，失败保留输入</li>
+        <li data-zh="Escape 关闭，焦点返回列表" data-en="Escape closes; focus returns to the list">Escape 关闭，焦点返回列表</li>
+        <li data-zh="中英文案走 tr()，窄屏自动单列" data-en="All copy via tr(); one column on narrow screens">中英文案走 tr()，窄屏自动单列</li>
+        <li data-zh="宽度复用 Drawer 的 md / lg / xl 档位" data-en="Widths reuse the Drawer's md / lg / xl sizes">宽度复用 Drawer 的 md / lg / xl 档位</li>
+      </ul>
+    </div>
+    <p class="reco" id="reco"></p>
+  </aside>
+
+  <section class="stage" id="stage" aria-label="CMDB 资源数据与实例抽屉预览"></section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var stage = document.getElementById('stage');
+
+  var state = { variant: 'A', lang: 'zh', open: true };
+
+  function L(zh, en) { return state.lang === 'en' ? en : zh; }
+  function esc(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ---------------- data ---------------- */
+
+  var GROUPS = [
+    { key: 'basic', zh: '基本信息', en: 'Basic information', icon: 'info', fields: [
+      { k: 'hostname', zh: '主机名', en: 'Hostname', type: 'text', required: true, value: 'db-prod-01' },
+      { k: 'uuid', zh: '唯一标识', en: 'Unique ID', type: 'text', required: true, value: '3f8e21c4-…-c21a', mono: true, hintZh: '由 CMDB 自动生成', hintEn: 'Generated by CMDB' },
+      { k: 'status', zh: '状态', en: 'Status', type: 'select', required: true, value: '运行中', options: [
+        { zh: '运行中', en: 'Running' }, { zh: '已停止', en: 'Stopped' }, { zh: '维护中', en: 'Maintenance' }
+      ] },
+      { k: 'env', zh: '环境', en: 'Environment', type: 'select', value: '生产', options: [
+        { zh: '生产', en: 'Production' }, { zh: '预发', en: 'Staging' }, { zh: '测试', en: 'Test' }
+      ] },
+      { k: 'owner', zh: '负责人', en: 'Owner', type: 'ref', value: '张伟' },
+      { k: 'desc', zh: '描述', en: 'Description', type: 'textarea', span: 2, value: '核心交易库主节点，双活部署。' }
+    ] },
+    { key: 'hardware', zh: '硬件配置', en: 'Hardware', icon: 'cpu', fields: [
+      { k: 'cpu', zh: 'CPU 核数', en: 'CPU cores', type: 'number', value: '32' },
+      { k: 'mem', zh: '内存（GB）', en: 'Memory (GB)', type: 'number', value: '128' },
+      { k: 'disk', zh: '磁盘（GB）', en: 'Disk (GB)', type: 'number', value: '2048' },
+      { k: 'model', zh: '设备型号', en: 'Model', type: 'text', value: 'PowerEdge R750' },
+      { k: 'rack', zh: '机架位置', en: 'Rack position', type: 'text', value: 'A-12-03' },
+      { k: 'vendor', zh: '供应商', en: 'Vendor', type: 'text', value: 'Dell' }
+    ] },
+    { key: 'network', zh: '网络', en: 'Network', icon: 'network', fields: [
+      { k: 'mgmt', zh: '管理 IP', en: 'Management IP', type: 'text', value: '10.20.8.11', mono: true },
+      { k: 'svc', zh: '业务 IP', en: 'Service IP', type: 'text', value: '10.20.9.11', mono: true },
+      { k: 'vlan', zh: 'VLAN', en: 'VLAN', type: 'number', value: '220' },
+      { k: 'os', zh: '操作系统', en: 'OS', type: 'text', value: 'Rocky Linux 9.4' }
+    ] },
+    { key: 'other', zh: '其他', en: 'Other', icon: 'more', fields: [
+      { k: 'purchased', zh: '采购日期', en: 'Purchase date', type: 'date', value: '2024-06-18' },
+      { k: 'asset', zh: '资产编号', en: 'Asset number', type: 'text', value: 'IT-2024-0881', mono: true },
+      { k: 'notes', zh: '备注', en: 'Notes', type: 'textarea', span: 2, value: '', rows: 2 }
+    ] }
+  ];
+
+  var ROWS = [
+    { name: 'db-prod-01', st: '运行中', env: '生产', owner: '张伟', at: '2026-11-08 09:42', tone: 'ok', selected: true },
+    { name: 'db-prod-02', st: '运行中', env: '生产', owner: '张伟', at: '2026-11-08 09:38', tone: 'ok' },
+    { name: 'web-prod-03', st: '维护中', env: '生产', owner: '李娜', at: '2026-11-07 22:10', tone: 'warn' },
+    { name: 'cache-prod-01', st: '运行中', env: '生产', owner: '王强', at: '2026-11-07 18:05', tone: 'ok' },
+    { name: 'k8s-node-07', st: '运行中', env: '生产', owner: '陈晨', at: '2026-11-07 16:27', tone: 'ok' },
+    { name: 'test-db-01', st: '已停止', env: '测试', owner: '刘洋', at: '2026-11-06 11:52', tone: 'idle' },
+    { name: 'gw-edge-02', st: '运行中', env: '生产', owner: '赵敏', at: '2026-11-06 09:15', tone: 'ok' },
+    { name: 'backup-01', st: '运行中', env: '预发', owner: '孙磊', at: '2026-11-05 20:44', tone: 'ok' }
+  ];
+
+  function statusText(st) {
+    var map = { '运行中': { zh: '运行中', en: 'Running' }, '已停止': { zh: '已停止', en: 'Stopped' }, '维护中': { zh: '维护中', en: 'Maintenance' } };
+    return L(map[st].zh, map[st].en);
+  }
+  function envText(env) {
+    var map = { '生产': 'Production', '预发': 'Staging', '测试': 'Test' };
+    return state.lang === 'en' ? map[env] : env;
+  }
+
+  /* ---------------- variant copy ---------------- */
+
+  var META = {
+    current: {
+      badgeZh: '基线', badgeEn: 'Baseline',
+      nameZh: '单栏堆叠', nameEn: 'Single column',
+      taglineZh: '当前 44rem 单栏表单', taglineEn: 'The current 44rem single-column form',
+      conceptZh: '分区用 11px 大写小标题分隔，字段自上而下堆叠在 44rem 抽屉中。',
+      conceptEn: 'Sections split by 11px uppercase captions; fields stack vertically in a 44rem drawer.',
+      fitZh: '属性较少的模型，也作为这次调整的对照基线。',
+      fitEn: 'Models with few attributes; the baseline for this comparison.',
+      tradeZh: '属性超过 10 个后滚动很长，分组之间缺少视觉断点。',
+      tradeEn: 'Long scroll past ten attributes; groups have weak visual breaks.',
+      effortZh: '—', effortEn: '—'
+    },
+    A: {
+      badgeZh: '方案 A', badgeEn: 'Option A',
+      nameZh: '双列卡片', nameEn: 'Two-column cards',
+      taglineZh: '字段两列，分区成卡片', taglineEn: 'Two columns, sections as cards',
+      conceptZh: '保持 44rem 抽屉宽度，字段改为两列网格；每个分组变成带图标、属性数量和必填完成度的卡片。',
+      conceptEn: 'Keep the 44rem drawer, switch fields to a two-column grid, and turn each group into a card with an icon, field count and required count.',
+      fitZh: '属性 10–25 个的常规模型；新建与编辑共用同一表单。',
+      fitEn: 'Regular models with 10–25 attributes; one form for create and edit.',
+      tradeZh: '长文本、JSON 和附件跨两列；390px 下自动回落单列。',
+      tradeEn: 'Textareas, JSON and files span both columns; the grid collapses to one column on phones.',
+      effortZh: '中 · 改 InstanceDrawer 的分区结构与网格。',
+      effortEn: 'Medium · rework the sections and grid inside InstanceDrawer.'
+    },
+    B: {
+      badgeZh: '方案 B', badgeEn: 'Option B',
+      nameZh: '锚点导航', nameEn: 'Anchor rail',
+      taglineZh: '左侧分组导航 + 双列表单', taglineEn: 'Section rail plus a two-column form',
+      conceptZh: '抽屉加宽到 60rem，左侧固定分组锚点，点击滚动到对应分区；右侧两列字段。',
+      conceptEn: 'Widen the drawer to 60rem with a fixed section rail on the left that scrolls the form; fields sit in two columns.',
+      fitZh: '属性 25 个以上、分区多的模型，例如主机、云主机和网络设备。',
+      fitEn: 'Models with 25+ attributes and many sections: hosts, cloud instances, network devices.',
+      tradeZh: '占用更多横向空间；窄屏时锚点收成横向胶囊。',
+      tradeEn: 'Uses more width; on narrow screens the rail becomes a horizontal chip row.',
+      effortZh: '较大 · Drawer 增加 xl 档位，并做滚动联动。',
+      effortEn: 'Larger · add an xl size to Drawer and wire scroll tracking.'
+    },
+    C: {
+      badgeZh: '方案 C', badgeEn: 'Option C',
+      nameZh: '折叠分区', nameEn: 'Accordion',
+      taglineZh: '手风琴 + 填写进度', taglineEn: 'Collapsible sections with progress',
+      conceptZh: '单栏分区可折叠，默认展开第一个分组；顶部显示已填和必填进度，未完成的必填分组带提示。',
+      conceptEn: 'Single-column sections collapse; the first opens by default. A progress card shows filled and required counts, and incomplete required groups are flagged.',
+      fitZh: '编辑已有实例、通常只改少数字段；可选属性多的模型。',
+      fitEn: 'Editing an existing instance where only a few fields change; models heavy on optional attributes.',
+      tradeZh: '字段被隐藏，需要展开才能发现；新建时可能连续展开多个分区。',
+      tradeEn: 'Hidden fields require expanding; a create flow may open several sections in a row.',
+      effortZh: '中 · 分区增加折叠状态与进度计算。',
+      effortEn: 'Medium · add collapse state and progress calculation.'
+    },
+    D: {
+      badgeZh: '方案 D', badgeEn: 'Option D',
+      nameZh: '紧凑单栏', nameEn: 'Compact single column',
+      taglineZh: '结构不变，信息更清楚', taglineEn: 'Same structure, clearer grouping',
+      conceptZh: '保留现有单栏结构，只给分区标题加图标和计数，缩小字段间距，分区标题随滚动吸顶。',
+      conceptEn: 'Keep the single column. Add an icon and count to each section header, tighten field spacing, and pin the header while scrolling.',
+      fitZh: '希望先小步改进、不改变交互方式的场景。',
+      fitEn: 'A small step that does not change any interaction.',
+      tradeZh: '纵向滚动仍然长，只是更容易定位。',
+      tradeEn: 'The scroll is still long; it is only easier to locate a group.',
+      effortZh: '小 · 仅调整 InstanceDrawer 的分区标题与间距。',
+      effortEn: 'Small · adjust section headers and spacing in InstanceDrawer.'
+    }
+  };
+
+  /* ---------------- stats ---------------- */
+
+  function filledIn(group) {
+    return group.fields.filter(function (f) { return f.value !== '' && f.value != null; }).length;
+  }
+  function stats() {
+    var total = 0, filled = 0, reqTotal = 0, reqDone = 0;
+    GROUPS.forEach(function (g) {
+      g.fields.forEach(function (f) {
+        total += 1;
+        if (f.value !== '' && f.value != null) filled += 1;
+        if (f.required) { reqTotal += 1; if (f.value !== '' && f.value != null) reqDone += 1; }
+      });
+    });
+    return { total: total, filled: filled, reqTotal: reqTotal, reqDone: reqDone };
+  }
+
+  /* ---------------- field renderers ---------------- */
+
+  function fieldHTML(f) {
+    var id = 'f-' + f.k;
+    var label = '<label class="flabel" for="' + id + '">' + esc(L(f.zh, f.en)) + (f.required ? '<span class="star">*</span>' : '') + '</label>';
+    var ctl = '';
+    if (f.type === 'select') {
+      ctl = '<div class="ctl-wrap"><select class="ctl" id="' + id + '">' +
+        f.options.map(function (o) {
+          return '<option' + (o.zh === f.value ? ' selected' : '') + '>' + esc(L(o.zh, o.en)) + '</option>';
+        }).join('') +
+        '</select><svg class="ic sel-chev"><use href="#i-chevron"/></svg></div>';
+    } else if (f.type === 'textarea') {
+      ctl = '<textarea class="ctl ctl-area" id="' + id + '" rows="' + (f.rows || 3) + '">' + esc(f.value) + '</textarea>';
+    } else if (f.type === 'ref') {
+      ctl = '<div class="ctl-wrap"><input class="ctl ctl-icon-right" id="' + id + '" value="' + esc(f.value) + '">' +
+        '<svg class="ic field-ic"><use href="#i-user"/></svg></div>';
+    } else {
+      ctl = '<input class="ctl' + (f.mono ? ' mono' : '') + '" id="' + id + '" type="' + f.type + '" value="' + esc(f.value) + '">';
+    }
+    return '<div class="field' + (f.span === 2 ? ' span-2' : '') + '">' + label + ctl +
+      (f.hintZh ? '<p class="fhint">' + esc(L(f.hintZh, f.hintEn)) + '</p>' : '') + '</div>';
+  }
+
+  function groupIcon(g) {
+    return '<span class="gicon"><svg class="ic"><use href="#i-' + g.icon + '"/></svg></span>';
+  }
+  function countText(n) { return state.lang === 'en' ? n + ' fields' : n + ' 项'; }
+
+  function headerHTML() {
+    return '<header class="dw-head">' +
+      '<span class="model-icon"><svg class="ic"><use href="#i-server"/></svg></span>' +
+      '<div class="dw-titles">' +
+        '<div class="dw-title-row"><h2>' + L('新实例', 'New instance') + '</h2>' +
+          '<span class="tag">' + L('主机', 'Host') + '</span>' +
+          '<span class="tag tag-new">' + L('新建', 'New') + '</span></div>' +
+        '<p class="dw-sub">' + L('在「主机」下新建一条实例', 'A new instance of “Host”') + '</p>' +
+      '</div>' +
+      '<button class="icon-btn" type="button" data-close aria-label="' + L('关闭', 'Close') + '">' +
+        '<svg class="ic"><use href="#i-x"/></svg></button>' +
+    '</header>';
+  }
+
+  function footerHTML(withHint) {
+    var s = stats();
+    var hint = '';
+    if (withHint) {
+      var text = state.lang === 'en'
+        ? s.filled + '/' + s.total + ' filled · ' + s.reqDone + '/' + s.reqTotal + ' required'
+        : '已填 ' + s.filled + '/' + s.total + ' · 必填 ' + s.reqDone + '/' + s.reqTotal;
+      hint = '<span class="foot-hint"><span class="dot"></span>' + esc(text) + '</span>';
+    }
+    return '<footer class="dw-foot">' + hint +
+      '<button class="btn ghost" type="button">' + L('取消', 'Cancel') + '</button>' +
+      '<button class="btn primary" type="button">' + L('保存', 'Save') + '</button>' +
+    '</footer>';
+  }
+
+  /* ---------------- drawer variants ---------------- */
+
+  function currentDrawer() {
+    return '<header class="dw-head plain">' +
+        '<div class="dw-titles"><div class="dw-title">' + L('新实例', 'New instance') + '</div>' +
+        '<p class="dw-sub">' + L('在「主机」下新建一条实例', 'A new instance of “Host”') + '</p></div>' +
+        '<button class="icon-btn" type="button" data-close aria-label="' + L('关闭', 'Close') + '">' +
+          '<svg class="ic"><use href="#i-x"/></svg></button>' +
+      '</header>' +
+      '<div class="dw-body"><form class="cur-form">' +
+        GROUPS.map(function (g) {
+          return '<fieldset class="cur-section"><legend>' + esc(L(g.zh, g.en)) + '</legend>' +
+            '<div class="cur-stack">' + g.fields.map(fieldHTML).join('') + '</div></fieldset>';
+        }).join('') +
+      '</form></div>' +
+      footerHTML(false);
+  }
+
+  function cardHTML(g) {
+    var req = g.fields.filter(function (f) { return f.required; }).length;
+    return '<section class="fcard">' +
+      '<header class="fcard-head">' + groupIcon(g) +
+        '<h3>' + esc(L(g.zh, g.en)) + '</h3>' +
+        '<span class="fcount">' + countText(g.fields.length) + '</span>' +
+        (req ? '<span class="reqcount">' + L('必填', 'Required') + ' ' + req + '</span>' : '') +
+      '</header>' +
+      '<div class="fgrid">' + g.fields.map(fieldHTML).join('') + '</div>' +
+    '</section>';
+  }
+
+  function twoColumnDrawer() {
+    return headerHTML() +
+      '<div class="dw-body"><form class="a-form">' + GROUPS.map(cardHTML).join('') + '</form></div>' +
+      footerHTML(true);
+  }
+
+  function anchorDrawer() {
+    var s = stats();
+    var pct = Math.round((s.filled / s.total) * 100);
+    return headerHTML() +
+      '<div class="dw-body">' +
+        '<nav class="b-rail" aria-label="' + L('分组', 'Sections') + '">' +
+          '<p class="rail-title">' + L('分组', 'SECTIONS') + '</p>' +
+          GROUPS.map(function (g, i) {
+            return '<button class="rail-item" type="button" data-goto="' + g.key + '"' + (i === 0 ? ' aria-current="true"' : '') + '>' +
+              '<svg class="ic"><use href="#i-' + g.icon + '"/></svg>' +
+              '<span>' + esc(L(g.zh, g.en)) + '</span>' +
+              '<span class="n">' + g.fields.length + '</span>' +
+            '</button>';
+          }).join('') +
+          '<span class="rail-spacer"></span>' +
+          '<div class="rail-progress">' +
+            '<p>' + L('已填', 'Filled') + '</p>' +
+            '<strong>' + s.filled + ' / ' + s.total + '</strong>' +
+          '</div>' +
+        '</nav>' +
+        '<div class="b-form" id="bForm">' +
+          GROUPS.map(function (g) {
+            return '<section class="fcard" id="sec-' + g.key + '">' +
+              '<header class="fcard-head">' + groupIcon(g) +
+                '<h3>' + esc(L(g.zh, g.en)) + '</h3>' +
+                '<span class="fcount">' + countText(g.fields.length) + '</span>' +
+              '</header>' +
+              '<div class="fgrid">' + g.fields.map(fieldHTML).join('') + '</div>' +
+            '</section>';
+          }).join('') +
+        '</div>' +
+      '</div>' +
+      footerHTML(true);
+  }
+
+  function accordionDrawer() {
+    var s = stats();
+    var pct = Math.round((s.filled / s.total) * 100);
+    return headerHTML() +
+      '<div class="dw-body">' +
+        '<div class="progress-card">' +
+          '<div class="progress-top"><span>' + L('填写进度', 'Progress') + '</span>' +
+            '<strong>' + s.filled + ' / ' + s.total + '</strong></div>' +
+          '<div class="pbar"><i style="width:' + pct + '%"></i></div>' +
+          '<p class="progress-note">' + L('必填 ' + s.reqDone + '/' + s.reqTotal + ' 已完成', s.reqDone + '/' + s.reqTotal + ' required complete') + '</p>' +
+        '</div>' +
+        GROUPS.map(function (g, i) {
+          var open = i === 0;
+          return '<section class="acc" data-open="' + open + '">' +
+            '<button class="acc-head" type="button" data-acc aria-expanded="' + open + '">' +
+              groupIcon(g) +
+              '<span class="acc-name">' + esc(L(g.zh, g.en)) + '</span>' +
+              '<span class="acc-count">' + filledIn(g) + '/' + g.fields.length + '</span>' +
+              '<svg class="ic chev"><use href="#i-chevron"/></svg>' +
+            '</button>' +
+            '<div class="acc-body"><div class="cstack">' + g.fields.map(fieldHTML).join('') + '</div></div>' +
+          '</section>';
+        }).join('') +
+      '</div>' +
+      footerHTML(true);
+  }
+
+  function compactDrawer() {
+    return headerHTML() +
+      '<div class="dw-body"><div class="dform">' +
+        GROUPS.map(function (g) {
+          return '<section class="dsection">' +
+            '<header class="dsection-head">' + groupIcon(g) +
+              '<h3>' + esc(L(g.zh, g.en)) + '</h3>' +
+              '<span class="fcount">' + countText(g.fields.length) + '</span>' +
+            '</header>' +
+            '<div class="dstack">' + g.fields.map(fieldHTML).join('') + '</div>' +
+          '</section>';
+        }).join('') +
+      '</div></div>' +
+      footerHTML(true);
+  }
+
+  function drawerHTML() {
+    switch (state.variant) {
+      case 'current': return currentDrawer();
+      case 'B': return anchorDrawer();
+      case 'C': return accordionDrawer();
+      case 'D': return compactDrawer();
+      default: return twoColumnDrawer();
+    }
+  }
+
+  /* ---------------- app mock ---------------- */
+
+  function tableHeadHTML() {
+    return '<tr>' +
+      '<th>' + L('主机名', 'Hostname') + '</th>' +
+      '<th>' + L('状态', 'Status') + '</th>' +
+      '<th>' + L('环境', 'Environment') + '</th>' +
+      '<th>' + L('负责人', 'Owner') + '</th>' +
+      '<th>' + L('更新时间', 'Updated') + '</th>' +
+      '<th aria-label="' + L('操作', 'Actions') + '"></th>' +
+    '</tr>';
+  }
+
+  function tableBodyHTML() {
+    return ROWS.map(function (r) {
+      return '<tr' + (r.selected ? ' data-selected' : '') + '>' +
+        '<td class="name mono" style="font-size:11px">' + esc(r.name) + '</td>' +
+        '<td><span class="status" data-tone="' + r.tone + '"><i></i>' + esc(statusText(r.st)) + '</span></td>' +
+        '<td>' + esc(envText(r.env)) + '</td>' +
+        '<td>' + esc(r.owner) + '</td>' +
+        '<td class="mono" style="font-size:10px">' + esc(r.at) + '</td>' +
+        '<td><div class="row-actions">' +
+          '<button class="row-btn" type="button" aria-label="' + L('查看', 'View') + ' ' + esc(r.name) + '"><svg class="ic"><use href="#i-eye"/></svg></button>' +
+          '<button class="row-btn" type="button" aria-label="' + L('编辑', 'Edit') + ' ' + esc(r.name) + '"><svg class="ic"><use href="#i-pencil"/></svg></button>' +
+          '<button class="row-btn" type="button" aria-label="' + L('删除', 'Delete') + ' ' + esc(r.name) + '"><svg class="ic"><use href="#i-trash"/></svg></button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  function renderStage() {
+    stage.innerHTML =
+      '<div class="app-mock" id="appMock" data-open="' + state.open + '">' +
+        '<nav class="app-rail" aria-label="' + L('主导航', 'Main navigation') + '">' +
+          '<button class="rail-btn" type="button" aria-current="true" aria-label="' + L('资源数据', 'Resources') + '"><svg class="ic"><use href="#i-server"/></svg></button>' +
+          '<button class="rail-btn" type="button" aria-label="' + L('网络拓扑', 'Topology') + '"><svg class="ic"><use href="#i-network"/></svg></button>' +
+          '<button class="rail-btn" type="button" aria-label="' + L('数据源', 'Data sources') + '"><svg class="ic"><use href="#i-database"/></svg></button>' +
+          '<button class="rail-btn" type="button" aria-label="' + L('监控', 'Monitoring') + '"><svg class="ic"><use href="#i-activity"/></svg></button>' +
+          '<button class="rail-btn" type="button" aria-label="' + L('设置', 'Settings') + '"><svg class="ic"><use href="#i-settings"/></svg></button>' +
+        '</nav>' +
+        '<div class="app-main">' +
+          '<div class="page-head">' +
+            '<div class="page-title"><h2>' + L('资源数据', 'Resources') + '</h2>' +
+              '<p>' + L('主机 · 128 条实例', 'Host · 128 instances') + '</p></div>' +
+            '<div class="page-tools">' +
+              '<div class="search-box"><svg class="ic"><use href="#i-search"/></svg>' +
+                '<input type="search" aria-label="' + L('搜索', 'Search') + '" placeholder="' + L('搜索主机名、IP 或标识', 'Search hostname, IP or ID') + '"></div>' +
+              '<button class="btn primary" type="button" id="openDrawer">' +
+                '<svg class="ic"><use href="#i-plus"/></svg>' + L('新建实例', 'New instance') + '</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="table-card"><div class="table-scroll"><table><thead>' + tableHeadHTML() + '</thead><tbody>' + tableBodyHTML() + '</tbody></table></div></div>' +
+        '</div>' +
+        '<div class="scrim" id="scrim"></div>' +
+        '<aside class="drawer v-' + state.variant.toLowerCase() + '" role="dialog" aria-modal="true" aria-label="' + L('实例表单', 'Instance form') + '">' + drawerHTML() + '</aside>' +
+        '<div class="closed-hint">' + L('抽屉已关闭 · 点击「新建实例」重新打开', 'Drawer closed · use “New instance” to reopen') + '</div>' +
+      '</div>';
+
+    var form = document.getElementById('bForm');
+    if (form) wireRail(form);
+  }
+
+  function wireRail(form) {
+    var drawer = form.closest('.drawer');
+    var items = Array.prototype.slice.call(drawer.querySelectorAll('[data-goto]'));
+    var sections = Array.prototype.slice.call(form.querySelectorAll('section[id^="sec-"]'));
+
+    function activate(key) {
+      items.forEach(function (it) {
+        if (it.dataset.goto === key) it.setAttribute('aria-current', 'true');
+        else it.removeAttribute('aria-current');
+      });
+    }
+
+    form.addEventListener('scroll', function () {
+      var top = form.getBoundingClientRect().top + 12;
+      var current = sections[0];
+      sections.forEach(function (s) {
+        if (s.getBoundingClientRect().top <= top) current = s;
+      });
+      if (current) activate(current.id.replace('sec-', ''));
+    }, { passive: true });
+
+    items.forEach(function (it) {
+      it.addEventListener('click', function () {
+        var target = document.getElementById('sec-' + it.dataset.goto);
+        if (!target) return;
+        activate(it.dataset.goto);
+        var top = form.scrollTop + target.getBoundingClientRect().top - form.getBoundingClientRect().top - 2;
+        form.scrollTo({ top: top, behavior: prefersReduced() ? 'auto' : 'smooth' });
+      });
+    });
+  }
+
+  function prefersReduced() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  /* ---------------- brief + tabs ---------------- */
+
+  function renderBrief() {
+    var m = META[state.variant] || META.A;
+    document.getElementById('vBadge').textContent = L(m.badgeZh, m.badgeEn);
+    document.getElementById('vName').textContent = L(m.nameZh, m.nameEn);
+    document.getElementById('vTagline').textContent = L(m.taglineZh, m.taglineEn);
+    document.getElementById('fConcept').textContent = L(m.conceptZh, m.conceptEn);
+    document.getElementById('fFit').textContent = L(m.fitZh, m.fitEn);
+    document.getElementById('fTradeoff').textContent = L(m.tradeZh, m.tradeEn);
+    document.getElementById('fEffort').textContent = L(m.effortZh, m.effortEn);
+    var reco = state.lang === 'en'
+      ? 'Recommendation: start with A for regular models; use B only when a model passes roughly 25 attributes.'
+      : '建议：常规模型先用 A；属性超过 25 个再考虑 B。';
+    document.getElementById('reco').innerHTML = '<strong>' + (state.lang === 'en' ? 'Where it lands: ' : '落地位置：') + '</strong>' +
+      (state.lang === 'en'
+        ? 'InstanceDrawer in web/src/cmdb/pages/Instances.tsx. B also needs an xl size in Drawer.tsx. '
+        : 'web/src/cmdb/pages/Instances.tsx 的 InstanceDrawer；B 还需在 Drawer.tsx 增加 xl 档位。') +
+      '<br>' + esc(reco);
+  }
+
+  function syncTabs() {
+    document.querySelectorAll('.tab').forEach(function (tab) {
+      tab.setAttribute('aria-selected', String(tab.dataset.variant === state.variant));
+      tab.tabIndex = tab.dataset.variant === state.variant ? 0 : -1;
+    });
+  }
+
+  function applyStaticLang() {
+    document.querySelectorAll('[data-zh]').forEach(function (el) {
+      el.textContent = state.lang === 'en' ? el.dataset.en : el.dataset.zh;
+    });
+    document.documentElement.lang = state.lang === 'en' ? 'en' : 'zh-CN';
+    document.getElementById('langLabel').textContent = state.lang === 'en' ? '中' : 'EN';
+  }
+
+  function renderAll() {
+    applyStaticLang();
+    renderBrief();
+    renderStage();
+    syncTabs();
+    syncThemeButton();
+  }
+
+  /* ---------------- theme ---------------- */
+
+  function effectiveTheme() {
+    var explicit = document.documentElement.getAttribute('data-theme');
+    if (explicit) return explicit;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  function syncThemeButton() {
+    var current = effectiveTheme();
+    var goingTo = current === 'dark' ? 'light' : 'dark';
+    document.getElementById('themeIcon').innerHTML = '<use href="#i-' + (goingTo === 'dark' ? 'moon' : 'sun') + '"/>';
+    document.getElementById('themeLabel').textContent = goingTo === 'dark' ? L('深色', 'Dark') : L('浅色', 'Light');
+    document.getElementById('themeBtn').setAttribute('aria-label', goingTo === 'dark' ? L('切换到深色', 'Switch to dark') : L('切换到浅色', 'Switch to light'));
+  }
+
+  /* ---------------- events ---------------- */
+
+  stage.addEventListener('click', function (event) {
+    var target = event.target;
+    if (target.closest('#openDrawer')) {
+      state.open = true;
+      document.getElementById('appMock').setAttribute('data-open', 'true');
+      return;
+    }
+    if (target.closest('[data-close]') || target.id === 'scrim') {
+      state.open = false;
+      document.getElementById('appMock').setAttribute('data-open', 'false');
+      return;
+    }
+    var accHead = target.closest('[data-acc]');
+    if (accHead) {
+      var acc = accHead.closest('.acc');
+      var open = acc.getAttribute('data-open') === 'true';
+      acc.setAttribute('data-open', String(!open));
+      accHead.setAttribute('aria-expanded', String(!open));
+    }
+  });
+
+  document.querySelectorAll('.tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      state.variant = tab.dataset.variant;
+      state.open = true;
+      renderAll();
+    });
+  });
+
+  document.getElementById('themeBtn').addEventListener('click', function () {
+    var next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    syncThemeButton();
+  });
+
+  document.getElementById('langBtn').addEventListener('click', function () {
+    state.lang = state.lang === 'zh' ? 'en' : 'zh';
+    renderAll();
+    syncThemeButton();
+  });
+
+  renderAll();
+  syncThemeButton();
+})();
+</script>

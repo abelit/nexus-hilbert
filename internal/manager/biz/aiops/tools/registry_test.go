@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/cmdb"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
 func TestBuildBaseTools_MinimalDependencies(t *testing.T) {
@@ -271,6 +273,31 @@ func containsName(names []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuildBaseToolsCMDBGatedOnClient(t *testing.T) {
+	reg := NewRegistry(nil, nil, nil, nil, nil, nil, nil, slog.Default())
+	names := toolInfoNames(t, reg.BuildBaseTools().AllTools())
+	if containsName(names, cmdb.ToolNameSearchCI) {
+		t.Fatal("CMDB tools must be absent without a configured client")
+	}
+
+	client := cmdb.New("http://127.0.0.1:1", func(tenantctx.Tenant) (string, error) {
+		return "tok", nil
+	}, nil, nil)
+	reg.SetCMDB(client)
+
+	names = toolInfoNames(t, reg.BuildBaseTools().AllTools())
+	want := []string{
+		cmdb.ToolNameSearchCI, cmdb.ToolNameGetCI, cmdb.ToolNameListCITypes,
+		cmdb.ToolNameGetCIType, cmdb.ToolNameGetCIRelations, cmdb.ToolNameQueryRelationPath,
+		cmdb.ToolNameFindCITypePath, cmdb.ToolNameGetCIHistory, cmdb.ToolNameRelationGraph,
+	}
+	for _, name := range want {
+		if !containsName(names, name) {
+			t.Fatalf("%s missing from %v", name, names)
+		}
+	}
 }
 
 func TestBuildBaseTools_HostObservationsWithoutEdgeService(t *testing.T) {

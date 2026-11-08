@@ -83,6 +83,9 @@ services:
       # tools get redacted schemas (LLM must call ToolSearch to expand).
       # Default 30 is fine until marketplace grows the bag past it.
       ONGRID_TOOLBAG_DEFERRAL_THRESHOLD: ${ONGRID_TOOLBAG_DEFERRAL_THRESHOLD:-30}
+      # Read-only CMDB tools for the assistant (ADR-037). An explicitly empty
+      # value disables them; unset uses the compose-network service root.
+      ONGRID_CMDB_API_URL: ${ONGRID_CMDB_API_URL-http://ongrid-cmdb:8082}
       # ADR-009: cloud-side Prometheus. Manager remote_writes open-set
       # samples here and the aiops query_promql tool reads from it.
       ONGRID_PROM_ENABLED: ${ONGRID_PROM_ENABLED:-true}

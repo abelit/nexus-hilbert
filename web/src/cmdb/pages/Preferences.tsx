@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { useSearchParams } from 'react-router-dom';
 
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -40,6 +41,7 @@ export default function PreferencesPage() {
   // but they belong in the page header like every other page's actions. The
   // panel portals them into this slot instead of duplicating their state here.
   const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
+  useCMDBAssistantFacts({ tab });
 
   // The URL is also the state when the operator uses back/forward or follows a
   // deep link while the page is already mounted.

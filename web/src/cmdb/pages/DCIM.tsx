@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { LayoutGrid, Plus, RefreshCw, Rows3, Search, X } from 'lucide-react';
 
 import { Button } from '@/components/ui';
@@ -78,6 +79,13 @@ function DcimShell() {
   const [selected, setSelected] = useState<ReadonlySet<string | number>>(new Set());
   const [openRackID, setOpenRackID] = useState<number | null>(null);
   const [nodeDialog, setNodeDialog] = useState<NodeDialogState | null>(null);
+  useCMDBAssistantFacts({
+    search,
+    type_filter: typeFilter,
+    page: page + 1,
+    selected: selected.size,
+    open_rack_id: openRackID,
+  });
 
   const roomID = selectedRoomID ? Number(selectedRoomID) : null;
   const openRack = useMemo(

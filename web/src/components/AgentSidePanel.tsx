@@ -10,6 +10,7 @@ import { modelSelectionForCatalog, createSession, deleteSession, getMessages, li
 import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
 import { useAssistantSource, type AssistantPage } from '@/lib/assistantPage';
+import { subscribeAssistantIntent } from '@/lib/assistantIntent';
 import { registerChatTurnController, unregisterChatTurnController, getChatTurnController } from '@/lib/chatTurnRegistry';
 import { useAssistantPosition } from '@/lib/useAssistantPosition';
 import { isImeComposing } from '@/lib/keyboard';
@@ -92,6 +93,14 @@ function FloatingAssistant() {
   useEffect(() => {
     if (isHome) setOpen(false);
   }, [isHome]);
+  // Pages open the panel through this channel (selected rows, attribute
+  // values, form actions). It only prefills; the operator still presses send.
+  useEffect(() => subscribeAssistantIntent((intent) => {
+    setOpen(true);
+    setDraft(intent.prompt);
+    if (intent.snapshot) setAnchor({ snapshot: intent.snapshot, route: location.key });
+    window.requestAnimationFrame(() => input.current?.focus());
+  }), [location.key]);
   useEffect(() => {
     if (open && scroller.current) scroller.current.scrollTop = messages.length ? scroller.current.scrollHeight : 0;
   }, [open, history, messages, status]);

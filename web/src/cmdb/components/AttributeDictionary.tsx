@@ -35,8 +35,10 @@ import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
 
 const PAGE_SIZE = 50;
 
-export function AttributeDictionary({ open, onClose, onChanged }: {
+export function AttributeDictionary({ open, modelRef, onClose, onChanged }: {
   open: boolean;
+  /** The model whose page opened the dictionary; scopes AI duplicate checks. */
+  modelRef?: string;
   onClose(): void;
   onChanged?(): void;
 }) {
@@ -170,6 +172,7 @@ export function AttributeDictionary({ open, onClose, onChanged }: {
         {creating || editing ? (
           <AttributeForm
             attribute={editing}
+            modelRef={modelRef}
             onClose={() => {
               setCreating(false);
               setEditing(null);

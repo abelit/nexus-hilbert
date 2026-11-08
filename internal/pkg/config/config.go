@@ -64,6 +64,15 @@ type Config struct {
 	PacketCapture  PacketCaptureConfig
 	Skills         SkillsConfig
 	FileStorage    CMDBFileStorageConfig
+	CMDB           CMDBConfig
+}
+
+// CMDBConfig holds the manager-side connection to the standalone CMDB
+// service. An empty APIURL disables the assistant's CMDB tools.
+type CMDBConfig struct {
+	// APIURL is the CMDB service root (e.g. http://ongrid-cmdb:8082).
+	// The client appends /api/v1/cmdb. env: ONGRID_CMDB_API_URL.
+	APIURL string
 }
 
 // CMDBFileStorageConfig holds process-level defaults for the standalone CMDB
@@ -532,6 +541,9 @@ func Load() (*Config, error) {
 			FileFetchBaseURL:   getEnv("ONGRID_CMDB_FILE_FETCH_BASE_URL", ""),
 			PreviewInternalURL: getEnv("ONGRID_CMDB_FILE_PREVIEW_INTERNAL_URL", ""),
 			MaxFileSizeMB:      getEnvInt("ONGRID_CMDB_FILE_MAX_MB", 50),
+		},
+		CMDB: CMDBConfig{
+			APIURL: strings.TrimSpace(getEnv("ONGRID_CMDB_API_URL", "")),
 		},
 		PacketCapture: PacketCaptureConfig{
 			RawDir:                      getEnv("ONGRID_PACKET_CAPTURE_RAW_DIR", ""),

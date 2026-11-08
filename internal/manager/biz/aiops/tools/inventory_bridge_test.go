@@ -24,3 +24,11 @@ func TestClassifyToolCategoryGroupsNetworkInventoryToolsIntoNetwork(t *testing.T
 		}
 	}
 }
+
+func TestClassifyToolCategoryGroupsCMDBTools(t *testing.T) {
+	for _, name := range []string{"cmdb_search_ci", "cmdb_get_ci", "cmdb_relation_graph"} {
+		if got := classifyToolCategory(name); got != "cmdb" {
+			t.Fatalf("classifyToolCategory(%q) = %q, want cmdb", name, got)
+		}
+	}
+}

@@ -29,6 +29,7 @@ import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
+import { openAssistant } from '@/lib/assistantIntent';
 import { cn } from '@/lib/cn';
 
 import { describeError } from '../api/http';
@@ -55,12 +56,15 @@ import {
   type ModelGroup,
 } from '../api/preferences';
 import { CMDBIcon } from '../components/CMDBIcon';
+import { AIActionButton } from '../components/AIActionButton';
+import { FormAssistDialog } from '../components/FormAssistDialog';
 import { ColumnVisibilityMenu, DataTable, useColumnVisibility, type Column } from '../components/DataTable';
 import { IconPicker } from '../components/IconPicker';
 import { ModelConfigShell } from '../components/ModelConfigShell';
 import { GroupedSortable, type DragSource, type SortableHandle } from '../components/GroupedSortable';
 import { useModelGroupsSync, useModelTreeRefresh } from '../components/model-tree-context';
 import { useToast } from '../components/Toast';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { groupModels, type ModelGroupSection } from '../lib/model-groups';
 import { groupIDFromSlotKey, mergeGroupMembership, sharedDragPlan } from '../lib/group-drag';
 import { VALUE_TYPE_LABELS, isValueTypeCode } from '../lib/valuetype';
@@ -213,6 +217,16 @@ export default function ModelsPage() {
     () => (groupedView ? visible : visible.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)),
     [groupedView, safePage, visible],
   );
+  useCMDBAssistantFacts({
+    query,
+    status,
+    page: safePage + 1,
+    page_count: pageCount,
+    models_total: models.length,
+    models_visible: visible.length,
+    grouped: groupedView,
+    view,
+  });
   const modelCountLabel = (count: number) =>
     count === 1 ? tr('1 个模型', '1 model') : tr(`${count} 个模型`, `${count} models`);
 
@@ -1184,7 +1198,7 @@ export function ModelForm({
   onClose(): void;
   onSaved(message: string, id: number): Promise<number | void>;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const toast = useToast();
   const creating = row === null;
 
@@ -1202,6 +1216,14 @@ export function ModelForm({
   const [uniqueKey, setUniqueKey] = useState(row?.unique_key ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [assistOpen, setAssistOpen] = useState(false);
+
+  useCMDBAssistantFacts({
+    form_kind: 'model',
+    form_mode: creating ? 'create' : 'edit',
+    model_id: row?.id,
+    model_name: row?.name,
+  });
 
   // The dictionary, for the unique-key picker.
   const [attributes, setAttributes] = useState<Attribute[]>([]);
@@ -1386,6 +1408,30 @@ export function ModelForm({
             {err}
           </div>
         )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <AIActionButton
+            zh="AI 生成模型信息"
+            en="AI suggest model"
+            onClick={() => setAssistOpen(true)}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() =>
+              openAssistant({
+                prompt: tr(
+                  '我在 CMDB 里新建/编辑一个模型，请结合当前页面上下文帮我设计模型名称、别名、标识属性和继承关系；先列出需要确认的信息，不要直接写入数据。',
+                  'I am creating or editing a CMDB model. Use the current page context to help design its name, alias, identifying attribute and parents; list what needs confirming first and do not write data.',
+                ),
+              })
+            }
+            className="inline-flex items-center gap-1.5 text-text-muted"
+          >
+            {tr('问 AI 助手', 'Ask the assistant')}
+          </Button>
+        </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -1620,6 +1666,57 @@ export function ModelForm({
           </fieldset>
         )}
       </form>
+      <FormAssistDialog
+        open={assistOpen}
+        onClose={() => setAssistOpen(false)}
+        mode="model"
+        modelId={row?.id}
+        locale={locale}
+        models={availableModels.map((model) => ({ id: Number(model.id), name: model.name, alias: model.alias }))}
+        onAccept={(suggestion) => {
+          if (suggestion.name) setName(suggestion.name);
+          if (suggestion.alias) setAlias(suggestion.alias);
+          if (suggestion.unique_key) {
+            setUniqueKey(suggestion.unique_key);
+            // A model cannot be created until its identifying attribute exists.
+            // Surface the inline creator prefilled instead of accepting a key
+            // the backend will reject.
+            if (!attributes.some((attribute) => attribute.name === suggestion.unique_key)) {
+              setNewAttr({
+                open: true,
+                name: suggestion.unique_key,
+                alias: suggestion.alias || suggestion.unique_key,
+                type: '2',
+              });
+              toast.info(
+                tr(
+                  '建议的标识属性还不在字典里，请先在下方创建它。',
+                  'The suggested identifying attribute is not in the dictionary yet; create it below first.',
+                ),
+              );
+            }
+          }
+          if (suggestion.default_order_attr) {
+            // A create form only knows the identifying attribute; an edit form
+            // knows the model's bound attributes. Anything else would be sent
+            // to the backend as a sort key the model does not have.
+            const candidates = creating
+              ? [suggestion.unique_key ?? uniqueKey]
+              : ownAttributes.map((attribute) => attribute.name);
+            if (candidates.includes(suggestion.default_order_attr)) {
+              setDefaultOrderAttr(suggestion.default_order_attr);
+            } else {
+              toast.info(
+                tr(
+                  `默认排序列 ${suggestion.default_order_attr} 还需要先绑定属性。`,
+                  `The suggested sort column ${suggestion.default_order_attr} must be bound first.`,
+                ),
+              );
+            }
+          }
+          if (suggestion.parent_ids) setParentIDs(suggestion.parent_ids);
+        }}
+      />
     </Modal>
   );
 }
