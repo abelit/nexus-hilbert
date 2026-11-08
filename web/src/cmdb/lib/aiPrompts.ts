@@ -72,3 +72,40 @@ export function explainValuePrompt(text: string, context?: string): string {
     body,
   ].filter(Boolean).join('\n');
 }
+
+function clip(text: string): string {
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+}
+
+export function explainRelationTypePrompt(name: string, color: string, locale: string): string {
+  return [
+    `请解释 CMDB 关系类型「${clip(name)}」${color ? `（颜色 ${clip(color)}）` : ''}。`,
+    '关系类型是模型关系共用的一套词表，描述“源 CI 类型 → 目标 CI 类型”的语义；它不是实例之间的关系。',
+    '说明它通常表达什么、适合和不适合哪些模型、容易和哪些相近关系混淆，并给出 3 个模型关系的例子。',
+    '不要写入数据；不要编造当前部署中不存在的模型或关系实例。',
+    `用${language(locale)}回答，先给结论，再给例子。`,
+  ].join('\n');
+}
+
+export function explainModelRelationPrompt(
+  relation: {
+    source: string;
+    target: string;
+    relationType: string;
+    constraint: string;
+    mapping: string;
+  },
+  locale: string,
+): string {
+  return [
+    '请解释下面这条 CMDB 模型关系（模型层，不是实例关系）：',
+    `- 源 CI 类型：${clip(relation.source)}`,
+    `- 目标 CI 类型：${clip(relation.target)}`,
+    `- 关系类型：${clip(relation.relationType)}`,
+    `- 关系约束：${clip(relation.constraint)}`,
+    `- 属性关联：${clip(relation.mapping) || '无'}`,
+    '说明它表达的依赖语义、对资源层级树/关系图的影响、创建实例关系时需要注意的约束，以及可能的建模风险。',
+    '如需确认模型是否存在，可以用 cmdb_get_ci_type；不要编造实例或实例关系。',
+    `用${language(locale)}回答，先给结论，再给依据。`,
+  ].join('\n');
+}

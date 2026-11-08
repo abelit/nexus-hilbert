@@ -13,6 +13,7 @@ import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
+import { openAssistant } from '@/lib/assistantIntent';
 import { usePermissions } from '@/store/me';
 import { cn } from '@/lib/cn';
 import { RELATION_CONSTRAINTS, relationConstraintLabel } from '../lib/relation';
@@ -30,9 +31,12 @@ import {
 } from '../api/citype';
 import { listRelationTypes, type RelationType } from '../api/relationtype';
 import { CMDBIcon } from '../components/CMDBIcon';
+import { AIActionButton } from '../components/AIActionButton';
+import { FormAssistDialog } from '../components/FormAssistDialog';
 import { DataTable, type Column } from '../components/DataTable';
 import { useToast } from '../components/Toast';
 import { RelationAttributePairs, type AttributePair } from '../components/RelationAttributePairs';
+import { explainModelRelationPrompt } from '../lib/aiPrompts';
 import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 
 // 模型关系 — every parent → child pair in the estate, in one table.
@@ -47,7 +51,7 @@ import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 
 
 export default function ModelRelationsPage() {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const { isAdmin } = usePermissions();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
@@ -58,6 +62,7 @@ export default function ModelRelationsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createAssist, setCreateAssist] = useState(false);
   const [models, setModels] = useState<CIType[]>([]);
   const [relationTypes, setRelationTypes] = useState<RelationType[]>([]);
   const [formLoading, setFormLoading] = useState(false);
@@ -117,15 +122,40 @@ export default function ModelRelationsPage() {
     }
   };
 
+  const loadFormLookups = async () => {
+    const [gotModels, gotTypes] = await Promise.all([listCITypes(), listRelationTypes()]);
+    setModels(gotModels);
+    setRelationTypes(gotTypes);
+    return { models: gotModels, relationTypes: gotTypes };
+  };
+
   const openCreate = async () => {
     setFormLoading(true);
     try {
-      const [gotModels, gotTypes] = await Promise.all([listCITypes(), listRelationTypes()]);
-      setModels(gotModels);
-      setRelationTypes(gotTypes);
+      await loadFormLookups();
+      setCreateAssist(false);
       setCreating(true);
     } catch (error) {
       toast.error(describeError(error, tr('无法打开新建关系', 'Could not open the relation form')));
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const openAssist = async () => {
+    setFormLoading(true);
+    try {
+      const lookups = await loadFormLookups();
+      // A model relation needs a relation type; without one the AI would only
+      // return an error after a round trip.
+      if (lookups.relationTypes.length === 0) {
+        toast.info(tr('请先创建至少一个关系类型，再让 AI 建议模型关系。', 'Create at least one relation type before asking AI for a model relation.'));
+        return;
+      }
+      setCreateAssist(true);
+      setCreating(true);
+    } catch (error) {
+      toast.error(describeError(error, tr('无法打开 AI 建议', 'Could not open the AI suggestion')));
     } finally {
       setFormLoading(false);
     }
@@ -228,6 +258,12 @@ export default function ModelRelationsPage() {
         )}
         actions={
           <div className="flex items-center gap-2">
+            <AIActionButton
+              zh="AI 建议关系"
+              en="AI suggest relation"
+              onClick={() => void openAssist()}
+              disabled={!isAdmin || formLoading}
+            />
             <Hint content={adminTip}>
               <Button
                 variant="primary"
@@ -288,7 +324,27 @@ export default function ModelRelationsPage() {
                 : tr('没有匹配的关系', 'No relation matches that')
             }
             actions={(row) => (
-              <Hint content={adminTip}>
+              <>
+                <AIActionButton
+                  iconOnly
+                  zh="AI 解读模型关系"
+                  en="AI explain model relation"
+                  onClick={() =>
+                    openAssistant({
+                      prompt: explainModelRelationPrompt(
+                        {
+                          source: `${row.parent.type.alias || row.parent.type.name} (${row.parent.type.name})`,
+                          target: `${row.child.type.alias || row.child.type.name} (${row.child.type.name})`,
+                          relationType: row.child.relation_type.name || String(row.child.relation_type.id ?? ''),
+                          constraint: relationConstraintLabel(row.child.constraint, tr),
+                          mapping: mappingText(row).text,
+                        },
+                        locale,
+                      ),
+                    })
+                  }
+                />
+                <Hint content={adminTip}>
                 <Button
                   variant="plain"
                   size="sm"
@@ -302,6 +358,7 @@ export default function ModelRelationsPage() {
                   <Trash2 size={13} aria-hidden="true" />
                 </Button>
               </Hint>
+              </>
             )}
           />
           </div>
@@ -312,9 +369,14 @@ export default function ModelRelationsPage() {
         <RelationFormModal
           models={models}
           relationTypes={relationTypes}
-          onClose={() => setCreating(false)}
+          initialAssist={createAssist}
+          onClose={() => {
+            setCreating(false);
+            setCreateAssist(false);
+          }}
           onSaved={async (message) => {
             setCreating(false);
+            setCreateAssist(false);
             toast.success(message);
             await load(true);
           }}
@@ -329,15 +391,18 @@ export default function ModelRelationsPage() {
 function RelationFormModal({
   models,
   relationTypes,
+  initialAssist = false,
   onClose,
   onSaved,
 }: {
   models: CIType[];
   relationTypes: RelationType[];
+  initialAssist?: boolean;
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
+  const { isAdmin } = usePermissions();
   const [sourceID, setSourceID] = useState('');
   const [targetID, setTargetID] = useState('');
   const [typeID, setTypeID] = useState('');
@@ -348,6 +413,14 @@ function RelationFormModal({
   const [attributesLoading, setAttributesLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [assistOpen, setAssistOpen] = useState(initialAssist);
+
+  useCMDBAssistantFacts({
+    form_kind: 'model_relation',
+    form_mode: 'create',
+    source_model: models.find((model) => String(model.id) === sourceID)?.name,
+    target_model: models.find((model) => String(model.id) === targetID)?.name,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -456,6 +529,33 @@ function RelationFormModal({
           {err}
         </div>
       )}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <AIActionButton
+          zh="AI 建议关系"
+          en="AI suggest relation"
+          onClick={() => setAssistOpen(true)}
+          disabled={!isAdmin}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          type="button"
+          onClick={() =>
+            openAssistant({
+              prompt: tr(
+                '我在 CMDB 里新建一条模型关系（源 CI 类型 → 目标 CI 类型）。请结合当前页面上下文帮我确认关系类型、关系约束和属性关联，并说明对层级树的影响。不要直接写入数据。',
+                'I am creating a CMDB model relation (source CI type → target CI type). Use the current page context to help confirm the relation type, constraint and attribute association, and explain the hierarchy impact. Do not write data.',
+              ),
+            })
+          }
+          className="inline-flex items-center gap-1.5 text-text-muted"
+        >
+          {tr('问 AI 助手', 'Ask the assistant')}
+        </Button>
+        {!isAdmin && (
+          <span className="text-[11px] text-text-faint">{tr('AI 生成需要管理员权限', 'AI suggestions require an administrator')}</span>
+        )}
+      </div>
       <p className="mb-4 text-[11px] leading-5 text-text-faint">
         {tr(
           '配置源 CI 类型到目标 CI 类型的关系；完成时点击保存。',
@@ -522,6 +622,33 @@ function RelationFormModal({
           loading={attributesLoading}
         />
       </div>
+      <FormAssistDialog
+        open={assistOpen}
+        onClose={() => setAssistOpen(false)}
+        mode="model_relation"
+        locale={locale}
+        models={models.map((model) => ({ id: Number(model.id), name: model.name, alias: model.alias }))}
+        relationTypes={relationTypes.map((type) => ({ id: type.id, name: type.name }))}
+        sourceModelRef={sourceID || undefined}
+        targetModelRef={targetID || undefined}
+        onAccept={(suggested) => {
+          setSourceID(String(suggested.source_model_id));
+          setTargetID(String(suggested.target_model_id));
+          setTypeID(String(suggested.relation_type_id));
+          // Use the setter, not chooseConstraint: that handler clears mappings,
+          // and these mappings are exactly what the suggestion just resolved.
+          setConstraint(suggested.constraint);
+          const count = Math.min(suggested.parent_attr_ids.length, suggested.child_attr_ids.length);
+          setPairs(
+            count > 0
+              ? Array.from({ length: count }, (_, index) => ({
+                  source: String(suggested.parent_attr_ids[index]),
+                  target: String(suggested.child_attr_ids[index]),
+                }))
+              : [{ source: '', target: '' }],
+          );
+        }}
+      />
     </Modal>
   );
 }

@@ -388,6 +388,7 @@ export default function ModelDetailPage() {
         >
           <AttributeForm
             attribute={editingAttribute}
+            modelRef={ref}
             onClose={() => setEditingAttribute(null)}
             onSaved={async (message) => {
               setEditingAttribute(null);
@@ -400,6 +401,7 @@ export default function ModelDetailPage() {
 
       <AttributeDictionary
         open={dictionaryOpen}
+        modelRef={ref}
         onClose={() => setDictionaryOpen(false)}
         onChanged={() => void load(true)}
       />

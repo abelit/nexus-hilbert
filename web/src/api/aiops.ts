@@ -9,7 +9,7 @@ import { request } from './client';
 //     the failure inside the helper popover only (NOT a global toast).
 //   - 6s server-side timeout.
 
-export type QueryDialect = 'logql' | 'traceql' | 'promql';
+export type QueryDialect = 'logql' | 'traceql' | 'promql' | 'cmdb';
 
 export type TranslateQueryResp = {
   query: string;
@@ -68,4 +68,66 @@ export function listMutatingProposals(params?: {
   }
   const qs = q.toString();
   return request<ListMutatingProposalsResponse>('GET', `/aiops/mutating-proposals${qs ? `?${qs}` : ''}`);
+}
+
+// --- CMDB form assist ---------------------------------------------------
+//
+// One read-only LLM call that proposes values for a CMDB form. The backend
+// reads the model schema through the caller's own JWT; the request never
+// carries the schema. The endpoint 503s when the LLM or CMDB client is not
+// configured, so callers hide the entry point in that case.
+
+export type CMDBFormAssistKind =
+  | 'instance'
+  | 'model'
+  | 'attribute'
+  | 'relation_type'
+  | 'model_relation';
+
+export type CMDBFormAssistRequest = {
+  kind: CMDBFormAssistKind;
+  ci_type?: string;
+  ci_id?: number;
+  model_ref?: string;
+  source_model_ref?: string;
+  target_model_ref?: string;
+  intent: string;
+  locale?: string;
+  fields?: string[];
+  values?: Record<string, unknown>;
+  parent_model_ids?: number[];
+};
+
+export type CMDBFormAttributeSuggestion = {
+  name: string;
+  alias: string;
+  value_type: string;
+  is_required?: boolean;
+  choice_values?: string[];
+};
+
+export type CMDBFormAssistResponse = {
+  kind: CMDBFormAssistKind;
+  values?: Record<string, unknown>;
+  attributes?: CMDBFormAttributeSuggestion[];
+  name?: string;
+  alias?: string;
+  color?: string;
+  unique_key?: string;
+  default_order_attr?: string;
+  parent_ids?: number[];
+  source_model_id?: number;
+  target_model_id?: number;
+  relation_type_id?: number;
+  constraint?: string;
+  parent_attr_ids?: number[];
+  child_attr_ids?: number[];
+  explanations?: Record<string, string>;
+  skipped?: string[];
+  warnings?: string[];
+  truncated?: boolean;
+};
+
+export function cmdbFormAssist(body: CMDBFormAssistRequest) {
+  return request<CMDBFormAssistResponse>('POST', '/aiops/cmdb/form-assist', body);
 }

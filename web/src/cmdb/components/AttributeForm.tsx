@@ -10,7 +10,9 @@ import { Radio } from '@/components/ui/Radio';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/i18n/locale';
+import { openAssistant } from '@/lib/assistantIntent';
 import { cn } from '@/lib/cn';
+import { usePermissions } from '@/store/me';
 
 import { describeError } from '../api/http';
 import {
@@ -23,6 +25,9 @@ import {
   type CIType,
 } from '../api/citype';
 import { AttributeControl } from './AttributeControl';
+import { AIActionButton } from './AIActionButton';
+import { FormAssistDialog } from './FormAssistDialog';
+import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { ATTRIBUTE_TYPE_META, type AttributeDisplayType } from '../lib/attribute-type';
 import { VALUE_TYPE_LABELS, isValueTypeCode, toWireValue, type ValueTypeCode } from '../lib/valuetype';
 
@@ -150,16 +155,20 @@ function parseJSONObject(raw: string, label: string): Record<string, unknown> | 
 
 export function AttributeForm({
   attribute,
+  modelRef,
   onClose,
   onSaved,
   onDelete,
 }: {
   attribute: Attribute | null;
+  /** The model whose attributes the suggestion is checked against. */
+  modelRef?: string;
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
   onDelete?(): void;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
+  const { isAdmin } = usePermissions();
   const editing = attribute !== null;
   const [name, setName] = useState(attribute?.name ?? '');
   const [alias, setAlias] = useState(attribute?.alias ?? '');
@@ -182,6 +191,14 @@ export function AttributeForm({
   const [optionText, setOptionText] = useState(() => (attribute?.option ? JSON.stringify(attribute.option, null, 2) : ''));
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [assistOpen, setAssistOpen] = useState(false);
+
+  useCMDBAssistantFacts({
+    form_kind: 'attribute',
+    form_mode: editing ? 'edit' : 'create',
+    attribute_name: attribute?.name,
+    model_ref: modelRef,
+  });
 
   useEffect(() => {
     void listCITypes()
@@ -400,6 +417,34 @@ export function AttributeForm({
           {err}
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <AIActionButton
+          zh="AI 生成属性"
+          en="AI suggest attribute"
+          onClick={() => setAssistOpen(true)}
+          disabled={!isAdmin}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          type="button"
+          onClick={() =>
+            openAssistant({
+              prompt: tr(
+                '我在 CMDB 里新建或编辑属性，请结合当前页面上下文帮我确认属性名、别名、类型和选项设计；先列出需要确认的信息，不要直接写入数据。',
+                'I am creating or editing a CMDB attribute. Use the current page context to help confirm its name, alias, type and choices; list what needs confirming first and do not write data.',
+              ),
+            })
+          }
+          className="inline-flex items-center gap-1.5 text-text-muted"
+        >
+          {tr('问 AI 助手', 'Ask the assistant')}
+        </Button>
+        {!isAdmin && (
+          <span className="text-[11px] text-text-faint">{tr('AI 生成需要管理员权限', 'AI suggestions require an administrator')}</span>
+        )}
+      </div>
 
       <fieldset className={fieldsetClass}>
         <legend className={legendClass}>{tr('基本信息', 'Basics')}</legend>
@@ -741,6 +786,22 @@ export function AttributeForm({
           {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
         </Button>
       </div>
+      <FormAssistDialog
+        open={assistOpen}
+        onClose={() => setAssistOpen(false)}
+        mode="attribute"
+        modelRef={modelRef}
+        locale={locale}
+        onAccept={(suggested) => {
+          setName(suggested.name);
+          setAlias(suggested.alias);
+          if (isValueTypeCode(suggested.value_type)) selectFormType(suggested.value_type);
+          if ((suggested.choice_values?.length ?? 0) > 0) {
+            setChoices(suggested.choice_values!.map((value) => ({ value, label: '', color: '', option: {} })));
+            setChoiceMode('static');
+          }
+        }}
+      />
     </form>
   );
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
+  BookOpen,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -9,6 +10,7 @@ import {
   Folder,
   Layers,
   LayoutGrid,
+  MoreHorizontal,
   Network,
   Pencil,
   Plus,
@@ -23,18 +25,23 @@ import {
 import { Button, EmptyState } from '@/components/ui';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Chip } from '@/components/ui/Chip';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/DropdownMenu';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { PaginationFooter } from '@/components/ui/PaginationFooter';
 import { Select } from '@/components/ui/Select';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Modal } from '@/components/Modal';
+import { NLQueryHelper } from '@/components/NLQueryHelper';
 import { useI18n } from '@/i18n/locale';
 import { openAssistant } from '@/lib/assistantIntent';
 import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
 
 import { AIActionButton } from '../components/AIActionButton';
+import { FormAssistDialog } from '../components/FormAssistDialog';
+import { KnowledgeImportDialog } from '../components/KnowledgeImportDialog';
+import { cmdbKnowledgeItem, type CMDBKnowledgeItem } from '../lib/knowledge-card';
 import { explainCIsPrompt, relationsPrompt } from '../lib/aiPrompts';
 
 import { describeError } from '../api/http';
@@ -295,6 +302,9 @@ export default function InstancesPage() {
     selection_query: [typeRef, search, condition].filter(Boolean).join(' ') || undefined,
   });
   const clearSelection = useCallback(() => setSelected(new Set()), []);
+  const [knowledgeItems, setKnowledgeItems] = useState<CMDBKnowledgeItem[]>([]);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   // BATCH DELETE IS DELIBERATE. The dialog asks the operator to solve an
   // arithmetic expression; the challenge is regenerated on every open so a
   // memorised number cannot stand in for reading the current one.
@@ -359,6 +369,31 @@ export default function InstancesPage() {
     () => models.find((item) => item.name === typeRef || String(item.id) === typeRef),
     [models, typeRef],
   );
+
+  const openKnowledgeImport = useCallback(async () => {
+    if (!model || selected.size === 0) return;
+    const ids = [...selected].map(Number).slice(0, 10);
+    if (selected.size > ids.length) {
+      toast.info(
+        tr(
+          `一次最多导入 ${ids.length} 个实例；已选取前 ${ids.length} 个。`,
+          `At most ${ids.length} instances can be imported at once; using the first ${ids.length}.`,
+        ),
+      );
+    }
+    setKnowledgeLoading(true);
+    try {
+      // Selection can span pages, so the loaded rows are not enough: fetch the
+      // chosen instances so the card reflects what was selected.
+      const instances = await Promise.all(ids.map((id) => getInstance(id)));
+      setKnowledgeItems(instances.map((instance) => cmdbKnowledgeItem({ model, attributes, instance })));
+      setKnowledgeOpen(true);
+    } catch (error) {
+      toast.error(describeError(error, tr('无法读取选中实例', 'Could not load the selected instances')));
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  }, [model, attributes, selected, toast, tr]);
 
   // REFERENCE IDS ARE NOT NAMES. Resolve the visible page's references in one
   // batch per referenced model, and fall back to the stored id if a lookup fails.
@@ -1431,6 +1466,20 @@ export default function InstancesPage() {
                       value={condition}
                       onApply={applyCondition}
                     />
+                    <NLQueryHelper
+                      dialect="cmdb"
+                      context={{
+                        models: models.map((item) => ({ name: item.name, alias: item.alias })),
+                        attributes: attributes
+                          .filter((attribute) => !attribute.is_password && !attribute.is_file && !attribute.is_link && attribute.value_type !== '6')
+                          .map((attribute) => ({
+                            name: attribute.name,
+                            label: attribute.alias || attribute.name,
+                            type: attribute.value_type,
+                          })),
+                      }}
+                      onAccept={(query) => applyCondition(query)}
+                    />
                     {model && (
                       <InstanceFieldsDialog
                         model={model}
@@ -1481,52 +1530,10 @@ export default function InstancesPage() {
                         disabled={loading || exportColumns.length === 0}
                       />
                     )}
-                    {/* The selection bar below is a status line; its action lives
-                        in this toolbar row so it does not become a second row of
-                        controls when something is selected. */}
-                    {selectedCount > 0 && (
-                      <>
-                        <AIActionButton
-                          zh="AI 解读"
-                          en="AI explain"
-                          onClick={() =>
-                            openAssistant({
-                              prompt: explainCIsPrompt([...selected].map(Number), model?.name ?? typeRef, locale),
-                            })
-                          }
-                        />
-                        {selectedCount === 1 && (
-                          <AIActionButton
-                            zh="AI 影响面"
-                            en="AI impact"
-                            onClick={() =>
-                              openAssistant({
-                                prompt: relationsPrompt(Number([...selected][0]), 'both', 2, locale),
-                              })
-                            }
-                          />
-                        )}
-                        <Button
-                          variant="dangerGhost"
-                          size="sm"
-                          type="button"
-                          onClick={openBatchDelete}
-                          className="inline-flex items-center gap-1.5"
-                        >
-                          <Trash2 size={12} aria-hidden="true" />
-                          {tr('批量删除', 'Delete selected')}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          type="button"
-                          onClick={clearSelection}
-                          className="text-text-muted hover:text-text"
-                        >
-                          {tr('清除选择', 'Clear selection')}
-                        </Button>
-                      </>
-                    )}
+                    {/* Selection actions live in the selection status bar
+                        below: five buttons do not fit beside the list controls,
+                        and splitting them across two wrapped rows made the
+                        toolbar and the environment filter fight for space. */}
                   </div>
                 </div>
                 {(search || condition || filtering) && (
@@ -1571,6 +1578,58 @@ export default function InstancesPage() {
                         'Choose “Selected” in Export to export only the checked instances.',
                       )}
                     </span>
+                    <div className="ms-auto flex flex-wrap items-center gap-1.5">
+                      <AIActionButton
+                        zh="AI 解读"
+                        en="AI explain"
+                        onClick={() =>
+                          openAssistant({
+                            prompt: explainCIsPrompt([...selected].map(Number), model?.name ?? typeRef, locale),
+                          })
+                        }
+                      />
+                      {selectedCount === 1 && (
+                        <AIActionButton
+                          zh="AI 影响面"
+                          en="AI impact"
+                          onClick={() =>
+                            openAssistant({
+                              prompt: relationsPrompt(Number([...selected][0]), 'both', 2, locale),
+                            })
+                          }
+                        />
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        onClick={() => void openKnowledgeImport()}
+                        disabled={knowledgeLoading}
+                        className="inline-flex items-center gap-1.5 text-text-muted hover:text-text"
+                      >
+                        <BookOpen size={12} aria-hidden="true" />
+                        {knowledgeLoading ? tr('读取中…', 'Loading…') : tr('导入知识库', 'Import to knowledge')}
+                      </Button>
+                      <Button
+                        variant="dangerGhost"
+                        size="sm"
+                        type="button"
+                        onClick={openBatchDelete}
+                        className="inline-flex items-center gap-1.5"
+                      >
+                        <Trash2 size={12} aria-hidden="true" />
+                        {tr('批量删除', 'Delete selected')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        onClick={clearSelection}
+                        className="text-text-muted hover:text-text"
+                      >
+                        {tr('清除选择', 'Clear selection')}
+                      </Button>
+                    </div>
                   </div>
                 )}
         </div>
@@ -1642,67 +1701,14 @@ export default function InstancesPage() {
                               : tr('还没有实例', 'No instances yet')
                       }
                       actions={(row) => (
-                        <span className="flex items-center gap-1 whitespace-nowrap">
-                          <Button
-                            variant="plain"
-                            size="sm"
-                            type="button"
-                            onClick={() =>
-                              openAssistant({
-                                prompt: explainCIsPrompt([row.ci_id], model?.name ?? typeRef, locale),
-                              })
-                            }
-                            aria-label={tr(`AI 解读实例 ${row.ci_id}`, `AI explain instance ${row.ci_id}`)}
-                            title={tr(`AI 解读实例 ${row.ci_id}`, `AI explain instance ${row.ci_id}`)}
-                            className="cmdb-liquid-action-ai inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-                          >
-                            <Sparkles size={13} aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="plain"
-                            size="sm"
-                            type="button"
-                            onClick={() => setViewing({ id: row.ci_id, tab: 'overview' })}
-                            aria-label={tr(`查看实例 ${row.ci_id}`, `View instance ${row.ci_id}`)}
-                            title={tr(`查看实例 ${row.ci_id}`, `View instance ${row.ci_id}`)}
-                            className="cmdb-liquid-action-view inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-                          >
-                            <Eye size={13} aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="plain"
-                            size="sm"
-                            type="button"
-                            onClick={() => setViewing({ id: row.ci_id, tab: 'topology' })}
-                            aria-label={tr(`实例 ${row.ci_id} 拓扑`, `Topology for instance ${row.ci_id}`)}
-                            title={tr(`实例 ${row.ci_id} 拓扑`, `Topology for instance ${row.ci_id}`)}
-                            className="cmdb-liquid-action-topology inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-                          >
-                            <Network size={13} aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="plain"
-                            size="sm"
-                            type="button"
-                            onClick={() => setEditing({ mode: 'edit', id: row.ci_id })}
-                            aria-label={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
-                            title={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
-                            className="cmdb-liquid-action-edit inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-                          >
-                            <Pencil size={13} aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="plain"
-                            size="sm"
-                            type="button"
-                            onClick={() => void remove(row)}
-                            aria-label={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
-                            title={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
-                            className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-                          >
-                            <Trash2 size={13} aria-hidden="true" />
-                          </Button>
-                        </span>
+                        <InstanceRowActions
+                          ciID={row.ci_id}
+                          modelName={model?.name ?? typeRef}
+                          onView={() => setViewing({ id: row.ci_id, tab: 'overview' })}
+                          onTopology={() => setViewing({ id: row.ci_id, tab: 'topology' })}
+                          onEdit={() => setEditing({ mode: 'edit', id: row.ci_id })}
+                          onDelete={() => void remove(row)}
+                        />
                       )}
                     />
                     )}
@@ -1867,6 +1873,12 @@ export default function InstancesPage() {
         />
       )}
 
+      <KnowledgeImportDialog
+        open={knowledgeOpen}
+        items={knowledgeItems}
+        onClose={() => setKnowledgeOpen(false)}
+      />
+
       <Modal
         open={batchDeleteOpen}
         onClose={closeBatchDelete}
@@ -1992,6 +2004,90 @@ export default function InstancesPage() {
   );
 }
 
+/**
+ * One row's actions, shared by the table and the grid.
+ *
+ * THE COLUMN STAYS NARROW ON PURPOSE. Five icon buttons made the operation
+ * column ~188px and squeezed the information columns; the design language asks
+ * for the overflow menu instead. View and AI stay one click away, while the
+ * view shortcut (topology), edit and the destructive delete live in the menu.
+ */
+function InstanceRowActions({
+  ciID,
+  modelName,
+  onView,
+  onTopology,
+  onEdit,
+  onDelete,
+}: {
+  ciID: number;
+  modelName: string;
+  onView(): void;
+  onTopology(): void;
+  onEdit(): void;
+  onDelete(): void;
+}) {
+  const { tr, locale } = useI18n();
+  const iconClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md p-0';
+  return (
+    <div className="flex items-center gap-1 whitespace-nowrap">
+      <Button
+        variant="plain"
+        size="sm"
+        type="button"
+        onClick={onView}
+        aria-label={tr(`查看实例 ${ciID}`, `View instance ${ciID}`)}
+        title={tr(`查看实例 ${ciID}`, `View instance ${ciID}`)}
+        className={cn(iconClass, 'cmdb-liquid-action-view')}
+      >
+        <Eye size={13} aria-hidden="true" />
+      </Button>
+      <Button
+        variant="plain"
+        size="sm"
+        type="button"
+        onClick={() => openAssistant({ prompt: explainCIsPrompt([ciID], modelName, locale) })}
+        aria-label={tr(`AI 解读实例 ${ciID}`, `AI explain instance ${ciID}`)}
+        title={tr(`AI 解读实例 ${ciID}`, `AI explain instance ${ciID}`)}
+        className={cn(iconClass, 'cmdb-liquid-action-ai')}
+      >
+        <Sparkles size={13} aria-hidden="true" />
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="plain"
+              size="sm"
+              type="button"
+              aria-label={tr(`实例 ${ciID} 的更多操作`, `More actions for instance ${ciID}`)}
+              title={tr(`实例 ${ciID} 的更多操作`, `More actions for instance ${ciID}`)}
+              className={cn(iconClass, 'text-text-faint hover:text-text')}
+            />
+          }
+        >
+          <MoreHorizontal size={14} aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40 p-1">
+          <DropdownMenuItem onClick={onTopology} className="gap-2">
+            <Network size={12} aria-hidden="true" />
+            {tr('拓扑', 'Topology')}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onEdit} className="gap-2">
+            <Pencil size={12} aria-hidden="true" />
+            {tr('编辑', 'Edit')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onDelete} className="gap-2 text-red-600 dark:text-red-300">
+            <Trash2 size={12} aria-hidden="true" />
+            {tr('删除', 'Delete')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 function InstanceCard({
   row,
   columns,
@@ -2019,7 +2115,7 @@ function InstanceCard({
   onDelete(): void;
   onSaveFile(attribute: TypeAttribute, serialized: string): void | Promise<void>;
 }) {
-  const { tr, locale } = useI18n();
+  const { tr } = useI18n();
   const titleAttribute = identityAttribute(columns, model);
   const titleLabel = titleAttribute?.is_reference
     ? referenceText(row.values?.[titleAttribute.name], referenceLabels)
@@ -2107,67 +2203,14 @@ function InstanceCard({
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
         <span className="text-[10px] text-text-faint">#{row.ci_id}</span>
-        <span className="flex items-center gap-1 whitespace-nowrap">
-          <Button
-            variant="plain"
-            size="sm"
-            type="button"
-            onClick={() =>
-              openAssistant({
-                prompt: explainCIsPrompt([row.ci_id], model?.name ?? '', locale),
-              })
-            }
-            aria-label={tr(`AI 解读实例 ${row.ci_id}`, `AI explain instance ${row.ci_id}`)}
-            title={tr(`AI 解读实例 ${row.ci_id}`, `AI explain instance ${row.ci_id}`)}
-            className="cmdb-liquid-action-ai inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-          >
-            <Sparkles size={13} aria-hidden="true" />
-          </Button>
-          <Button
-            variant="plain"
-            size="sm"
-            type="button"
-            onClick={onView}
-            aria-label={tr(`查看实例 ${row.ci_id}`, `View instance ${row.ci_id}`)}
-            title={tr(`查看实例 ${row.ci_id}`, `View instance ${row.ci_id}`)}
-            className="cmdb-liquid-action-view inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-          >
-            <Eye size={13} aria-hidden="true" />
-          </Button>
-          <Button
-            variant="plain"
-            size="sm"
-            type="button"
-            onClick={onTopology}
-            aria-label={tr(`实例 ${row.ci_id} 拓扑`, `Topology for instance ${row.ci_id}`)}
-            title={tr(`实例 ${row.ci_id} 拓扑`, `Topology for instance ${row.ci_id}`)}
-            className="cmdb-liquid-action-topology inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-          >
-            <Network size={13} aria-hidden="true" />
-          </Button>
-          <Button
-            variant="plain"
-            size="sm"
-            type="button"
-            onClick={onEdit}
-            aria-label={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
-            title={tr(`编辑实例 ${row.ci_id}`, `Edit instance ${row.ci_id}`)}
-            className="cmdb-liquid-action-edit inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-          >
-            <Pencil size={13} aria-hidden="true" />
-          </Button>
-          <Button
-            variant="plain"
-            size="sm"
-            type="button"
-            onClick={onDelete}
-            aria-label={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
-            title={tr(`删除实例 ${row.ci_id}`, `Delete instance ${row.ci_id}`)}
-            className="cmdb-liquid-action-danger inline-flex h-7 w-7 items-center justify-center rounded-md p-0"
-          >
-            <Trash2 size={13} aria-hidden="true" />
-          </Button>
-        </span>
+        <InstanceRowActions
+          ciID={row.ci_id}
+          modelName={model?.name ?? ''}
+          onView={onView}
+          onTopology={onTopology}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
       </div>
     </div>
   );
@@ -2195,14 +2238,23 @@ function InstanceDrawer({
   /** Refresh the list behind the drawer after an immediate file write. */
   onFileSaved?(): void;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const creating = instanceID === null;
 
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(!creating);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [assistOpen, setAssistOpen] = useState(false);
   const referenceLabels = useReferenceLabels([{ values }], attributes, models);
+
+  useCMDBAssistantFacts({
+    form_kind: 'instance',
+    form_mode: creating ? 'create' : 'edit',
+    model_id: model.id,
+    model_name: model.name,
+    ci_id: instanceID ?? undefined,
+  });
 
   useEffect(() => {
     if (instanceID === null) return;
@@ -2314,6 +2366,31 @@ function InstanceDrawer({
           {err}
         </div>
       )}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <AIActionButton
+          zh="AI 填写"
+          en="AI fill"
+          onClick={() => setAssistOpen(true)}
+          disabled={loading}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          type="button"
+          onClick={() =>
+            openAssistant({
+              prompt: tr(
+                '我在 CMDB 里新建或编辑实例，请结合当前页面上下文帮我确认必填字段和填写规范；先列出需要确认的信息，不要直接写入数据。',
+                'I am creating or editing a CMDB instance. Use the current page context to help confirm required fields and conventions; list what needs confirming first and do not write data.',
+              ),
+            })
+          }
+          className="inline-flex items-center gap-1.5 text-text-muted"
+        >
+          {tr('问 AI 助手', 'Ask the assistant')}
+        </Button>
+      </div>
 
       {loading ? (
         <p className="py-6 text-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</p>
@@ -2448,6 +2525,27 @@ function InstanceDrawer({
           })}
         </form>
       )}
+
+      <FormAssistDialog
+        open={assistOpen}
+        onClose={() => setAssistOpen(false)}
+        mode="instance"
+        ciType={model.name}
+        ciId={instanceID ?? undefined}
+        locale={locale}
+        fields={attributes
+          // References are excluded on purpose: filling one requires resolving
+          // another instance, and a wrong reference is worse than an empty one.
+          .filter((attribute) => !attribute.is_computed && !attribute.is_password && !attribute.is_file && !attribute.is_link && !attribute.is_reference)
+          .map((attribute) => ({
+            name: attribute.name,
+            label: attribute.alias || attribute.name,
+            current: values[attribute.name],
+            valueType: attribute.value_type,
+            isList: attribute.is_list,
+          }))}
+        onAccept={(suggested) => setValues((current) => ({ ...current, ...suggested }))}
+      />
     </Drawer>
   );
 }

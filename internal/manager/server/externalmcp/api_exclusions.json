@@ -21,6 +21,7 @@
   {"method":"POST","path":"/v1/auth/login","reason":"Authentication, credential disclosure, and approval decisions stay in the trusted console."},
   {"method":"POST","path":"/v1/auth/refresh","reason":"Authentication, credential disclosure, and approval decisions stay in the trusted console."},
   {"method":"POST","path":"/v1/auth/register","reason":"Authentication, credential disclosure, and approval decisions stay in the trusted console."},
+  {"method":"POST","path":"/v1/aiops/cmdb/form-assist","reason":"Browser-only one-shot LLM form suggestion; it fills a console form and is not a stable external API operation."},
   {"method":"POST","path":"/v1/chat/sessions/{id}/attachments","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
   {"method":"GET","path":"/v1/chat/sessions/{id}/attachments/{attachmentID}","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
   {"method":"POST","path":"/v1/chat/sessions/{id}/messages/stream","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},

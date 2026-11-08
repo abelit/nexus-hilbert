@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
+import { openAssistant } from '@/lib/assistantIntent';
 import { usePermissions } from '@/store/me';
 import { cn } from '@/lib/cn';
 
@@ -24,6 +25,9 @@ import {
   type RelationTypeInput,
 } from '../api/relationtype';
 import { DataTable, type Column } from '../components/DataTable';
+import { AIActionButton } from '../components/AIActionButton';
+import { FormAssistDialog } from '../components/FormAssistDialog';
+import { explainRelationTypePrompt } from '../lib/aiPrompts';
 import { isValidColor } from '../lib/iconvalue';
 import { useToast } from '../components/Toast';
 
@@ -46,7 +50,7 @@ import { useToast } from '../components/Toast';
 // them with a reason rather than letting the operator find out from a 403.
 
 export default function RelationTypesPage() {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const { isAdmin } = usePermissions();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
@@ -56,7 +60,11 @@ export default function RelationTypesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [form, setForm] = useState<{ mode: 'create' } | { mode: 'edit'; row: RelationType } | null>(null);
+  const [form, setForm] = useState<
+    | { mode: 'create'; suggestion?: { name: string; color: string }; assist?: boolean }
+    | { mode: 'edit'; row: RelationType }
+    | null
+  >(null);
   useCMDBAssistantFacts({ relation_type_count: items.length, editing: form ? form.mode : undefined });
 
   const load = useCallback(
@@ -164,6 +172,12 @@ export default function RelationTypesPage() {
         )}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <AIActionButton
+              zh="AI 生成关系类型"
+              en="AI suggest relation type"
+              onClick={() => setForm({ mode: 'create', assist: true })}
+              disabled={!isAdmin}
+            />
             <Button
               variant="outline"
               size="sm"
@@ -205,6 +219,14 @@ export default function RelationTypesPage() {
             empty={tr('还没有关系类型', 'No relation types yet')}
             actions={(row) => (
               <>
+                <AIActionButton
+                  iconOnly
+                  zh="AI 解读关系类型"
+                  en="AI explain relation type"
+                  onClick={() =>
+                    openAssistant({ prompt: explainRelationTypePrompt(row.name, row.color, locale) })
+                  }
+                />
                 <Hint content={adminTip}>
                   <Button
                     variant="subtle"
@@ -242,6 +264,8 @@ export default function RelationTypesPage() {
       {form && (
         <RelationTypeForm
           row={form.mode === 'edit' ? form.row : null}
+          suggestion={form.mode === 'create' ? form.suggestion : undefined}
+          initialAssist={form.mode === 'create' ? form.assist : undefined}
           onClose={() => setForm(null)}
           onSaved={async (message) => {
             setForm(null);
@@ -260,18 +284,30 @@ export default function RelationTypesPage() {
 
 function RelationTypeForm({
   row,
+  suggestion,
+  initialAssist = false,
   onClose,
   onSaved,
 }: {
   row: RelationType | null;
+  suggestion?: { name: string; color: string };
+  initialAssist?: boolean;
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
 }) {
-  const { tr } = useI18n();
-  const [name, setName] = useState(row?.name ?? '');
-  const [color, setColor] = useState(row?.color ?? '');
+  const { tr, locale } = useI18n();
+  const { isAdmin } = usePermissions();
+  const [name, setName] = useState(row?.name ?? suggestion?.name ?? '');
+  const [color, setColor] = useState(row?.color ?? suggestion?.color ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [assistOpen, setAssistOpen] = useState(initialAssist);
+
+  useCMDBAssistantFacts({
+    form_kind: 'relation_type',
+    form_mode: row ? 'edit' : 'create',
+    relation_type_name: row?.name,
+  });
 
   const nameId = 'cmdb-relation-type-name';
   const colorId = 'cmdb-relation-type-color';
@@ -335,6 +371,34 @@ function RelationTypeForm({
           </div>
         )}
 
+        <div className="flex flex-wrap items-center gap-2">
+          <AIActionButton
+            zh="AI 生成关系类型"
+            en="AI suggest relation type"
+            onClick={() => setAssistOpen(true)}
+            disabled={!isAdmin}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() =>
+              openAssistant({
+                prompt: tr(
+                  '我在 CMDB 里新建或编辑关系类型。关系类型是模型关系共用的词表；请结合当前页面上下文帮我确认名称和颜色，并说明它适合哪些模型关系。不要直接写入数据。',
+                  'I am creating or editing a CMDB relation type, the shared vocabulary for model relations. Use the current page context to help confirm its name and colour and explain which model relations suit it. Do not write data.',
+                ),
+              })
+            }
+            className="inline-flex items-center gap-1.5 text-text-muted"
+          >
+            {tr('问 AI 助手', 'Ask the assistant')}
+          </Button>
+          {!isAdmin && (
+            <span className="text-[11px] text-text-faint">{tr('AI 生成需要管理员权限', 'AI suggestions require an administrator')}</span>
+          )}
+        </div>
+
         <div>
           <Label htmlFor={nameId}>{tr('名称', 'Name')}</Label>
           <Input
@@ -370,6 +434,16 @@ function RelationTypeForm({
           </p>
         </div>
       </form>
+      <FormAssistDialog
+        open={assistOpen}
+        onClose={() => setAssistOpen(false)}
+        mode="relation_type"
+        locale={locale}
+        onAccept={(suggested) => {
+          setName(suggested.name);
+          setColor(suggested.color);
+        }}
+      />
       {submitting && <span className="sr-only" role="status">{tr('保存中', 'Saving')}</span>}
     </Modal>
   );

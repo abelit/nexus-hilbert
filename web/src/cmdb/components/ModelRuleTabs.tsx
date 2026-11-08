@@ -14,6 +14,7 @@ import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { Textarea } from '@/components/ui/Textarea';
 import { Modal } from '@/components/Modal';
+import { NLQueryHelper } from '@/components/NLQueryHelper';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
@@ -1802,8 +1803,30 @@ function TriggerDrawer({
 
           <div>
             <span className="text-xs text-text-muted">{tr('过滤条件', 'Filter')}</span>
-            <div className="mt-1.5">
-              <ConditionFilter attributes={attributes} models={models} value={filter} onApply={setFilter} />
+            <div className="mt-1.5 flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <ConditionFilter attributes={attributes} models={models} value={filter} onApply={setFilter} />
+              </div>
+              <NLQueryHelper
+                dialect="cmdb"
+                context={{
+                  models: models.map((model) => ({ name: model.name, alias: model.alias })),
+                  attributes: attributes
+                    .filter(
+                      (attribute) =>
+                        !attribute.is_password &&
+                        !attribute.is_file &&
+                        !attribute.is_link &&
+                        attribute.value_type !== '6',
+                    )
+                    .map((attribute) => ({
+                      name: attribute.name,
+                      label: attribute.alias || attribute.name,
+                      type: attribute.value_type,
+                    })),
+                }}
+                onAccept={(query) => setFilter(query)}
+              />
             </div>
             {filter && (
               <code className="mt-2 block break-all rounded-md border border-border bg-card/40 px-3 py-2 font-mono text-[10px] text-text-faint">

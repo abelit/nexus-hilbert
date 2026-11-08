@@ -87,9 +87,13 @@ func run() (runErr error) {
 	// Read-only CMDB tools must be registered before bootstrapRuntime and the
 	// inventory bridge call BuildBaseTools. An unconfigured URL leaves the
 	// tools out of the bag. See ADR-037.
-	aiops.toolsReg.SetCMDB(newCMDBClient(cfg, iam.signer, log))
+	cmdbClient := newCMDBClient(cfg, iam.signer, log)
+	aiops.toolsReg.SetCMDB(cmdbClient)
 	knowledge := bootstrapKnowledge(rootCtx, cfg, log, storage, settings, telemetry, aiops)
 	runtime := bootstrapRuntime(rootCtx, cfg, log, reg, tracing, models, devices, telemetry, tunnel, aiops, settings)
+	// The form-assist endpoint reads the authoritative model schema through
+	// the same caller-authenticated client. Nil leaves the endpoint 503.
+	runtime.aiopsHandler.SetCMDBFormAssist(cmdbClient)
 	automation := bootstrapAutomation(rootCtx, cfg, log, reg, notifyRouter, &cleanup, storage, settings, models, alerts, telemetry, aiops, runtime)
 	system := bootstrapSystem(cfg, storage, iam, settings, models, telemetry, aiops, knowledge, automation)
 	extensions := bootstrapExtensions(rootCtx, cfg, log, reg, notifyRouter, storage, settings, devices, alerts, tunnel, aiops, runtime, automation, iam)

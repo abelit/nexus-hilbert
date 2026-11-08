@@ -274,4 +274,47 @@ describe('the flat relation list', () => {
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '确认' }));
     await waitFor(() => expect(deleted).toBe(1));
   });
+
+  it('prefills a new relation from an AI suggestion and saves it', async () => {
+    const user = userEvent.setup();
+    let posted: Record<string, unknown> | null = null;
+    server.use(
+      http.get('/api/v1/cmdb/ci-type-relations', () => HttpResponse.json({ items: relations, total: relations.length })),
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [host, disk], total: 2 })),
+      http.get('/api/v1/cmdb/relation-types', () =>
+        HttpResponse.json({ items: [{ id: 1, name: '包含', color: '#6366f1' }], total: 1 }),
+      ),
+      http.get('/api/v1/cmdb/ci-types/:ref/attributes', () => HttpResponse.json({ attributes: [] })),
+      http.post('/api/v1/aiops/cmdb/form-assist', () =>
+        HttpResponse.json({
+          kind: 'model_relation',
+          source_model_id: 1,
+          target_model_id: 2,
+          relation_type_id: 1,
+          constraint: '0',
+          parent_attr_ids: [],
+          child_attr_ids: [],
+        }),
+      ),
+      http.post('/api/v1/cmdb/ci-types/:parent/relation-children/:child', async ({ request, params }) => {
+        posted = { path: `/api/v1/cmdb/ci-types/${params.parent}/relation-children/${params.child}`, body: await request.json() };
+        return HttpResponse.json({ id: 99 });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'AI 建议关系' }));
+    await user.type(await screen.findByLabelText('描述你要填写的内容'), '主机运行虚拟机');
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    const assist = await screen.findByRole('dialog', { name: 'AI 建议模型关系' });
+    await within(assist).findByText('包含');
+    await user.click(within(assist).getByRole('button', { name: '接受选中' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({
+      path: '/api/v1/cmdb/ci-types/1/relation-children/2',
+      body: { relation_type_id: 1, constraint: '0' },
+    });
+  });
 });

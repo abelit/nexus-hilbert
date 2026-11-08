@@ -135,4 +135,24 @@ describe('writes', () => {
     await user.click(screen.getByRole('button', { name: '取消' }));
     expect(deleted).toBe(0);
   });
+
+  it('opens a prefilled create form from an AI suggestion', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get('/api/v1/cmdb/relation-types', () => HttpResponse.json({ items: rows, total: rows.length })),
+      http.post('/api/v1/aiops/cmdb/form-assist', () =>
+        HttpResponse.json({ kind: 'relation_type', name: 'hosts', color: '#abcdef' }),
+      ),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'AI 生成关系类型' }));
+    await user.type(screen.getByLabelText('描述你要填写的内容'), '主机运行虚拟机');
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    await screen.findByText('hosts');
+    await user.click(screen.getByRole('button', { name: '接受选中' }));
+
+    expect(await screen.findByLabelText('名称')).toHaveValue('hosts');
+    expect(screen.getByLabelText('颜色')).toHaveValue('#abcdef');
+  });
 });

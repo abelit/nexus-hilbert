@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock3, Fingerprint, Hash, History, Info, Network, Pencil, UserRound, X, Zap } from 'lucide-react';
+import { Clock3, Fingerprint, Hash, History, Info, Network, Pencil, UserRound, X, Zap, BookOpen } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
@@ -23,7 +23,9 @@ import { choiceText } from '../../lib/choice-labels';
 import { displayValue } from '../../lib/valuetype';
 import { CMDBIcon } from '../CMDBIcon';
 import { Drawer } from '../Drawer';
+import { KnowledgeImportDialog } from '../KnowledgeImportDialog';
 import { useToast } from '../Toast';
+import { cmdbKnowledgeItem } from '../../lib/knowledge-card';
 import { InstanceHistory } from './InstanceHistory';
 import { InstanceOverview } from './InstanceOverview';
 import { InstanceTopology } from './InstanceTopology';
@@ -114,6 +116,11 @@ export function InstanceDetailDrawer({
     [nav, instanceID, model, attributes, groups],
   );
   const instance = loaded?.id === subject.id ? loaded.instance : null;
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const knowledgeItems = useMemo(
+    () => (instance ? [cmdbKnowledgeItem({ model: subject.model, attributes: subject.attributes, instance })] : []),
+    [instance, subject],
+  );
 
   useEffect(() => {
     let live = true;
@@ -378,6 +385,18 @@ export function InstanceDetailDrawer({
                 })
               }
             />
+            {canMutate && instance && (
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                onClick={() => setKnowledgeOpen(true)}
+                aria-label={tr('导入知识库', 'Import to knowledge base')}
+                title={tr('导入知识库', 'Import to knowledge base')}
+              >
+                <BookOpen size={13} aria-hidden="true" />
+              </Button>
+            )}
           </div>
           <button
             type="button"
@@ -486,6 +505,11 @@ export function InstanceDetailDrawer({
           {tab === 'triggers' && <InstanceTriggers ciID={subject.id} userLabel={userLabel} />}
         </TabsContent>
       </Tabs>
+      <KnowledgeImportDialog
+        open={knowledgeOpen}
+        items={knowledgeItems}
+        onClose={() => setKnowledgeOpen(false)}
+      />
     </Drawer>
   );
 }

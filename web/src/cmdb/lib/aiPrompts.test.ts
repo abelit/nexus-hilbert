@@ -4,6 +4,8 @@ import {
   MAX_EXPLAIN_CIS,
   MAX_PROMPT_TEXT,
   explainCIsPrompt,
+  explainModelRelationPrompt,
+  explainRelationTypePrompt,
   explainValuePrompt,
   relationsPrompt,
   translateValuePrompt,
@@ -57,5 +59,37 @@ describe('value prompts', () => {
     expect(prompt).toContain('属性 owner');
     expect(prompt).toContain('不要调用工具');
     expect(prompt.length).toBeLessThan(text.length + 400);
+  });
+});
+
+describe('relation prompts', () => {
+  it('explains the vocabulary and forbids invented relations', () => {
+    const prompt = explainRelationTypePrompt('runs_on', '#6366f1', 'zh-CN');
+
+    expect(prompt).toContain('runs_on');
+    expect(prompt).toContain('#6366f1');
+    expect(prompt).toContain('模型关系');
+    expect(prompt).toContain('不要编造');
+    expect(prompt).toContain('中文');
+  });
+
+  it('keeps the model-relation row and distinguishes it from instances', () => {
+    const prompt = explainModelRelationPrompt(
+      {
+        source: '主机 (host)',
+        target: '虚拟机 (vm)',
+        relationType: 'runs_on',
+        constraint: '一对多',
+        mapping: '主机名 → 主机名',
+      },
+      'en-US',
+    );
+
+    expect(prompt).toContain('主机 (host)');
+    expect(prompt).toContain('runs_on');
+    expect(prompt).toContain('一对多');
+    expect(prompt).toContain('模型层');
+    expect(prompt).toContain('cmdb_get_ci_type');
+    expect(prompt).toContain('English');
   });
 });

@@ -67,6 +67,12 @@ function renderPage(path = '/cmdb/instances?type=host') {
   );
 }
 
+/** Row actions beyond View/AI live in the overflow menu. */
+async function openRowMenu(user: ReturnType<typeof userEvent.setup>, ciID = 5) {
+  await user.click(await screen.findByRole('button', { name: `实例 ${ciID} 的更多操作` }));
+  return screen.findByRole('menu');
+}
+
 function handlers(instances: unknown[] = []) {
   server.use(
     http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [model], total: 1 })),
@@ -141,11 +147,12 @@ describe('the list', () => {
     // The header checkbox extends the selection to the rows on this page.
     await user.click(screen.getByRole('checkbox', { name: '选择本页全部' }));
     expect(await screen.findByText('已选 2 项')).toBeInTheDocument();
-    // The clear action belongs to the toolbar row; the bar is a status line.
+    // The selection actions live in the status bar so the main toolbar keeps
+    // its width; the bar is no longer text-only.
     const selectionBar = screen.getByRole('status');
     expect(
-      within(selectionBar).queryByRole('button', { name: '清除选择' }),
-    ).not.toBeInTheDocument();
+      within(selectionBar).getByRole('button', { name: '清除选择' }),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '清除选择' }));
     expect(screen.queryByText(/已选 \d+ 项/)).not.toBeInTheDocument();
@@ -410,7 +417,10 @@ describe('the list', () => {
     await user.click(screen.getByRole('button', { name: '网格' }));
     expect(await screen.findByRole('heading', { name: 'web-01' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '查看实例 5' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '编辑实例 5' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'AI 解读实例 5' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '实例 5 的更多操作' })).toBeInTheDocument();
+    // Editing moved into the overflow menu so the operation column stays narrow.
+    expect(screen.queryByRole('button', { name: '编辑实例 5' })).not.toBeInTheDocument();
     expect(screen.getAllByText('生产').length).toBeGreaterThan(0);
     // The grid shares the table's selection state and gives the card its own
     // checkbox instead of making the whole card a checkbox.
@@ -491,7 +501,7 @@ describe('the list', () => {
     );
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: '删除实例 5' }));
+    await user.click(within(await openRowMenu(user)).getByRole('menuitem', { name: '删除' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/web-01/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: '取消' }));
@@ -809,7 +819,7 @@ describe('the detail drawer', () => {
 
     const details = await screen.findByRole('button', { name: '查看实例 5' });
     expect(details).toHaveTextContent('');
-    await user.click(screen.getByRole('button', { name: '实例 5 拓扑' }));
+    await user.click(within(await openRowMenu(user)).getByRole('menuitem', { name: '拓扑' }));
 
     const drawer = await screen.findByRole('dialog');
     expect(await within(drawer).findByTestId('instance-topology')).toHaveTextContent('web-01');
@@ -1149,7 +1159,7 @@ describe('the form in the drawer', () => {
     );
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: '编辑实例 5' }));
+    await user.click(within(await openRowMenu(user)).getByRole('menuitem', { name: '编辑' }));
     const drawer = await screen.findByRole('dialog');
     await user.clear(within(drawer).getByLabelText('note'));
     await user.type(within(drawer).getByLabelText('note'), 'changed');
@@ -1189,7 +1199,7 @@ describe('the form in the drawer', () => {
     );
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: '编辑实例 5' }));
+    await user.click(within(await openRowMenu(user)).getByRole('menuitem', { name: '编辑' }));
     const drawer = await screen.findByRole('dialog');
     expect(within(drawer).getByText(/由模型计算/)).toBeInTheDocument();
     expect(within(drawer).getByLabelText('asset_no')).toBeDisabled();

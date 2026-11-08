@@ -4,6 +4,7 @@ import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { NLQueryHelper } from '@/components/NLQueryHelper';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 import {
@@ -53,6 +54,8 @@ type Props = {
   placeholder?: string;
   /** Renders a clause row the builder cannot edit as text instead of guessing. */
   className?: string;
+  /** Model / page context sent to the natural-language → CMDB helper. */
+  aiContext?: Record<string, unknown>;
 };
 
 type Row = { connector: Connector; clause: Clause | null; token: string };
@@ -64,7 +67,7 @@ const CONNECTOR_LABELS: Record<Connector, [string, string]> = {
   orNot: ['或者不是', 'or not'],
 };
 
-export function QueryBar({ attributes, value, onChange, placeholder, className }: Props) {
+export function QueryBar({ attributes, value, onChange, placeholder, className, aiContext }: Props) {
   const { tr } = useI18n();
   const [draft, setDraft] = useState<Row>(() => emptyRow());
 
@@ -211,14 +214,28 @@ export function QueryBar({ attributes, value, onChange, placeholder, className }
         </Button>
       </div>
 
-      <Input
-        type="search"
-        aria-label={tr('筛选表达式', 'Filter expression')}
-        placeholder={placeholder ?? tr('也可以直接写表达式，例如 hostname:web*', 'Or type an expression, e.g. hostname:web*')}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="font-mono text-[11px]"
-      />
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Input
+          type="search"
+          aria-label={tr('筛选表达式', 'Filter expression')}
+          placeholder={placeholder ?? tr('也可以直接写表达式，例如 hostname:web*', 'Or type an expression, e.g. hostname:web*')}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-w-0 flex-1 font-mono text-[11px]"
+        />
+        <NLQueryHelper
+          dialect="cmdb"
+          context={{
+            ...aiContext,
+            attributes: attributes.map((attribute) => ({
+              name: attribute.ref,
+              label: attribute.label,
+              type: attribute.type,
+            })),
+          }}
+          onAccept={(query) => onChange(query)}
+        />
+      </div>
     </div>
   );
 }

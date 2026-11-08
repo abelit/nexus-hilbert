@@ -712,7 +712,12 @@ export default function SearchPage() {
 
             {advancedOpen && (
               <div className="rounded-lg border border-border/60 bg-card/40 p-2.5">
-                <QueryBar attributes={attributes} value={expression} onChange={setExpression} />
+                <QueryBar
+                  attributes={attributes}
+                  value={expression}
+                  onChange={setExpression}
+                  aiContext={{ models: selectedTypes.join(','), keyword }}
+                />
               </div>
             )}
           </div>
