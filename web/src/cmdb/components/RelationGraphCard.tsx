@@ -60,17 +60,20 @@ function RelationNodeCard({ data }: NodeProps) {
   return (
     <div className="relative w-40 rounded-lg border border-border bg-card px-2.5 py-2 text-start shadow-sm">
       <Handle type="target" position={Position.Left} className="!size-1.5 !border-0 !bg-text-faint/50" />
+      {/* The whole card is the click target, like a resource row: the body
+          button covers the padding too, and the expand control sits above it. */}
       <button
         type="button"
         aria-label={tr(`查看 ${name} 详情`, `View details for ${name}`)}
         onClick={() => onOpen(node)}
-        className="nodrag nopan block w-full text-start"
-      >
+        className="nodrag nopan absolute inset-0 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500"
+      />
+      <div className="pointer-events-none relative">
         <span className="block truncate text-xs font-medium text-text">{name}</span>
         {node.type_name && (
           <span className="block truncate text-[10px] text-text-faint">{node.type_name}</span>
         )}
-      </button>
+      </div>
       {!isRoot && (
         <button
           type="button"
@@ -81,7 +84,7 @@ function RelationNodeCard({ data }: NodeProps) {
             event.stopPropagation();
             onExpand(node);
           }}
-          className="nodrag nopan absolute -end-2 -top-2 grid size-5 place-items-center rounded-full border border-border bg-bg text-text-faint shadow-sm transition-colors hover:text-text motion-reduce:transition-none"
+          className="nodrag nopan absolute -end-2 -top-2 z-10 grid size-5 place-items-center rounded-full border border-border bg-bg text-text-faint shadow-sm transition-colors hover:text-text motion-reduce:transition-none"
         >
           {busy ? (
             <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
