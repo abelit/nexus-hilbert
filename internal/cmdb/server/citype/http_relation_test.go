@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	citypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -80,9 +81,9 @@ func (s *attrStub) DeleteTypeRelation(_ context.Context, in citypebiz.TypeRelati
 	return nil
 }
 
-func (s *attrStub) EnsureRelationType(_ context.Context, name string) (*citypemodel.RelationType, error) {
+func (s *attrStub) EnsureRelationType(_ context.Context, spec cibiz.RelationTypeSpec) (*citypemodel.RelationType, error) {
 	for _, rt := range s.relationTypes {
-		if rt.Name == name {
+		if rt.Name == spec.Name {
 			copied := rt
 			return &copied, nil
 		}

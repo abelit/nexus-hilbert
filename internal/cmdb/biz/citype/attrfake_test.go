@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 )
@@ -516,7 +517,7 @@ func (noAttrRepo) DeleteTypeRelation(context.Context, TypeRelationDeleteSpec) er
 func (noAttrRepo) RelationTypesByID(context.Context, []model.ID) (map[model.ID]citypemodel.RelationType, error) {
 	return nil, notImplemented()
 }
-func (noAttrRepo) EnsureRelationType(context.Context, string) (*citypemodel.RelationType, error) {
+func (noAttrRepo) EnsureRelationType(context.Context, cibiz.RelationTypeSpec) (*citypemodel.RelationType, error) {
 	return nil, notImplemented()
 }
 

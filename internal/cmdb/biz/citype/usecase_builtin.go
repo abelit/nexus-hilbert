@@ -129,7 +129,11 @@ func (u *Usecase) ensureBuiltinRelation(ctx context.Context, spec cibiz.BuiltinR
 	if child == nil {
 		return fmt.Errorf("%w: child model %q", errs.ErrNotFound, spec.ChildModel)
 	}
-	rt, err := u.repo.EnsureRelationType(ctx, spec.RelationTypeName)
+	vocab, ok := cibiz.TargetRelationType(spec.RelationTypeName)
+	if !ok {
+		return fmt.Errorf("built-in relation type %q is not in the target vocabulary", spec.RelationTypeName)
+	}
+	rt, err := u.repo.EnsureRelationType(ctx, vocab)
 	if err != nil {
 		return err
 	}
@@ -144,11 +148,10 @@ func (u *Usecase) ensureBuiltinRelation(ctx context.Context, spec cibiz.BuiltinR
 	}
 	if _, err := u.SaveTypeRelation(ctx, TypeRelationInput{
 		ParentRef: spec.ParentModel, ChildRef: spec.ChildModel,
-		RelationTypeID:  rt.ID,
-		Constraint:      string(spec.Constraint),
-		AllowSelf:       spec.AllowSelf,
-		AllowDeprecated: true,
-		Actor:           actor,
+		RelationTypeID: rt.ID,
+		Constraint:     string(spec.Constraint),
+		AllowSelf:      spec.AllowSelf,
+		Actor:          actor,
 	}); err != nil {
 		return fmt.Errorf("create the built-in relation %s: %w", label, err)
 	}

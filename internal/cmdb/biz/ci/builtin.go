@@ -319,8 +319,10 @@ type BuiltinRelationSpec struct {
 	ParentModel string
 	ChildModel  string
 
-	// RelationTypeName is the vocabulary the pair uses. The structural
-	// built-ins use `contain`; a fresh database gets it created on demand.
+	// RelationTypeName is the vocabulary the pair uses. It must be one of the
+	// managed target relation types (see TargetRelationType); the bootstrap
+	// creates the word with its shared semantics when the dictionary does not
+	// have it yet.
 	RelationTypeName string
 
 	Constraint model.Constraint
@@ -330,16 +332,30 @@ type BuiltinRelationSpec struct {
 	AllowSelf bool
 }
 
-// BuiltinContainRelation is the structural vocabulary the built-ins use.
-const BuiltinContainRelation = "contain"
+// The managed target vocabulary the built-ins use. These are the same words
+// the relation split migrates to, so a bootstrapped database and a migrated
+// one speak the same language.
+const (
+	// BuiltinLocationRelation is the structural position word for the DCIM
+	// tree: region contains IDC contains room contains rack.
+	BuiltinLocationRelation = "HAS_LOCATION"
+
+	// BuiltinPartOfRelation is the structural composition word for the IPAM
+	// scope -> subnet and nested subnet hierarchy.
+	BuiltinPartOfRelation = "CONTAINS"
+
+	// BuiltinAllocatedRelation is the address-allocation word for subnet ->
+	// address.
+	BuiltinAllocatedRelation = "ALLOCATES"
+)
 
 // DCIMBuiltinRelations is the fixed data-centre tree. The rack -> device edge is
 // deliberately absent: which models are devices is the deployment's decision.
 func DCIMBuiltinRelations() []BuiltinRelationSpec {
 	return []BuiltinRelationSpec{
-		{ParentModel: string(ModelDCIMRegion), ChildModel: string(ModelDCIMIDC), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
-		{ParentModel: string(ModelDCIMIDC), ChildModel: string(ModelDCIMServerRoom), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
-		{ParentModel: string(ModelDCIMServerRoom), ChildModel: string(ModelDCIMRack), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelDCIMRegion), ChildModel: string(ModelDCIMIDC), RelationTypeName: BuiltinLocationRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelDCIMIDC), ChildModel: string(ModelDCIMServerRoom), RelationTypeName: BuiltinLocationRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelDCIMServerRoom), ChildModel: string(ModelDCIMRack), RelationTypeName: BuiltinLocationRelation, Constraint: model.ConstraintOne2Many},
 	}
 }
 
@@ -347,9 +363,9 @@ func DCIMBuiltinRelations() []BuiltinRelationSpec {
 // subnet hierarchy. A subnet has one container, so the default is one2many.
 func IPAMBuiltinRelations() []BuiltinRelationSpec {
 	return []BuiltinRelationSpec{
-		{ParentModel: string(ModelIPAMScope), ChildModel: string(ModelIPAMSubnet), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
-		{ParentModel: string(ModelIPAMSubnet), ChildModel: string(ModelIPAMSubnet), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many, AllowSelf: true},
-		{ParentModel: string(ModelIPAMSubnet), ChildModel: string(ModelIPAMAddress), RelationTypeName: BuiltinContainRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelIPAMScope), ChildModel: string(ModelIPAMSubnet), RelationTypeName: BuiltinPartOfRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelIPAMSubnet), ChildModel: string(ModelIPAMSubnet), RelationTypeName: BuiltinPartOfRelation, Constraint: model.ConstraintOne2Many, AllowSelf: true},
+		{ParentModel: string(ModelIPAMSubnet), ChildModel: string(ModelIPAMAddress), RelationTypeName: BuiltinAllocatedRelation, Constraint: model.ConstraintOne2Many},
 	}
 }
 

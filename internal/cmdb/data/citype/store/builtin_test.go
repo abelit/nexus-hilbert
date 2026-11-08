@@ -7,6 +7,7 @@ import (
 	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	citypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	cmdbmodel "github.com/ongridio/ongrid/internal/cmdb/model"
+	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 )
 
 // Creating the models a feature addresses by name, against a real database.
@@ -139,6 +140,73 @@ func TestEnsureBuiltinRelationsCreatesThenLeavesAlone(t *testing.T) {
 	}
 	if !foundSelf {
 		t.Fatal("the ipam_subnet -> ipam_subnet self-rule was not created")
+	}
+}
+
+// The built-in rules use the post-split vocabulary and create its semantics, so
+// a bootstrapped database can accept instance edges immediately — the write
+// gate refuses a deprecated word such as `contain` on a migrated deployment.
+func TestBuiltinRelationsUseTheTargetVocabulary(t *testing.T) {
+	repo, db := newWriteRepo(t)
+	uc := citypebiz.NewUsecase(repo, nil)
+	ctx := context.Background()
+	in := citypebiz.BuiltinEnsureInput{
+		Models:    append(cibiz.DCIMBuiltinModels(), cibiz.IPAMBuiltinModels()...),
+		Relations: append(cibiz.DCIMBuiltinRelations(), cibiz.IPAMBuiltinRelations()...),
+	}
+	if _, err := uc.EnsureBuiltinModels(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []struct {
+		Parent string
+		Child  string
+		Rel    string
+	}
+	if err := db.Table("c_ci_type_relations AS tr").
+		Select("p.name AS parent, c.name AS child, rt.name AS rel").
+		Joins("JOIN c_ci_types p ON p.id = tr.parent_id").
+		Joins("JOIN c_ci_types c ON c.id = tr.child_id").
+		Joins("JOIN c_relation_types rt ON rt.id = tr.relation_type_id").
+		Where("tr.delete_marker = 0 AND tr.deleted_at IS NULL").
+		Scan(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"dcim_region->dcim_idc":       "HAS_LOCATION",
+		"dcim_idc->dcim_server_room":  "HAS_LOCATION",
+		"dcim_server_room->dcim_rack": "HAS_LOCATION",
+		"ipam_scope->ipam_subnet":     "CONTAINS",
+		"ipam_subnet->ipam_subnet":    "CONTAINS",
+		"ipam_subnet->ipam_address":   "ALLOCATES",
+	}
+	seen := map[string]string{}
+	for _, row := range got {
+		seen[row.Parent+"->"+row.Child] = row.Rel
+	}
+	for pair, rel := range want {
+		if seen[pair] != rel {
+			t.Fatalf("%s uses %q, want %q (all: %+v)", pair, seen[pair], rel, seen)
+		}
+	}
+
+	for name, inverse := range map[string]string{
+		"HAS_LOCATION": "LOCATED_IN", "CONTAINS": "PART_OF", "ALLOCATES": "ALLOCATED_TO",
+	} {
+		var rt citypemodel.RelationType
+		if err := db.Where("name = ?", name).First(&rt).Error; err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if rt.InverseOf != inverse || rt.Revision != 1 || rt.WeightDefault != 0 {
+			t.Fatalf("%s = %+v, want inverse %q, revision 1, weight 0", name, rt, inverse)
+		}
+	}
+	var contains citypemodel.RelationType
+	if err := db.Where("name = ?", "CONTAINS").First(&contains).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !contains.Transitive {
+		t.Fatal("CONTAINS must be transitive")
 	}
 }
 

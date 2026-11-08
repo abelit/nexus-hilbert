@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -77,15 +78,21 @@ func (a *attrRepo) DeleteTypeRelation(_ context.Context, in TypeRelationDeleteSp
 	return nil
 }
 
-func (a *attrRepo) EnsureRelationType(_ context.Context, name string) (*citypemodel.RelationType, error) {
+func (a *attrRepo) EnsureRelationType(_ context.Context, spec cibiz.RelationTypeSpec) (*citypemodel.RelationType, error) {
 	for _, rt := range a.relationTypes {
-		if rt.Name == name {
+		if rt.Name == spec.Name {
 			copied := rt
 			return &copied, nil
 		}
 	}
 	id := model.ID(len(a.relationTypes) + 100)
-	rt := citypemodel.RelationType{Name: name, Color: "#1890ff"}
+	rt := citypemodel.RelationType{
+		Name: spec.Name, Color: "#1890ff",
+		Category: spec.Category, Direction: spec.Direction,
+		PropagatesDefault: spec.Propagates, WeightDefault: spec.Weight,
+		InverseOf: spec.InverseOf, Transitive: spec.Transitive,
+		Revision: 1,
+	}
 	rt.ID = id
 	a.relationTypes[id] = rt
 	return &rt, nil
@@ -185,8 +192,7 @@ func TestSaveTypeRelationValidatesItsInputs(t *testing.T) {
 }
 
 // A deprecated relation type is retired vocabulary: a new pair must not adopt
-// it. An existing rule may keep it so legacy configuration stays editable, and
-// the built-in bootstrap may recreate its own rules.
+// it. An existing rule may keep it so legacy configuration stays editable.
 func TestSaveTypeRelationRejectsDeprecatedRelationType(t *testing.T) {
 	ctx := context.Background()
 	deprecatedRepo := func() *attrRepo {
@@ -218,15 +224,6 @@ func TestSaveTypeRelationRejectsDeprecatedRelationType(t *testing.T) {
 		in.RelationTypeID = 6
 		if _, err := attrUsecase(repo).SaveTypeRelation(ctx, in); err != nil {
 			t.Fatalf("SaveTypeRelation(existing legacy rule) error = %v, want nil", err)
-		}
-	})
-
-	t.Run("builtin bootstrap", func(t *testing.T) {
-		in := relInput()
-		in.RelationTypeID = 6
-		in.AllowDeprecated = true
-		if _, err := attrUsecase(deprecatedRepo()).SaveTypeRelation(ctx, in); err != nil {
-			t.Fatalf("SaveTypeRelation(AllowDeprecated) error = %v, want nil", err)
 		}
 	})
 

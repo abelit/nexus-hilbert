@@ -117,7 +117,7 @@ ongrid-cmdb --split-relations
 
 - 新建模型规则：拒绝已弃用类型；已有规则可以继续用原类型修改基数或属性映射，避免历史配置无法编辑；
 - 新建实例边或把边改成已弃用类型：拒绝；重复提交已存在的旧边是幂等 no-op，不会被拒绝；
-- 内置模型 bootstrap 可以在重建自己的规则时使用旧类型（内部开关），保证 DCIM/IPAM 初始化不被迁移状态阻塞；
+- 内置模型 bootstrap 直接使用迁移后的目标词汇（DCIM 用 `HAS_LOCATION`，IPAM 用 `CONTAINS`/`ALLOCATES`），类型缺失时按共享语义创建，不依赖旧类型；
 - `GET /v1/cmdb/relation-types?include_deprecated=false` 只返回可用类型；控制台的模型关系下拉使用该参数，关系类型管理页仍显示全部并标注 deprecated；
 - AIOps `cmdb_list_relation_types` 仍返回完整字典（含 deprecated/replacement），由调用方判断。
 
