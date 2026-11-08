@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode/utf8"
 
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -28,10 +29,16 @@ var (
 	ErrColorInvalid = fmt.Errorf("%w: relation type colour must be a #rrggbb literal", errs.ErrInvalid)
 )
 
-// Column widths, copied from cantor's model so a value this layer accepts can
-// always be stored: name is String(16), colour is String(7).
+// Column widths. The colour stays cantor's String(7). The name was widened
+// from cantor's String(16) so the dictionary can hold the vocabulary that
+// nexus-topocortex already uses (e.g. MEMBER_OF_REDUNDANCY_GROUP), which is a
+// prerequisite for mirroring ontology relation types into CMDB.
+//
+// THE NAME LIMIT IS IN CHARACTERS, NOT BYTES. MySQL's varchar(64) counts
+// characters, so a 64-character Chinese name fits; `len()` counts bytes and
+// would reject it at 22 characters.
 const (
-	MaxNameLen  = 16
+	MaxNameLen  = 64
 	MaxColorLen = 7
 )
 
@@ -165,8 +172,8 @@ func NormalizeInput(name, color string) (string, string, error) {
 	if name == "" {
 		return "", "", ErrNameRequired
 	}
-	if len(name) > MaxNameLen {
-		return "", "", fmt.Errorf("%w: %d > %d", ErrNameTooLong, len(name), MaxNameLen)
+	if utf8.RuneCountInString(name) > MaxNameLen {
+		return "", "", fmt.Errorf("%w: %d > %d", ErrNameTooLong, utf8.RuneCountInString(name), MaxNameLen)
 	}
 
 	color = strings.TrimSpace(color)

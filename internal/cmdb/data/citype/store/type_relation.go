@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
 	citypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
 // ListTypeRelations returns the live model relations, ordered by id.
@@ -85,7 +87,7 @@ func (r *Repo) SaveTypeRelation(ctx context.Context, in citypebiz.TypeRelationSa
 		if err := assertTypeExists(tx, in.ChildID); err != nil {
 			return err
 		}
-		if in.ParentID == in.ChildID {
+		if in.ParentID == in.ChildID && !in.AllowSelf {
 			return citypebiz.ErrRelationSelfLoop
 		}
 		if err := assertRelationTypeExists(tx, in.RelationTypeID); err != nil {
@@ -98,10 +100,22 @@ func (r *Repo) SaveTypeRelation(ctx context.Context, in citypebiz.TypeRelationSa
 			return fmt.Errorf("cmdb type relation: load graph: %w", err)
 		}
 		proposed := make([]citypemodel.CITypeRelation, 0, len(existing)+1)
-		proposed = append(proposed, existing...)
-		proposed = append(proposed, citypemodel.CITypeRelation{
-			ParentID: in.ParentID, ChildID: in.ChildID, RelationTypeID: in.RelationTypeID,
-		})
+		// SELF-EDGES ARE STRUCTURAL, NOT MULTI-NODE CYCLES. A subnet containing
+		// a subnet is legitimate and was allowed into the graph by the
+		// bootstrap; leaving it in the cycle-check graph would make every later
+		// relation on that model fail. The write path still refuses a NEW
+		// self-edge unless the caller explicitly allows one.
+		for _, row := range existing {
+			if row.ParentID == row.ChildID {
+				continue
+			}
+			proposed = append(proposed, row)
+		}
+		if !(in.AllowSelf && in.ParentID == in.ChildID) {
+			proposed = append(proposed, citypemodel.CITypeRelation{
+				ParentID: in.ParentID, ChildID: in.ChildID, RelationTypeID: in.RelationTypeID,
+			})
+		}
 		if cycle, found := citypebiz.NewRelationGraph(proposed).FindCycle(); found {
 			return &citypebiz.RelationCycleError{Path: cycle}
 		}
@@ -194,6 +208,30 @@ func (r *Repo) DeleteTypeRelation(ctx context.Context, in citypebiz.TypeRelation
 		return insertTypeHistory(tx, model.CITypeOpDeleteRelation, in.Previous.ParentID, in.Actor,
 			map[string]any{"old": renderTypeRelation(in.Previous)})
 	})
+}
+
+// EnsureRelationType returns the live relation type with this name, creating
+// it when absent. It is deliberately a read-then-create, not an upsert: an
+// existing row's colour and semantic mirror must be left alone.
+func (r *Repo) EnsureRelationType(ctx context.Context, name string) (*citypemodel.RelationType, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("%w: relation type name is required", errs.ErrInvalid)
+	}
+	var rt citypemodel.RelationType
+	err := r.db.WithContext(ctx).Where("name = ?", name).First(&rt).Error
+	switch {
+	case err == nil:
+		return &rt, nil
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		rt = citypemodel.RelationType{Name: name, Color: "#1890ff"}
+		if err := r.db.WithContext(ctx).Create(&rt).Error; err != nil {
+			return nil, fmt.Errorf("cmdb type relation: create relation type %q: %w", name, err)
+		}
+		return &rt, nil
+	default:
+		return nil, fmt.Errorf("cmdb type relation: find relation type %q: %w", name, err)
+	}
 }
 
 // RelationTypesByID returns the requested relation types keyed by id.

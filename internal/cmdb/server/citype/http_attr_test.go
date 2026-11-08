@@ -146,6 +146,9 @@ func (noAttrStub) DeleteTypeRelation(context.Context, citypebiz.TypeRelationDele
 func (noAttrStub) RelationTypesByID(context.Context, []model.ID) (map[model.ID]citypemodel.RelationType, error) {
 	return nil, stubNotImplemented()
 }
+func (noAttrStub) EnsureRelationType(context.Context, string) (*citypemodel.RelationType, error) {
+	return nil, stubNotImplemented()
+}
 
 func (noAttrStub) ShowAttributes(context.Context, model.ID, model.ID) ([]citypemodel.PreferenceShowAttributes, error) {
 	return nil, stubNotImplemented()

@@ -6,6 +6,7 @@ import (
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
+	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -54,6 +55,11 @@ type RelationRepo interface {
 
 	// RelationsTo returns the edges arriving at an instance.
 	RelationsTo(ctx context.Context, ciID, relationTypeID model.ID, limit, offset int) ([]cimodel.Relation, int64, error)
+
+	// RelationTypesByID resolves the vocabulary of a page of edges. Missing
+	// ids are absent rather than an error: a deleted relation type must not
+	// make the neighbour list unreadable.
+	RelationTypesByID(ctx context.Context, ids []model.ID) (map[model.ID]citypemodel.RelationType, error)
 
 	// WalkChildren returns one hop below a frontier.
 	//
@@ -180,4 +186,14 @@ var (
 
 	// ErrSelfRelation is returned for an edge from an instance to itself.
 	ErrSelfRelation = fmt.Errorf("%w: an instance cannot be related to itself", errs.ErrInvalid)
+
+	// ErrRelationTypeRequired is returned when an edge write does not name a
+	// relation type and no model rule supplied one. A zero type cannot be
+	// labelled, filtered or reasoned about, and MySQL would store it because
+	// the column is NOT NULL.
+	ErrRelationTypeRequired = fmt.Errorf("%w: relation_type_id is required", errs.ErrInvalid)
+
+	// ErrRelationTypeNotFound is returned when the named relation type does
+	// not exist (or was soft-deleted).
+	ErrRelationTypeNotFound = fmt.Errorf("%w: relation type does not exist", errs.ErrNotFound)
 )

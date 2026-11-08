@@ -170,7 +170,8 @@ func TestToolInfoIsReadOnly(t *testing.T) {
 	want := map[string]bool{
 		ToolNameSearchCI: false, ToolNameGetCI: false,
 		ToolNameListCITypes: false, ToolNameGetCIType: false,
-		ToolNameGetCIRelations: false, ToolNameQueryRelationPath: false,
+		ToolNameListRelationTypes: false,
+		ToolNameGetCIRelations:    false, ToolNameQueryRelationPath: false,
 		ToolNameFindCITypePath: false, ToolNameGetCIHistory: false,
 		ToolNameRelationGraph: false,
 	}
@@ -223,7 +224,12 @@ func TestGetCIRelationsDirection(t *testing.T) {
 					t.Errorf("relation_type_id = %q", r.URL.Query().Get("relation_type_id"))
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"items":    []map[string]any{{"relation_id": 1, "ci_id": 10, "type_id": 3, "relation_type_id": 4}},
+					"items": []map[string]any{{
+						"relation_id": 1, "ci_id": 10, "type_id": 3, "relation_type_id": 4,
+						"relation_type_name": "run", "relation_type_category": "runtime",
+						"relation_type_direction": "dst_to_src", "relation_type_propagates": true,
+						"relation_type_weight": 1.0,
+					}},
 					"numfound": 1, "page": 2,
 				})
 			})
@@ -232,7 +238,46 @@ func TestGetCIRelationsDirection(t *testing.T) {
 			if len(items) != 1 {
 				t.Fatalf("items = %v", got["items"])
 			}
+			item, _ := items[0].(map[string]any)
+			if item["relation_type_name"] != "run" || item["relation_type_category"] != "runtime" ||
+				item["relation_type_direction"] != "dst_to_src" || item["relation_type_propagates"] != true ||
+				item["relation_type_weight"] != 1.0 {
+				t.Fatalf("relation type vocabulary missing: %v", item)
+			}
 		})
+	}
+}
+
+func TestListRelationTypesToolExposesSemantics(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/cmdb/relation-types" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"items":[{
+			"id":5,"name":"run","color":"#123456","category":"runtime",
+			"direction":"dst_to_src","propagates_default":true,"weight_default":1.0,
+			"inverse_of":"","transitive":false,"sub_property_of":["DEPENDS_ON"],
+			"display_name_zh":"运行于","display_name_en":"Runs on",
+			"description":"host failure affects workload","deprecated":false,
+			"replacement":"","revision":1
+		}],"total":1}`))
+	})
+
+	got := runTool(t, c, ToolNameListRelationTypes, `{}`)
+	items, _ := got["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items = %v", got["items"])
+	}
+	item, _ := items[0].(map[string]any)
+	if item["name"] != "run" || item["category"] != "runtime" ||
+		item["direction"] != "dst_to_src" || item["propagates"] != true ||
+		item["weight"] != 1.0 || item["display_name_zh"] != "运行于" ||
+		item["revision"] != float64(1) {
+		t.Fatalf("relation type vocabulary missing: %v", item)
+	}
+	sub, _ := item["sub_property_of"].([]any)
+	if len(sub) != 1 || sub[0] != "DEPENDS_ON" {
+		t.Fatalf("sub_property_of = %#v", item["sub_property_of"])
 	}
 }
 
@@ -250,12 +295,12 @@ func TestQueryRelationPathBody(t *testing.T) {
 			t.Errorf("source = %v", body["source"])
 		}
 		target, _ := body["target"].(map[string]any)
-		if fmt.Sprint(target["type_ids"]) != "[4 5]" {
-			t.Errorf("target = %v", body["target"])
+		if _, has := target["type_ids"]; has {
+			t.Errorf("target.type_ids should not be sent: %v", body["target"])
 		}
 		_, _ = w.Write([]byte(`{"numfound":1,"total":1,"page":1,"paths":{"a":[[1,2]]},"id2ci":{}}`))
 	})
-	got := runTool(t, c, ToolNameQueryRelationPath, `{"source":{"type_id":3,"q":"hostname:web-01"},"target":{"type_ids":[4,5],"q":""},"path":[[3,4]],"count":5}`)
+	got := runTool(t, c, ToolNameQueryRelationPath, `{"source":{"type_id":3,"q":"hostname:web-01"},"target":{"q":""},"path":[[3,4]],"count":5}`)
 	if got["numfound"] != float64(1) || got["paths"] == nil {
 		t.Fatalf("got = %v", got)
 	}
@@ -347,7 +392,7 @@ func TestRelationGraphBounds(t *testing.T) {
 			_, _ = w.Write([]byte(`{"items":[]}`))
 			return
 		}
-		if r.URL.Path == "/api/v1/cmdb/ci-type-relations" {
+		if r.URL.Path == "/api/v1/cmdb/relation-types" {
 			_, _ = w.Write([]byte(`{"items":[]}`))
 			return
 		}
@@ -403,7 +448,7 @@ func TestRelationGraphBoundsFanOut(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "numfound": len(items), "page": 1})
 		case r.URL.Path == "/api/v1/cmdb/ci-types":
 			_, _ = w.Write([]byte(`{"items":[]}`))
-		case r.URL.Path == "/api/v1/cmdb/ci-type-relations":
+		case r.URL.Path == "/api/v1/cmdb/relation-types":
 			_, _ = w.Write([]byte(`{"items":[]}`))
 		case strings.HasPrefix(r.URL.Path, "/api/v1/cmdb/instances/"):
 			id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/instances/"))
@@ -452,8 +497,8 @@ func TestRelationGraphRenderPayload(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/v1/cmdb/ci-types":
 			_, _ = w.Write([]byte(`{"items":[{"id":3,"name":"host","alias":"主机"},{"id":4,"name":"db","alias":"数据库"}]}`))
-		case r.URL.Path == "/api/v1/cmdb/ci-type-relations":
-			_, _ = w.Write([]byte(`{"items":[{"parent":{"type":{"id":3},"relation_type":{"id":7,"name":"runs_on"}},"child":{"type":{"id":4},"relation_type":{"id":7,"name":"runs_on"}}}]}`))
+		case r.URL.Path == "/api/v1/cmdb/relation-types":
+			_, _ = w.Write([]byte(`{"items":[{"id":7,"name":"runs_on"}],"total":1}`))
 		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/children":
 			childrenHits++
 			_, _ = w.Write([]byte(`{"items":[{"relation_id":1,"ci_id":2,"type_id":4,"relation_type_id":7}],"numfound":1,"page":1}`))
@@ -510,7 +555,7 @@ func TestRelationGraphCountsUseFirstHopNumfound(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/v1/cmdb/ci-types":
 			_, _ = w.Write([]byte(`{"items":[]}`))
-		case r.URL.Path == "/api/v1/cmdb/ci-type-relations":
+		case r.URL.Path == "/api/v1/cmdb/relation-types":
 			_, _ = w.Write([]byte(`{"items":[]}`))
 		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/children":
 			_, _ = w.Write([]byte(`{"items":[{"relation_id":1,"ci_id":2,"type_id":3,"relation_type_id":1}],"numfound":5,"page":1}`))
@@ -546,7 +591,7 @@ func TestRelationGraphResolvesRootByQuery(t *testing.T) {
 			_, _ = w.Write([]byte(`{"result":[{"_id":1}],"numfound":1,"page":1}`))
 		case r.URL.Path == "/api/v1/cmdb/ci-types":
 			_, _ = w.Write([]byte(`{"items":[]}`))
-		case r.URL.Path == "/api/v1/cmdb/ci-type-relations":
+		case r.URL.Path == "/api/v1/cmdb/relation-types":
 			_, _ = w.Write([]byte(`{"items":[]}`))
 		case strings.HasSuffix(r.URL.Path, "/children"), strings.HasSuffix(r.URL.Path, "/parents"):
 			_, _ = w.Write([]byte(`{"items":[],"numfound":0,"page":1}`))

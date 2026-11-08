@@ -35,6 +35,11 @@ const cmdbFormAssistMaxValues = 20
 const cmdbFormAssistMaxAttributes = 5
 const cmdbFormAssistMaxPairs = 10
 
+// cmdbFormRelationTypeNameMax mirrors CMDB's relation-type name limit. The
+// manager cannot import internal/cmdb (ADR-037), so the two constants are kept
+// in sync here and in internal/cmdb/biz/relationtype.
+const cmdbFormRelationTypeNameMax = 64
+
 var cmdbFormNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 var cmdbFormColorRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
@@ -458,8 +463,8 @@ func (h *Handler) cmdbAssistRelationType(ctx context.Context, req cmdbFormAssist
 用户描述：%s
 只输出严格 JSON，不要 markdown 代码块：
 {"name":"关系类型名","color":"#6366f1","warnings":[]}
-规则：name 简洁明确（2-24 个字符，中文或 lower_snake 均可），不能与已有名称重复；color 必须是 #rrggbb 或空字符串；解释用 %s。`,
-		mustJSON(relationTypeNames(existing)), req.Intent, promptLanguage(req.Locale))
+规则：name 简洁明确（2-%d 个字符，中文或 lower_snake 均可），不能与已有名称重复；color 必须是 #rrggbb 或空字符串；解释用 %s。`,
+		mustJSON(relationTypeNames(existing)), req.Intent, cmdbFormRelationTypeNameMax, promptLanguage(req.Locale))
 
 	raw, err := h.cmdbFormChat(ctx, prompt)
 	if err != nil {
@@ -471,7 +476,7 @@ func (h *Handler) cmdbAssistRelationType(ctx context.Context, req cmdbFormAssist
 	}
 	warnings := append([]string(nil), suggestion.Warnings...)
 	name := strings.TrimSpace(suggestion.Name)
-	if name == "" || len([]rune(name)) > 64 {
+	if name == "" || len([]rune(name)) > cmdbFormRelationTypeNameMax {
 		return nil, fmt.Errorf("%w: suggested relation type name is empty or too long", errs.ErrInvalid)
 	}
 	for _, item := range existing {

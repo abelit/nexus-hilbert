@@ -12,6 +12,7 @@ import (
 	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
+	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -85,6 +86,21 @@ func (r *Repo) BatchAddRelations(ctx context.Context, specs []cibiz.RelationAddS
 // addRelationTx is the body of one edge write, run inside a caller's
 // transaction so a single write and a batch share it exactly.
 func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, error) {
+	// THE STORE IS THE SINGLE WRITE ENTRY POINT, so the self-edge refusal has
+	// to live here as well as in the use case. Discovery, rack placement and
+	// the attribute-derived paths call this function directly; a check only in
+	// the use case is a check those paths can bypass — which is how the legacy
+	// 271 self-loops were created.
+	if in.FirstCIID == in.SecondCIID {
+		return nil, fmt.Errorf("%w: %d", cibiz.ErrSelfRelation, in.FirstCIID)
+	}
+	if in.RelationTypeID == 0 {
+		return nil, fmt.Errorf("%w", cibiz.ErrRelationTypeRequired)
+	}
+	if err := assertRelationTypeLive(tx, in.RelationTypeID); err != nil {
+		return nil, err
+	}
+
 	if err := lockCI(tx, in.SecondCIID); err != nil {
 		return nil, err
 	}
@@ -223,6 +239,21 @@ func writeRelationAudit(tx *gorm.DB, row *cimodel.Relation, op model.OperateType
 	}
 	if err := tx.Create(history).Error; err != nil {
 		return fmt.Errorf("insert relation history: %w", err)
+	}
+	return nil
+}
+
+// assertRelationTypeLive refuses an edge whose relation type is gone. The
+// column is NOT NULL and there is no foreign key, so the database would happily
+// store a dangling id; the check is the only referential guarantee this table
+// has.
+func assertRelationTypeLive(tx *gorm.DB, id model.ID) error {
+	var n int64
+	if err := tx.Model(&citypemodel.RelationType{}).Where("id = ?", id).Count(&n).Error; err != nil {
+		return fmt.Errorf("check relation type: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: %d", cibiz.ErrRelationTypeNotFound, id)
 	}
 	return nil
 }
@@ -409,41 +440,55 @@ func (r *Repo) WalkChildren(ctx context.Context, frontier []cibiz.WalkKey, scope
 		"ci.type_id AS child_type_id, cr.ancestor_ids AS ancestors "
 
 	if scoped {
-		// A row-value IN, so a frontier of a thousand keys is still one query
-		// rather than a thousand. Both dialects accept the form.
-		pairs := make([]string, 0, len(frontier))
-		args := make([]any, 0, len(frontier)*2)
-		for _, key := range frontier {
-			pairs = append(pairs, "(?,?)")
-			args = append(args, ancestorsOf(key.Path), key.Node)
+		// LEGACY DATA HAS ancestor_ids NULL ON EVERY EDGE. A path-scoped lookup
+		// against a column nobody wrote returns an empty level, silently — the
+		// whole branch disappears without an error. Detect the globally-unused
+		// case and fall back to the plain child map; once any edge carries a
+		// path, keep cantor's strict scoped semantics so a sibling branch is not
+		// walked into.
+		used, err := ancestorPathsUsed(db)
+		if err != nil {
+			return nil, err
 		}
-		var rows []relationHop
-		if err := db.Raw(
-			"SELECT "+hopColumns+
-				"FROM c_ci_relations cr "+
-				"JOIN c_cis ci ON ci.id = cr.second_ci_id AND ci.delete_marker = 0 "+
-				"WHERE cr.delete_marker = 0 AND (cr.ancestor_ids, cr.first_ci_id) IN ("+
-				strings.Join(pairs, ",")+") ORDER BY cr.id", args...).Scan(&rows).Error; err != nil {
-			return nil, fmt.Errorf("cmdb ci: walk scoped children: %w", err)
-		}
-
-		// THE CHILD'S PATH IS BUILT FROM THE ROW, not from a map keyed by the
-		// parent. Two frontier entries can name the same parent instance on two
-		// different paths, and a map keyed by node id would keep one of them —
-		// so one of the two branches would silently continue along the other's
-		// path. `ancestor_ids` is exactly "everything above the parent", which
-		// makes `ancestors,parent,child` the path with no lookup at all.
-		for _, row := range rows {
-			parent := ""
-			if row.Ancestors != nil {
-				parent = *row.Ancestors
+		if !used {
+			scoped = false
+		} else {
+			// A row-value IN, so a frontier of a thousand keys is still one query
+			// rather than a thousand. Both dialects accept the form.
+			pairs := make([]string, 0, len(frontier))
+			args := make([]any, 0, len(frontier)*2)
+			for _, key := range frontier {
+				pairs = append(pairs, "(?,?)")
+				args = append(args, ancestorsOf(key.Path), key.Node)
 			}
-			out = append(out, cibiz.WalkKey{
-				Path: parent + "," + fmt.Sprint(row.Parent) + "," + fmt.Sprint(row.Child),
-				Node: row.Child, TypeID: row.ChildTypeID, Parent: row.Parent,
-			})
+			var rows []relationHop
+			if err := db.Raw(
+				"SELECT "+hopColumns+
+					"FROM c_ci_relations cr "+
+					"JOIN c_cis ci ON ci.id = cr.second_ci_id AND ci.delete_marker = 0 "+
+					"WHERE cr.delete_marker = 0 AND (cr.ancestor_ids, cr.first_ci_id) IN ("+
+					strings.Join(pairs, ",")+") ORDER BY cr.id", args...).Scan(&rows).Error; err != nil {
+				return nil, fmt.Errorf("cmdb ci: walk scoped children: %w", err)
+			}
+
+			// THE CHILD'S PATH IS BUILT FROM THE ROW, not from a map keyed by the
+			// parent. Two frontier entries can name the same parent instance on two
+			// different paths, and a map keyed by node id would keep one of them —
+			// so one of the two branches would silently continue along the other's
+			// path. `ancestor_ids` is exactly "everything above the parent", which
+			// makes `ancestors,parent,child` the path with no lookup at all.
+			for _, row := range rows {
+				parent := ""
+				if row.Ancestors != nil {
+					parent = *row.Ancestors
+				}
+				out = append(out, cibiz.WalkKey{
+					Path: parent + "," + fmt.Sprint(row.Parent) + "," + fmt.Sprint(row.Child),
+					Node: row.Child, TypeID: row.ChildTypeID, Parent: row.Parent,
+				})
+			}
+			return out, nil
 		}
-		return out, nil
 	}
 
 	nodes := make([]any, 0, len(frontier))
@@ -486,6 +531,20 @@ func ancestorsOf(path string) string {
 		return path[:idx]
 	}
 	return ""
+}
+
+// ancestorPathsUsed reports whether any live edge records its ancestor path.
+// A deployment whose edges predate the column reads the plain child map; one
+// with paths reads the scoped map. The query is served by
+// idx_c_ci_relations_ancestor_ids.
+func ancestorPathsUsed(db *gorm.DB) (bool, error) {
+	var one int
+	if err := db.Raw(
+		"SELECT 1 FROM c_ci_relations WHERE delete_marker = 0 AND ancestor_ids IS NOT NULL LIMIT 1",
+	).Scan(&one).Error; err != nil {
+		return false, fmt.Errorf("cmdb ci: check ancestor paths: %w", err)
+	}
+	return one == 1, nil
 }
 
 // relationHop is one row of a walk step.
@@ -600,6 +659,24 @@ func (r *Repo) TypeIDsForInstances(ctx context.Context, ids []model.ID) (map[mod
 	}
 	for _, row := range rows {
 		out[row.ID] = row.TypeID
+	}
+	return out, nil
+}
+
+// RelationTypesByID resolves the vocabulary of a page of edges. The default
+// GORM scope hides soft-deleted types, so a retired word is absent rather than
+// returned as a dangling label.
+func (r *Repo) RelationTypesByID(ctx context.Context, ids []model.ID) (map[model.ID]citypemodel.RelationType, error) {
+	out := make(map[model.ID]citypemodel.RelationType, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []citypemodel.RelationType
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("cmdb ci: resolve relation types: %w", err)
+	}
+	for _, row := range rows {
+		out[row.ID] = row
 	}
 	return out, nil
 }

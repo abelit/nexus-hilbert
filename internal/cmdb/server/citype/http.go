@@ -313,9 +313,11 @@ func (h *Handler) ensureBuiltinModels(w http.ResponseWriter, r *http.Request) {
 	// missing attributes to existing models, so an installation that already
 	// has DCIM models gains the IPAM shape without them being touched.
 	models := append(cibiz.DCIMBuiltinModels(), cibiz.IPAMBuiltinModels()...)
+	relations := append(cibiz.DCIMBuiltinRelations(), cibiz.IPAMBuiltinRelations()...)
 	got, err := h.uc.EnsureBuiltinModels(r.Context(), citypebiz.BuiltinEnsureInput{
-		Models: models,
-		Actor:  actor.UserID,
+		Models:    models,
+		Relations: relations,
+		Actor:     actor.UserID,
 	})
 	if err != nil {
 		writeErr(w, err)

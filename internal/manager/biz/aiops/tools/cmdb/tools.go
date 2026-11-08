@@ -18,6 +18,7 @@ const (
 	ToolNameGetCI             = "cmdb_get_ci"
 	ToolNameListCITypes       = "cmdb_list_ci_types"
 	ToolNameGetCIType         = "cmdb_get_ci_type"
+	ToolNameListRelationTypes = "cmdb_list_relation_types"
 	ToolNameGetCIRelations    = "cmdb_get_ci_relations"
 	ToolNameQueryRelationPath = "cmdb_query_relation_path"
 	ToolNameFindCITypePath    = "cmdb_find_ci_type_path"
@@ -32,11 +33,15 @@ const (
 	// explicitly. Anything the caller asked for is honoured up to this cap;
 	// beyond it the result carries a note instead of silently dropping them.
 	maxExplicitAttrs = 20
+	// maxRelationTypes is the vocabulary's cap. It is larger than a page of
+	// CIs because a full ontology can carry tens of words and the model needs
+	// the whole dictionary to interpret an edge.
+	maxRelationTypes = 100
 )
 
 // tool is a read-only CMDB capability with a declarative JSON Schema. The
-// nine P0 tools differ only in their schema and run function, so one type
-// keeps them auditable in one file instead of nine near-identical structs.
+// ten P0 tools differ only in their schema and run function, so one type
+// keeps them auditable in one file instead of ten near-identical structs.
 type tool struct {
 	name        string
 	description string
@@ -81,6 +86,7 @@ func Tools(c *Client) []basetool.BaseTool {
 		newGetCITool(c),
 		newListCITypesTool(c),
 		newGetCITypeTool(c),
+		newListRelationTypesTool(c),
 		newGetCIRelationsTool(c),
 		newQueryRelationPathTool(c),
 		newFindCITypePathTool(c),
@@ -304,6 +310,73 @@ func newListCITypesTool(c *Client) basetool.BaseTool {
 	}
 }
 
+var listRelationTypesSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {}
+}`)
+
+type relationTypeDTO struct {
+	ID                int      `json:"id"`
+	Name              string   `json:"name"`
+	Color             string   `json:"color"`
+	Category          string   `json:"category"`
+	Direction         string   `json:"direction"`
+	PropagatesDefault bool     `json:"propagates_default"`
+	WeightDefault     float64  `json:"weight_default"`
+	InverseOf         string   `json:"inverse_of"`
+	Transitive        bool     `json:"transitive"`
+	SubPropertyOf     []string `json:"sub_property_of"`
+	DisplayNameZH     string   `json:"display_name_zh"`
+	DisplayNameEN     string   `json:"display_name_en"`
+	Description       string   `json:"description"`
+	Deprecated        bool     `json:"deprecated"`
+	Replacement       string   `json:"replacement"`
+	Revision          int      `json:"revision"`
+}
+
+func newListRelationTypesTool(c *Client) basetool.BaseTool {
+	return &tool{
+		name:        ToolNameListRelationTypes,
+		description: "List the CMDB relation-type vocabulary and its AIOps semantics.",
+		whenToUse:   "Use before interpreting a relation_type_id, or when deciding whether an edge propagates and in which direction.",
+		schema:      listRelationTypesSchema,
+		run: func(ctx context.Context, raw json.RawMessage) (any, error) {
+			if len(raw) > 0 {
+				var args map[string]any
+				if err := json.Unmarshal(raw, &args); err != nil {
+					return nil, fmt.Errorf("cmdb_list_relation_types: bad args: %w", err)
+				}
+			}
+			data, err := c.Get(ctx, "/relation-types", nil)
+			if err != nil {
+				return nil, err
+			}
+			var page struct {
+				Items []relationTypeDTO `json:"items"`
+				Total int               `json:"total"`
+			}
+			if err := json.Unmarshal(data, &page); err != nil {
+				return nil, fmt.Errorf("cmdb_list_relation_types: decode response: %w", err)
+			}
+			items := make([]any, 0, len(page.Items))
+			for _, rt := range page.Items {
+				items = append(items, map[string]any{
+					"id": rt.ID, "name": rt.Name, "color": rt.Color,
+					"category": rt.Category, "direction": rt.Direction,
+					"propagates": rt.PropagatesDefault, "weight": rt.WeightDefault,
+					"inverse_of": rt.InverseOf, "transitive": rt.Transitive,
+					"sub_property_of": rt.SubPropertyOf,
+					"display_name_zh": rt.DisplayNameZH, "display_name_en": rt.DisplayNameEN,
+					"description": rt.Description,
+					"deprecated":  rt.Deprecated, "replacement": rt.Replacement,
+					"revision": rt.Revision,
+				})
+			}
+			return Truncate(items, maxRelationTypes, page.Total), nil
+		},
+	}
+}
+
 var getCITypeSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -378,6 +451,15 @@ type neighbour struct {
 	CIID           int `json:"ci_id"`
 	TypeID         int `json:"type_id"`
 	RelationTypeID int `json:"relation_type_id"`
+
+	// The CMDB resolves the edge's vocabulary once per page; carrying it here
+	// lets the model decide whether the edge propagates without a second tool
+	// call.
+	RelationTypeName       string  `json:"relation_type_name"`
+	RelationTypeCategory   string  `json:"relation_type_category"`
+	RelationTypeDirection  string  `json:"relation_type_direction"`
+	RelationTypePropagates bool    `json:"relation_type_propagates"`
+	RelationTypeWeight     float64 `json:"relation_type_weight"`
 }
 
 func newGetCIRelationsTool(c *Client) basetool.BaseTool {
@@ -428,6 +510,11 @@ func newGetCIRelationsTool(c *Client) basetool.BaseTool {
 				items = append(items, map[string]any{
 					"relation_id": n.RelationID, "ci_id": n.CIID,
 					"type_id": n.TypeID, "relation_type_id": n.RelationTypeID,
+					"relation_type_name":       n.RelationTypeName,
+					"relation_type_category":   n.RelationTypeCategory,
+					"relation_type_direction":  n.RelationTypeDirection,
+					"relation_type_propagates": n.RelationTypePropagates,
+					"relation_type_weight":     n.RelationTypeWeight,
 				})
 			}
 			out := Truncate(items, maxItems, pageData.NumFound)
@@ -452,10 +539,8 @@ var queryRelationPathSchema = json.RawMessage(`{
     "target": {
       "type": "object",
       "properties": {
-        "type_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}},
-        "q": {"type": "string", "description": "Search expression narrowing target instances; empty means all."}
-      },
-      "required": ["type_ids"]
+        "q": {"type": "string", "description": "Search expression narrowing target instances; empty means all. The target models are the declared chains' tails."}
+      }
     },
     "path": {
       "type": "array",
@@ -465,7 +550,7 @@ var queryRelationPathSchema = json.RawMessage(`{
     "page": {"type": "integer", "minimum": 1, "default": 1},
     "count": {"type": "integer", "minimum": 1, "maximum": 20, "default": 20}
   },
-  "required": ["source", "target", "path"]
+  "required": ["source", "path"]
 }`)
 
 type queryRelationPathArgs struct {
@@ -474,8 +559,7 @@ type queryRelationPathArgs struct {
 		Q      string `json:"q"`
 	} `json:"source"`
 	Target struct {
-		TypeIDs []int  `json:"type_ids"`
-		Q       string `json:"q"`
+		Q string `json:"q"`
 	} `json:"target"`
 	Path  [][]int `json:"path"`
 	Page  int     `json:"page"`
@@ -496,9 +580,6 @@ func newQueryRelationPathTool(c *Client) basetool.BaseTool {
 			if args.Source.TypeID <= 0 {
 				return nil, errors.New("cmdb_query_relation_path: source.type_id is required")
 			}
-			if len(args.Target.TypeIDs) == 0 {
-				return nil, errors.New("cmdb_query_relation_path: target.type_ids is required")
-			}
 			if len(args.Path) == 0 {
 				return nil, errors.New("cmdb_query_relation_path: path is required")
 			}
@@ -512,7 +593,7 @@ func newQueryRelationPathTool(c *Client) basetool.BaseTool {
 			}
 			body := map[string]any{
 				"source": map[string]any{"type_id": args.Source.TypeID, "q": args.Source.Q},
-				"target": map[string]any{"type_ids": args.Target.TypeIDs, "q": args.Target.Q},
+				"target": map[string]any{"q": args.Target.Q},
 				"path":   args.Path,
 				"page":   page,
 				"count":  count,
@@ -984,35 +1065,27 @@ func fetchCITypeNames(ctx context.Context, c *Client) map[int]string {
 
 // fetchRelationTypeLabels maps relation type id -> name for edge labels.
 // Best-effort for the same reason as fetchCITypeNames.
+// fetchRelationTypeLabels reads the DICTIONARY, not the model-rule projection.
+// The projection only knows types used by a declared model pair, so an
+// instance-only type (or one whose rule was removed) rendered an empty label.
 func fetchRelationTypeLabels(ctx context.Context, c *Client) map[int]string {
 	out := map[int]string{}
-	data, err := c.Get(ctx, "/ci-type-relations", nil)
+	data, err := c.Get(ctx, "/relation-types", nil)
 	if err != nil {
 		return out
 	}
-	type relationTypeRef struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
-	}
 	var page struct {
 		Items []struct {
-			Parent struct {
-				RelationType relationTypeRef `json:"relation_type"`
-			} `json:"parent"`
-			Child struct {
-				RelationType relationTypeRef `json:"relation_type"`
-			} `json:"child"`
+			ID   int    `json:"id"`
+			Name string `json:"name"`
 		} `json:"items"`
 	}
 	if json.Unmarshal(data, &page) != nil {
 		return out
 	}
 	for _, item := range page.Items {
-		if item.Parent.RelationType.ID > 0 && item.Parent.RelationType.Name != "" {
-			out[item.Parent.RelationType.ID] = item.Parent.RelationType.Name
-		}
-		if item.Child.RelationType.ID > 0 && item.Child.RelationType.Name != "" {
-			out[item.Child.RelationType.ID] = item.Child.RelationType.Name
+		if item.ID > 0 && item.Name != "" {
+			out[item.ID] = item.Name
 		}
 	}
 	return out

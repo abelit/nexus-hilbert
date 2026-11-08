@@ -49,6 +49,25 @@ import { useToast } from '../components/Toast';
 // three write routes on the admin role and this page mirrors that by disabling
 // them with a reason rather than letting the operator find out from a 403.
 
+// The semantic mirror is a controlled vocabulary. Unknown values fall back to
+// the raw word rather than being hidden: a future topocortex category should
+// still be visible to the operator.
+const CATEGORY_LABELS: Record<string, { zh: string; en: string }> = {
+  structure: { zh: '结构', en: 'Structure' },
+  runtime: { zh: '运行', en: 'Runtime' },
+  dependency: { zh: '依赖', en: 'Dependency' },
+  ownership: { zh: '归属', en: 'Ownership' },
+  observability: { zh: '观测', en: 'Observability' },
+  'failure-domain': { zh: '故障域', en: 'Failure domain' },
+  'data-lineage': { zh: '数据血缘', en: 'Data lineage' },
+};
+
+const DIRECTION_LABELS: Record<string, { zh: string; en: string }> = {
+  src_to_dst: { zh: '源→目标', en: 'Source → target' },
+  dst_to_src: { zh: '目标→源', en: 'Target → source' },
+  bidirectional: { zh: '双向', en: 'Bidirectional' },
+};
+
 export default function RelationTypesPage() {
   const { tr, locale } = useI18n();
   const { isAdmin } = usePermissions();
@@ -124,7 +143,7 @@ export default function RelationTypesPage() {
       // otherwise spread it across every column, which widens the operation cell
       // past its buttons — and the design language fixes that column at its
       // content's width.
-      width: 'w-full',
+      width: 'w-full min-w-[140px]',
       sortable: true,
       sortValue: (row) => row.name,
       cell: (row) => (
@@ -134,14 +153,63 @@ export default function RelationTypesPage() {
             className="h-2.5 w-2.5 shrink-0 rounded-full border border-border"
             style={{ backgroundColor: isValidColor(row.color) ? row.color : 'transparent' }}
           />
-          <span className="min-w-0 truncate font-medium text-text">{row.name}</span>
+          <span className="min-w-0 truncate font-medium text-text" title={row.name}>
+            {row.name}
+          </span>
+          {row.deprecated && (
+            <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/5 px-1 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+              {tr('已弃用', 'Deprecated')}
+            </span>
+          )}
         </div>
       ),
+    },
+    {
+      key: 'semantics',
+      header: tr('语义', 'Semantics'),
+      hideable: true,
+      cell: (row) => {
+        const category = CATEGORY_LABELS[row.category];
+        const direction = DIRECTION_LABELS[row.direction];
+        if (!row.category && !row.direction) {
+          return <span className="text-text-faint">—</span>;
+        }
+        return (
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {row.category && (
+              <span className="whitespace-nowrap rounded-full border border-border px-1.5 py-0.5 text-[10px] text-text-muted">
+                {category ? tr(category.zh, category.en) : row.category}
+              </span>
+            )}
+            {row.direction && (
+              <span className="whitespace-nowrap text-[11px] text-text-faint">
+                {direction ? tr(direction.zh, direction.en) : row.direction}
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'propagation',
+      header: tr('传播', 'Propagation'),
+      hideable: true,
+      cell: (row) =>
+        row.propagates_default ? (
+          <span className="whitespace-nowrap text-[11px] text-text-muted">
+            {tr('传播', 'Propagates')} · {Number(row.weight_default ?? 0).toFixed(1)}
+          </span>
+        ) : (
+          <span className="whitespace-nowrap text-[11px] text-text-faint">{tr('不传播', 'No')}</span>
+        ),
     },
     {
       key: 'color',
       header: tr('颜色', 'Colour'),
       hideable: true,
+      // The name cell already carries the colour dot; the hex is secondary and
+      // yields its width to identity/semantics on narrow screens.
+      hideBelow: 900,
       cell: (row) =>
         row.color ? (
           <code className="font-mono text-[11px] text-text-muted">{row.color}</code>
@@ -404,6 +472,7 @@ function RelationTypeForm({
           <Input
             id={nameId}
             required
+            maxLength={64}
             value={name}
             onChange={(event) => setName(event.target.value)}
             aria-invalid={err !== null && !name.trim() ? true : undefined}

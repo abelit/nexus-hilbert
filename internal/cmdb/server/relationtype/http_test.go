@@ -178,6 +178,55 @@ func TestListReturnsItemsAndTotal(t *testing.T) {
 	}
 }
 
+// The list route exposes the read-only semantic mirror so the console and the
+// AI tools can explain an edge without a second ontology call.
+func TestListExposesSemanticMirror(t *testing.T) {
+	row := row(1, "CALLS", "#1890ff")
+	row.Category = "dependency"
+	row.Direction = "src_to_dst"
+	row.PropagatesDefault = true
+	row.WeightDefault = 0.8
+	row.InverseOf = "CALLED_BY"
+	row.Transitive = false
+	row.SubPropertyOf = citypemodel.StringList{"DEPENDS_ON"}
+	row.DisplayNameZH = "调用"
+	row.DisplayNameEN = "Calls"
+	row.Description = "caller invokes callee"
+	row.Revision = 3
+	row.DisplayNameOverride = "服务调用"
+
+	repo := newStubRepo()
+	repo.rows = []citypemodel.RelationType{row}
+	router := newRouter(t, repo, "user", false)
+
+	rec := do(t, router, http.MethodGet, "/v1/cmdb/relation-types", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, rec.Body.String())
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("items = %+v, want one", got.Items)
+	}
+	item := got.Items[0]
+	if item["category"] != "dependency" || item["direction"] != "src_to_dst" ||
+		item["propagates_default"] != true || item["weight_default"] != 0.8 ||
+		item["inverse_of"] != "CALLED_BY" || item["transitive"] != false ||
+		item["display_name_zh"] != "调用" || item["display_name_en"] != "Calls" ||
+		item["description"] != "caller invokes callee" || item["revision"] != float64(3) ||
+		item["display_name_override"] != "服务调用" {
+		t.Fatalf("semantic mirror missing from response: %+v", item)
+	}
+	sub, ok := item["sub_property_of"].([]any)
+	if !ok || len(sub) != 1 || sub[0] != "DEPENDS_ON" {
+		t.Fatalf("sub_property_of = %#v, want [DEPENDS_ON]", item["sub_property_of"])
+	}
+}
+
 // An empty dictionary must serialise as [] rather than null: a null would make
 // the SPA's list rendering special-case the empty state.
 func TestListWithNoRowsSerialisesEmptyArray(t *testing.T) {
@@ -319,7 +368,8 @@ func TestCreateValidationIsBadRequest(t *testing.T) {
 	cases := []struct{ name, body string }{
 		{"missing name", `{}`},
 		{"empty name", `{"name":""}`},
-		{"name too long", `{"name":"12345678901234567"}`},
+		{"name too long", `{"name":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{"semantic field is read-only", `{"name":"CALLS","category":"dependency"}`},
 		{"bad colour", `{"name":"ok","color":"#gggggg"}`},
 		{"unknown field", `{"name":"ok","nope":1}`},
 		{"malformed json", `{"name":`},
