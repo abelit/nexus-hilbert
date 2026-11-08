@@ -57,6 +57,14 @@ const rows = [
       deprecated: true, replacement: 'RUNS_ON',
     }),
   },
+  {
+    id: 4, name: 'CONTAINS', color: '#0ea5e9',
+    created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+    ...semantics({
+      category: 'structure', direction: 'src_to_dst',
+      inverse_of: 'PART_OF', transitive: true, display_name_zh: '包含',
+    }),
+  },
 ];
 
 function renderPage() {
@@ -83,13 +91,18 @@ describe('the list', () => {
     expect(await screen.findByText('depends_on')).toBeInTheDocument();
     expect(screen.getByText('runs_on')).toBeInTheDocument();
     // A TYPE WITH NO COLOUR SHOWS A DASH rather than a transparent swatch that
-    // looks like a rendering bug.
-    expect(screen.getByText('—')).toBeInTheDocument();
+    // looks like a rendering bug. The inverse column uses the same convention.
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
     // The semantic mirror is visible: category, direction and propagation.
     expect(screen.getByText('依赖')).toBeInTheDocument();
     expect(screen.getAllByText('目标→源').length).toBeGreaterThan(0);
     expect(screen.getAllByText('传播 · 0.8').length).toBeGreaterThan(0);
     expect(screen.getByText('已弃用')).toBeInTheDocument();
+    expect(screen.getByText('→ RUNS_ON')).toBeInTheDocument();
+    // The inverse and transitive flags are the operator-visible half of the
+    // direction mapping the connector applies.
+    expect(screen.getByText('PART_OF')).toBeInTheDocument();
+    expect(screen.getByText('可传递')).toBeInTheDocument();
   });
 
   it('offers a retry when the load fails, and keeps the table usable', async () => {
