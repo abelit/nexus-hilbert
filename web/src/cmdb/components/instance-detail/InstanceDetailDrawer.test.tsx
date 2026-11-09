@@ -196,6 +196,7 @@ function renderDrawer(
 
 beforeEach(() => {
   localStorage.setItem('ongrid-locale', 'zh-CN');
+  useAuth.setState({ token: null, role: 'admin' });
 });
 
 afterEach(() => {
@@ -525,5 +526,77 @@ describe('read-only peek', () => {
     const drawer = await screen.findByRole('dialog');
     await waitFor(() => expect(within(drawer).getAllByText('web-01').length).toBeGreaterThan(0));
     expect(within(drawer).getAllByRole('button', { name: /^编辑/ }).length).toBeGreaterThan(0);
+  });
+});
+
+describe('the header actions', () => {
+  it('offers AI explain, knowledge, share and copy, without AI impact', async () => {
+    mocks();
+    renderDrawer(vi.fn(), 'overview');
+    const drawer = await screen.findByRole('dialog');
+
+    expect(within(drawer).getByRole('button', { name: 'AI 解读' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: '知识库' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: '分享' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: '复制' })).toBeInTheDocument();
+    expect(within(drawer).queryByRole('button', { name: 'AI 影响面' })).not.toBeInTheDocument();
+  });
+
+  it('copies the resource deep link when sharing', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    mocks();
+    renderDrawer(vi.fn(), 'overview');
+    const drawer = await screen.findByRole('dialog');
+
+    fireEvent.click(within(drawer).getByRole('button', { name: '分享' }));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/cmdb/instances?type=host&ci=5')),
+    );
+    expect(await screen.findByText('链接已复制')).toBeInTheDocument();
+  });
+
+  it('copies a readable summary without duplicating the link', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    mocks();
+    renderDrawer(vi.fn(), 'overview');
+    const drawer = await screen.findByRole('dialog');
+
+    fireEvent.click(within(drawer).getByRole('button', { name: '复制' }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const copied = String(writeText.mock.calls[0]?.[0] ?? '');
+    expect(copied).toContain('web-01');
+    expect(copied).toContain('主机');
+    expect(copied).toContain('ID');
+    expect(copied).not.toContain('/cmdb/instances');
+  });
+});
+
+describe('the attribute row actions', () => {
+  it('shows AI explain, translate and copy beside the hover-revealed edit icon', async () => {
+    mocks();
+    renderDrawer(vi.fn(), 'overview');
+    const drawer = await screen.findByRole('dialog');
+
+    expect(await within(drawer).findByRole('button', { name: 'AI 解读 主机标识' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'AI 翻译 主机标识' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: '复制 主机标识' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: '编辑 主机标识' })).toBeInTheDocument();
+  });
+
+  it('copies the value the operator sees, not the stored code', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    mocks();
+    renderDrawer(vi.fn(), 'overview');
+    const drawer = await screen.findByRole('dialog');
+
+    fireEvent.click(await within(drawer).findByRole('button', { name: '复制 环境' }));
+
+    // `test` is the stored code; 测试 is what the row displays.
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('测试'));
   });
 });

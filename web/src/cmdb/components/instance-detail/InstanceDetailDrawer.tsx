@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock3, Fingerprint, Hash, History, Info, Network, Pencil, UserRound, X, Zap, BookOpen } from 'lucide-react';
+import { BookOpen, Clock3, Copy, Fingerprint, Hash, History, Info, Network, Pencil, Share2, UserRound, X, Zap } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
@@ -10,7 +10,7 @@ import { useI18n } from '@/i18n/locale';
 import { openAssistant } from '@/lib/assistantIntent';
 
 import { AIActionButton } from '../AIActionButton';
-import { explainCIsPrompt, relationsPrompt } from '../../lib/aiPrompts';
+import { explainCIsPrompt } from '../../lib/aiPrompts';
 import { cn } from '@/lib/cn';
 import { usePermissions } from '@/store/me';
 
@@ -90,6 +90,28 @@ export function InstanceDetailDrawer({
   const { tr, locale } = useI18n();
   const { isAdmin, canMutate } = usePermissions();
   const toast = useToast();
+
+  // SHARING IS COPYING THE CANONICAL DEEP LINK, not minting a public token:
+  // the console has no public-resource share, and the recipient needs a login
+  // either way. The label says Share because that is the operator's task.
+  const copyToClipboard = useCallback(
+    async (text: string, done: string) => {
+      if (!navigator.clipboard?.writeText) {
+        toast.error(
+          tr('当前浏览器不支持自动复制，请手动选择复制。', 'Copy is unavailable in this browser; select the value manually.'),
+        );
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        toast.success(done);
+      } catch {
+        toast.error(tr('复制失败，请手动复制。', 'Could not copy; select the value manually.'));
+      }
+    },
+    [toast, tr],
+  );
+
   const [tab, setTab] = useState<TabKey>(initialTab);
   // `nav` holds a subject opened from the topology; until then the props are
   // authoritative. The effect clears it when a different row/model is opened.
@@ -300,6 +322,15 @@ export function InstanceDetailDrawer({
     ? users.find((user) => user.email === storedUpdater)?.display_name || storedUpdater
     : storedUpdater;
 
+  const shareLink = `${window.location.origin}/cmdb/instances?type=${encodeURIComponent(subject.model.name)}&ci=${subject.id}`;
+  const copySummary = [
+    displayName,
+    `${subject.model.alias || subject.model.name} · ${tr('ID', 'ID')} ${subject.id}`,
+    showUnique ? `${uniqueLabel}: ${uniqueValue}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
   return (
     <Drawer
       open
@@ -375,28 +406,38 @@ export function InstanceDetailDrawer({
                 })
               }
             />
-            <AIActionButton
-              zh="AI 影响面"
-              en="AI impact"
-              iconOnly
-              onClick={() =>
-                openAssistant({
-                  prompt: relationsPrompt(subject.id, 'both', 2, locale),
-                })
-              }
-            />
             {canMutate && instance && (
               <Button
                 variant="ghost"
                 size="icon"
                 type="button"
                 onClick={() => setKnowledgeOpen(true)}
-                aria-label={tr('导入知识库', 'Import to knowledge base')}
-                title={tr('导入知识库', 'Import to knowledge base')}
+                aria-label={tr('知识库', 'Knowledge base')}
+                title={tr('知识库', 'Knowledge base')}
               >
                 <BookOpen size={13} aria-hidden="true" />
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              onClick={() => void copyToClipboard(shareLink, tr('链接已复制', 'Link copied'))}
+              aria-label={tr('分享', 'Share')}
+              title={tr('分享', 'Share')}
+            >
+              <Share2 size={13} aria-hidden="true" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              onClick={() => void copyToClipboard(copySummary, tr('已复制', 'Copied'))}
+              aria-label={tr('复制', 'Copy')}
+              title={tr('复制', 'Copy')}
+            >
+              <Copy size={13} aria-hidden="true" />
+            </Button>
           </div>
           <button
             type="button"

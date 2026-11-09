@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { PanelsTopLeft, Pencil, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Copy, Languages, PanelsTopLeft, Pencil, RefreshCw, Sparkles } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
@@ -10,9 +10,9 @@ import { cn } from '@/lib/cn';
 
 import type { AttributeGroup, CIType, TypeAttribute } from '../../api/citype';
 import type { Instance } from '../../api/instance';
-import { AIActionButton } from '../AIActionButton';
 import { AttributeValue } from '../AttributeControl';
 import { FileField } from '../files/FileField';
+import { useToast } from '../Toast';
 import { attributeSections } from '../../lib/attribute-sections';
 import { explainValuePrompt, translateValuePrompt } from '../../lib/aiPrompts';
 import { choiceText } from '../../lib/choice-labels';
@@ -34,6 +34,34 @@ function valueText(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+// A row action is a plain icon, like the inline-edit pencil: no bordered
+// button competing with the value. The whole group is revealed by the row's
+// hover / focus rule in styles.css.
+function RowActionButton({
+  label,
+  onClick,
+  disabled = false,
+  children,
+}: {
+  label: string;
+  onClick(): void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="shrink-0 rounded p-0.5 text-text-faint transition-colors hover:text-sky-500 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
 }
 
 export function InstanceOverview({
@@ -62,9 +90,28 @@ export function InstanceOverview({
   readOnly?: boolean;
 }) {
   const { tr, locale } = useI18n();
+  const toast = useToast();
   const referenceLabels = useReferenceLabels(instance ? [instance] : [], attributes, models);
   const [editing, setEditing] = useState<string | null>(null);
   const [savingName, setSavingName] = useState<string | null>(null);
+
+  const copyValue = useCallback(
+    async (text: string) => {
+      if (!navigator.clipboard?.writeText) {
+        toast.error(
+          tr('当前浏览器不支持自动复制，请手动选择复制。', 'Copy is unavailable in this browser; select the value manually.'),
+        );
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        toast.success(tr('已复制', 'Copied'));
+      } catch {
+        toast.error(tr('复制失败，请手动复制。', 'Could not copy; select the value manually.'));
+      }
+    },
+    [toast, tr],
+  );
 
   // A different resource (or a switch from the topology) starts with no row
   // left in edit mode; a stale draft must never be saved to the new instance.
@@ -146,6 +193,9 @@ export function InstanceOverview({
                 const raw = attribute.is_reference ? referenceRawText(value) : displayValue(value);
                 const oddLast = section.items.length % 2 === 1 && index === section.items.length - 1;
                 const editingRow = editing === attribute.name;
+                const attributeLabel = attribute.alias || attribute.name;
+                const hasValue =
+                  !attribute.is_password && !attribute.is_file && Boolean(valueText(value).trim());
                 return (
                   <div
                     key={attribute.id}
@@ -214,51 +264,57 @@ export function InstanceOverview({
                               </Chip>
                             )}
                           </span>
-                          {!attribute.is_password && !attribute.is_file && valueText(value).trim() && (
-                            <span className="flex shrink-0 items-center gap-0.5">
-                              <AIActionButton
-                                iconOnly
-                                zh="AI 解释"
-                                en="AI explain"
-                                onClick={() =>
-                                  openAssistant({
-                                    prompt: explainValuePrompt(
-                                      valueText(value),
-                                      `${attribute.alias || attribute.name} (${attribute.name})`,
-                                    ),
-                                  })
-                                }
-                              />
-                              <AIActionButton
-                                iconOnly
-                                icon="languages"
-                                zh="AI 翻译"
-                                en="AI translate"
-                                onClick={() =>
-                                  openAssistant({
-                                    prompt: translateValuePrompt(
-                                      valueText(value),
-                                      locale.toLowerCase().startsWith('zh') ? 'en' : 'zh',
-                                      `${attribute.alias || attribute.name} (${attribute.name})`,
-                                    ),
-                                  })
-                                }
-                              />
+                          {(hasValue || editable(attribute)) && (
+                            <span className="cmdb-attribute-actions flex shrink-0 items-center gap-0.5">
+                              {hasValue && (
+                                <>
+                                  <RowActionButton
+                                    label={tr(`AI 解读 ${attributeLabel}`, `AI explain ${attributeLabel}`)}
+                                    onClick={() =>
+                                      openAssistant({
+                                        prompt: explainValuePrompt(
+                                          valueText(value),
+                                          `${attributeLabel} (${attribute.name})`,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    <Sparkles size={11} aria-hidden="true" />
+                                  </RowActionButton>
+                                  <RowActionButton
+                                    label={tr(`AI 翻译 ${attributeLabel}`, `AI translate ${attributeLabel}`)}
+                                    onClick={() =>
+                                      openAssistant({
+                                        prompt: translateValuePrompt(
+                                          valueText(value),
+                                          locale.toLowerCase().startsWith('zh') ? 'en' : 'zh',
+                                          `${attributeLabel} (${attribute.name})`,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    <Languages size={11} aria-hidden="true" />
+                                  </RowActionButton>
+                                  <RowActionButton
+                                    label={tr(`复制 ${attributeLabel}`, `Copy ${attributeLabel}`)}
+                                    onClick={() => void copyValue(label || raw)}
+                                  >
+                                    <Copy size={11} aria-hidden="true" />
+                                  </RowActionButton>
+                                </>
+                              )}
+                              {editable(attribute) && (
+                                <RowActionButton
+                                  label={tr(`编辑 ${attributeLabel}`, `Edit ${attributeLabel}`)}
+                                  onClick={() => setEditing(attribute.name)}
+                                  // While a row writes itself, another pencil
+                                  // would start a second draft before the first settles.
+                                  disabled={savingName !== null}
+                                >
+                                  <Pencil size={11} aria-hidden="true" />
+                                </RowActionButton>
+                              )}
                             </span>
-                          )}
-                          {editable(attribute) && (
-                            <button
-                              type="button"
-                              onClick={() => setEditing(attribute.name)}
-                              // While a row writes itself, another pencil would
-                              // start a second draft before the first settles.
-                              disabled={savingName !== null}
-                              aria-label={tr(`编辑 ${attribute.alias || attribute.name}`, `Edit ${attribute.alias || attribute.name}`)}
-                              title={tr(`编辑 ${attribute.alias || attribute.name}`, `Edit ${attribute.alias || attribute.name}`)}
-                              className="cmdb-attribute-edit shrink-0 rounded p-0.5 text-text-faint transition-colors hover:text-sky-500 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <Pencil size={11} aria-hidden="true" />
-                            </button>
                           )}
                         </div>
                       )}
