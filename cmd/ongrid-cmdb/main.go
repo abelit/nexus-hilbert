@@ -48,7 +48,7 @@ const (
 
 func main() {
 	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService, applyServiceEdges, rollbackServiceLayers bool
-	var serviceDecisionsPath string
+	var serviceDecisionsPath, ingestCallEdgesPath string
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -59,6 +59,13 @@ func main() {
 				os.Exit(1)
 			}
 			serviceDecisionsPath = args[i+1]
+			i++
+		case "--ingest-call-edges":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--ingest-call-edges requires a file path")
+				os.Exit(1)
+			}
+			ingestCallEdgesPath = args[i+1]
 			i++
 		case "--version", "-v":
 			fmt.Fprintf(os.Stdout, "ongrid-cmdb %s\n", version)
@@ -99,6 +106,9 @@ func main() {
 			if strings.HasPrefix(arg, "--service-decisions=") {
 				serviceDecisionsPath = strings.TrimPrefix(arg, "--service-decisions=")
 			}
+			if strings.HasPrefix(arg, "--ingest-call-edges=") {
+				ingestCallEdgesPath = strings.TrimPrefix(arg, "--ingest-call-edges=")
+			}
 		}
 	}
 	if classifyService && !applyServiceLayers {
@@ -109,18 +119,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, "--service-decisions is only valid with --apply-service-layers")
 		os.Exit(1)
 	}
-	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers && !applyServiceEdges && !rollbackServiceLayers {
-		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary, --apply-service-layers, --apply-service-edges or --rollback-service-layers")
+	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers && !applyServiceEdges && !rollbackServiceLayers && ingestCallEdgesPath == "" {
+		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary, --apply-service-layers, --apply-service-edges, --rollback-service-layers or --ingest-call-edges")
 		os.Exit(1)
 	}
 	commands := 0
-	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, applyServiceEdges, rollbackServiceLayers} {
+	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, applyServiceEdges, rollbackServiceLayers, ingestCallEdgesPath != ""} {
 		if on {
 			commands++
 		}
 	}
 	if commands > 1 {
-		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers, --apply-service-edges, --rollback-service-layers")
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers, --apply-service-edges, --rollback-service-layers, --ingest-call-edges")
 		os.Exit(1)
 	}
 
@@ -321,6 +331,30 @@ func main() {
 		}
 		return
 	}
+	// The APM/collector CALLS ingestion: explicit CI pairs with provenance,
+	// observation time and call attributes. The producer resolves its own
+	// service names; the CMDB does not guess.
+	if ingestCallEdgesPath != "" {
+		edges, err := readCallEdges(ingestCallEdgesPath)
+		if err != nil {
+			fatal(log, "read call edges", err)
+		}
+		citypeUC := cmdbcitypebiz.NewUsecase(cmdbcitypedata.NewRepo(db), log)
+		ciRepo := cistore.NewRepo(db)
+		ciUC := cibiz.NewUsecase(ciRepo, cmdbcitypebiz.NewCIResolver(citypeUC), log)
+		report, err := ciUC.IngestCallEdges(rootCtx, cibiz.CallEdgeIngestInput{
+			DryRun: dryRun, DefaultEvidenceSource: "collector:apm", Edges: edges,
+		})
+		if err != nil {
+			fatal(log, "ingest call edges", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode call edge report", err)
+		}
+		return
+	}
 	// The managed vocabulary is provisioned EXPLICITLY. Some target words have
 	// no legacy rule to split and are not needed by the built-in bootstrap, so
 	// without this command a new writer would have no semantically configured
@@ -404,6 +438,20 @@ func main() {
 		log.Warn("trigger dispatcher did not drain", slog.Any("err", err))
 	}
 	log.Info("shutdown complete", slog.String("version", version))
+}
+
+// readCallEdges reads the collector's CALLS edges: a JSON array of the fields
+// CallEdgeInput documents. The producer resolves service names to CI ids.
+func readCallEdges(path string) ([]cibiz.CallEdgeInput, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var edges []cibiz.CallEdgeInput
+	if err := json.Unmarshal(raw, &edges); err != nil {
+		return nil, err
+	}
+	return edges, nil
 }
 
 // readServiceDecisions reads the owner's review decisions for the RFC-011
