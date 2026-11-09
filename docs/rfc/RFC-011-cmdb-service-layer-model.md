@@ -100,6 +100,21 @@ CMDB 当前的 `service`、`application`、`app_instance`、`app_cluster` 是部
 | **M3 对账** | 新旧图并行计算影响面；业务上卷覆盖率；调用链与人工答案对比 | 只读 | 未解释差异 0；业务上卷 100%；抽样正确 | 影子结果不影响生产 |
 | **M4 下线** | 旧 `service`/`application`/`app_instance` 标记 deprecated，保留 alias；一个发布周期后删除 | 只改字典/只读 | 旧类只读；页面无引用；回滚演练通过 | 保留 alias 和映射表 |
 
+### M1 规划器
+
+```bash
+ongrid-cmdb --plan-service-layers
+```
+
+只读命令。它按模型名把 `application` → `application_service`、`app_instance` → `service_instance` 映射为可直接分类的实例，把 `service` 全部放入 review（业务服务还是应用服务需要业务判断），并检查：
+
+- 目标三层是否存在（缺失列在 `missing_targets`）；
+- 来源模型是否存在（缺失列在 `missing_sources`）；
+- 每个实例是否有唯一标识；同一标识出现多次时，**所有**相关实例都进入 review（迁移时无法决定谁对应谁）；
+- 输出每个来源模型的行数、可分类数、review 数，以及 review 列表（ci_id、名称、原因）。
+
+规划器不写任何数据。review 清零后，下一步是独立的 apply：创建目标 CI、写入独立 ID 映射表（`c_ci_layer_mappings`），再进入 M2。
+
 ### M1 分类规则（初稿）
 
 1. 模型名精确匹配 `application` → `application_service`；`app_instance` → `service_instance`；`service` 按实例属性/关系判定：
@@ -160,6 +175,6 @@ M0 前已按推荐默认值确定：
 ## 实施顺序建议
 
 1. **M0（已实现）**：三个类、`HAS_INSTANCE`/`DEPLOYED_TO` 词表、`--ensure-builtin-models`/管理员 bootstrap、CALLS/HAS_INSTANCE/CONTAINS 声明；
-2. M1（部分实现）：边属性 `props_json` 已完成；剩余分类命令、review 队列、独立 ID 映射表；
+2. M1（部分实现）：边属性 `props_json` 和只读分类规划器 `--plan-service-layers` 已完成；剩余 apply、独立 ID 映射表和 review 清零；
 3. M2：边重分类 + APM 接入；
 4. M3/M4：对账、影子、下线。
