@@ -360,6 +360,14 @@ func TestServiceBuiltinModelsCreateTheThreeLayers(t *testing.T) {
 		if set.UniqueAttr.Name != spec.UniqueKey {
 			t.Fatalf("%s identifies by %q, want %q", spec.Name, set.UniqueAttr.Name, spec.UniqueKey)
 		}
+		// The RFC's display name is the ordinary `name` attribute. Without a
+		// show binding cantor labels an instance by its unique attribute, which
+		// would put the code (a UUID on migrated models) where a person expects
+		// the service's name.
+		if set.ShowAttr.Name != "name" || set.ShowAttr.ID == set.UniqueAttr.ID {
+			t.Fatalf("%s labels by %q (id %d), want the name attribute",
+				spec.Name, set.ShowAttr.Name, set.ShowAttr.ID)
+		}
 		for _, attr := range spec.Attributes {
 			if _, ok := set.ByName[attr.Name]; !ok {
 				t.Fatalf("%s does not carry %s", spec.Name, attr.Name)
@@ -417,5 +425,62 @@ func TestServiceBuiltinModelsCreateTheThreeLayers(t *testing.T) {
 	}
 	if len(second.Created) != 0 {
 		t.Fatalf("second call created %v; the bootstrap is not idempotent", second.Created)
+	}
+}
+
+// A deployment that created the service layer before the display binding was
+// declared has show_id NULL and labels each instance by its code. The
+// bootstrap fills that one missing binding on the next run, and never replaces
+// a show key an operator chose.
+func TestEnsureBuiltinModelsFillsMissingServiceShowKey(t *testing.T) {
+	repo, db := newWriteRepo(t)
+	uc := citypebiz.NewUsecase(repo, nil)
+	ctx := context.Background()
+	in := citypebiz.BuiltinEnsureInput{Models: cibiz.ServiceBuiltinModels()}
+	if _, err := uc.EnsureBuiltinModels(ctx, in); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	names := []string{
+		string(cibiz.ModelBusinessService),
+		string(cibiz.ModelApplicationService),
+		string(cibiz.ModelServiceInstance),
+	}
+	// Simulate the rows the earlier bootstrap left behind.
+	if err := db.Model(&citypemodel.CIType{}).Where("name IN ?", names).
+		Update("show_id", nil).Error; err != nil {
+		t.Fatalf("clear show ids: %v", err)
+	}
+	if _, err := uc.EnsureBuiltinModels(ctx, in); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+	for _, name := range names {
+		view, err := uc.GetByRef(ctx, name)
+		if err != nil || view == nil {
+			t.Fatalf("resolve %s: %v", name, err)
+		}
+		if view.Type.ShowID == nil {
+			t.Fatalf("%s still has no show binding", name)
+		}
+	}
+
+	// An operator's own choice is not replaced.
+	var owner citypemodel.Attribute
+	if err := db.Where("name = ?", "owner").First(&owner).Error; err != nil {
+		t.Fatalf("owner attribute: %v", err)
+	}
+	if err := db.Model(&citypemodel.CIType{}).
+		Where("name = ?", string(cibiz.ModelApplicationService)).
+		Update("show_id", owner.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uc.EnsureBuiltinModels(ctx, in); err != nil {
+		t.Fatalf("third call: %v", err)
+	}
+	view, err := uc.GetByRef(ctx, string(cibiz.ModelApplicationService))
+	if err != nil || view == nil {
+		t.Fatalf("resolve application_service: %v", err)
+	}
+	if view.Type.ShowID == nil || *view.Type.ShowID != owner.ID {
+		t.Fatalf("application_service show id = %v, want the operator's choice %d", view.Type.ShowID, owner.ID)
 	}
 }

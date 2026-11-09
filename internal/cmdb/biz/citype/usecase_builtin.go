@@ -37,7 +37,10 @@ type BuiltinModelResult struct {
 }
 
 // EnsureBuiltinModels creates the named models and attributes if they are
-// absent, and changes nothing that exists.
+// absent, and changes nothing that exists — except that it fills a MISSING
+// display binding on a built-in model whose spec declares one. That gap is a
+// deployment created before the spec had a display attribute; a show key the
+// operator chose is never replaced.
 //
 // THE ATTRIBUTE DICTIONARY IS SHARED, so an attribute is created once and
 // bound to each model that needs it — the same `u_count` serves a rack and a
@@ -81,11 +84,15 @@ func (u *Usecase) EnsureBuiltinModels(ctx context.Context, in BuiltinEnsureInput
 		}
 		if view != nil {
 			out.Existing = append(out.Existing, "model "+spec.Name)
+			if err := u.ensureBuiltinShowKey(ctx, spec, view, in.Actor); err != nil {
+				return nil, err
+			}
 		} else {
 			if _, err := u.Create(ctx, CreateInput{
 				Name:      spec.Name,
 				Alias:     spec.Alias,
 				UniqueKey: spec.UniqueKey,
+				ShowKey:   spec.ShowKey,
 				Actor:     in.Actor,
 			}); err != nil {
 				return nil, fmt.Errorf("create the built-in model %s: %w", spec.Name, err)
@@ -109,6 +116,21 @@ func (u *Usecase) EnsureBuiltinModels(ctx context.Context, in BuiltinEnsureInput
 		}
 	}
 	return out, nil
+}
+
+// ensureBuiltinShowKey fills a missing display binding. A model with no show
+// key labels its instances by the unique attribute, which is why a deployment
+// created before the spec declared `name` shows codes; the next bootstrap run
+// repairs it. A binding the operator already chose is left alone.
+func (u *Usecase) ensureBuiltinShowKey(ctx context.Context, spec cibiz.BuiltinModelSpec, view *View, actor model.ID) error {
+	if spec.ShowKey == "" || view == nil || view.Type.ShowID != nil {
+		return nil
+	}
+	showKey := spec.ShowKey
+	if _, err := u.Update(ctx, UpdateInput{ID: view.Type.ID, ShowKey: &showKey, Actor: actor}); err != nil {
+		return fmt.Errorf("set the built-in show key of %s: %w", spec.Name, err)
+	}
+	return nil
 }
 
 // ensureBuiltinRelation creates one model relation if the pair has no live rule.
