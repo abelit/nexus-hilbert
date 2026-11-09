@@ -508,10 +508,10 @@ func TestRelationGraphRenderPayload(t *testing.T) {
 			_, _ = w.Write([]byte(`{"items":[{"id":7,"name":"runs_on"}],"total":1}`))
 		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/children":
 			childrenHits++
-			_, _ = w.Write([]byte(`{"items":[{"relation_id":1,"ci_id":2,"type_id":4,"relation_type_id":7}],"numfound":1,"page":1}`))
+			_, _ = w.Write([]byte(`{"items":[{"relation_id":1,"ci_id":2,"type_id":4,"relation_type_id":7,"relation_type_name":"runs_on","relation_type_direction":"dst_to_src","relation_type_propagates":true,"relation_type_weight":1.0,"evidence_source":"collector:autodiscovery","confidence":0.9,"observed_at":"2026-11-08T10:00:00Z"}],"numfound":1,"page":1}`))
 		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/parents":
 			parentHits++
-			_, _ = w.Write([]byte(`{"items":[{"relation_id":2,"ci_id":9,"type_id":3,"relation_type_id":7}],"numfound":1,"page":1}`))
+			_, _ = w.Write([]byte(`{"items":[{"relation_id":2,"ci_id":9,"type_id":3,"relation_type_id":7,"relation_type_name":"runs_on","relation_type_direction":"dst_to_src","relation_type_propagates":true,"relation_type_weight":1.0}],"numfound":1,"page":1}`))
 		case strings.HasPrefix(r.URL.Path, "/api/v1/cmdb/instances/"):
 			id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/instances/"))
 			typeID := 3
@@ -544,16 +544,100 @@ func TestRelationGraphRenderPayload(t *testing.T) {
 	}
 	edges, _ := got["edges"].([]any)
 	labels := map[string]string{}
+	var childEdge map[string]any
 	for _, e := range edges {
 		edge := e.(map[string]any)
 		labels[fmt.Sprintf("%v->%v", edge["source"], edge["target"])] = fmt.Sprint(edge["label"])
+		if edge["source"] == float64(1) && edge["target"] == float64(2) {
+			childEdge = edge
+		}
 	}
 	if labels["1->2"] != "runs_on" || labels["9->1"] != "runs_on" {
 		t.Fatalf("edge labels = %v", labels)
 	}
+	if childEdge == nil {
+		t.Fatalf("missing 1->2 edge: %v", edges)
+	}
+	if childEdge["relation_type_id"] != float64(7) || childEdge["direction"] != "dst_to_src" ||
+		childEdge["propagates"] != true || childEdge["weight"] != 1.0 {
+		t.Fatalf("edge semantics missing: %v", childEdge)
+	}
+	if childEdge["evidence_source"] != "collector:autodiscovery" || childEdge["confidence"] != 0.9 ||
+		childEdge["observed_at"] != "2026-11-08T10:00:00Z" {
+		t.Fatalf("edge provenance missing: %v", childEdge)
+	}
 	nodes, _ := got["nodes"].([]any)
 	if len(nodes) != 3 {
 		t.Fatalf("nodes = %d, want 3", len(nodes))
+	}
+}
+
+func TestRelationGraphOnlyPropagatingFiltersStructuralEdges(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/cmdb/ci-types":
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case r.URL.Path == "/api/v1/cmdb/relation-types":
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/children":
+			_, _ = w.Write([]byte(`{"items":[
+				{"relation_id":1,"ci_id":2,"type_id":3,"relation_type_id":7,"relation_type_name":"runs_on","relation_type_propagates":true},
+				{"relation_id":2,"ci_id":3,"type_id":3,"relation_type_id":8,"relation_type_name":"contain","relation_type_propagates":false}
+			],"numfound":2,"page":1}`))
+		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/parents":
+			_, _ = w.Write([]byte(`{"items":[],"numfound":0,"page":1}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/cmdb/instances/"):
+			id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/instances/"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"ci_id": id, "type_id": 3, "values": map[string]any{}})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	})
+
+	all := runTool(t, c, ToolNameRelationGraph, `{"ci_id":1,"direction":"down"}`)
+	if nodes, _ := all["nodes"].([]any); len(nodes) != 3 {
+		t.Fatalf("nodes without filter = %d, want 3: %v", len(nodes), all)
+	}
+	filtered := runTool(t, c, ToolNameRelationGraph, `{"ci_id":1,"direction":"down","only_propagating":true}`)
+	if nodes, _ := filtered["nodes"].([]any); len(nodes) != 2 {
+		t.Fatalf("nodes with only_propagating = %d, want 2: %v", len(nodes), filtered)
+	}
+	if edges, _ := filtered["edges"].([]any); len(edges) != 1 {
+		t.Fatalf("edges = %v, want only the propagating one", edges)
+	}
+	if counts, _ := filtered["counts"].(map[string]any); counts["downstream"] != float64(2) {
+		t.Fatalf("counts = %v, want the raw numfound 2", counts)
+	}
+}
+
+func TestRelationGraphReportsTruncationAtDeeperHops(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/cmdb/ci-types":
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case r.URL.Path == "/api/v1/cmdb/relation-types":
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/children":
+			_, _ = w.Write([]byte(`{"items":[{"relation_id":1,"ci_id":2,"type_id":3,"relation_type_id":7,"relation_type_propagates":true}],"numfound":1,"page":1}`))
+		case r.URL.Path == "/api/v1/cmdb/ci-relations/2/children":
+			_, _ = w.Write([]byte(`{"items":[{"relation_id":2,"ci_id":3,"type_id":3,"relation_type_id":7,"relation_type_propagates":true}],"numfound":5,"page":1}`))
+		case strings.HasSuffix(r.URL.Path, "/parents"):
+			_, _ = w.Write([]byte(`{"items":[],"numfound":0,"page":1}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/cmdb/instances/"):
+			id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/instances/"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"ci_id": id, "type_id": 3, "values": map[string]any{}})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	})
+
+	got := runTool(t, c, ToolNameRelationGraph, `{"ci_id":1,"direction":"down","depth":2,"max_nodes":20}`)
+	if got["truncated"] != true {
+		t.Fatalf("truncated = %v, want true for the deeper hop", got["truncated"])
+	}
+	levels, _ := got["truncated_levels"].([]any)
+	if len(levels) != 1 || levels[0] != float64(2) {
+		t.Fatalf("truncated_levels = %v, want [2]", got["truncated_levels"])
 	}
 }
 

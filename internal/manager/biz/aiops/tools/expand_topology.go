@@ -28,7 +28,8 @@ const (
 
 const expandTopologyDescription = "Walk the business topology graph outward from a starting node (or a device's node). " +
 	"Returns every reachable node with the hop count, the relation type that led there, and that relation's AIOps semantics tag. " +
-	"Default depth=2, only follows propagating edges (depends_on / deployed_on / routes_to) so the result is the failure blast-radius."
+	"Default depth=2, only follows propagating edges (depends_on / deployed_on / routes_to) so the result is the failure blast-radius. " +
+	"Propagation follows each relation type's declared direction (src_to_dst: Src→Dst, dst_to_src: Dst→Src, bidirectional: both)."
 
 const expandTopologyWhenToUse = "When the user asks 'what depends on X', 'what would break if X dies', 'show me the blast radius of node X', " +
 	"or as a follow-up after query_incidents / get_incident_detail to figure out which other services are affected by an alert on a single device. " +
@@ -66,7 +67,7 @@ var expandTopologySchema = json.RawMessage(`{
         "downstream",
         "upstream"
       ],
-      "description": "downstream = follow propagation direction (failure on src reaches these); upstream = inverse (these can cause failure on src). Default both for a symmetric blast radius.",
+      "description": "downstream = follow the relation type's declared propagation direction (src_to_dst: Src→Dst; dst_to_src: Dst→Src; bidirectional: both); upstream = the inverse (what can cause the start to fail). Default both for a symmetric blast radius.",
       "default": "both"
     }
   },
@@ -254,16 +255,8 @@ func (t *ExpandTopologyTool) InvokableRun(ctx context.Context, argsJSON string, 
 			if onlyPropagating && !rt.PropagatesFailure {
 				continue
 			}
-			var nextID uint64
-			var reach string
-			switch {
-			case r.SrcID == cur && (direction == "both" || direction == "downstream"):
-				nextID = r.DstID
-				reach = "downstream"
-			case r.DstID == cur && (direction == "both" || direction == "upstream"):
-				nextID = r.SrcID
-				reach = "upstream"
-			default:
+			nextID, reach, ok := topologyPropagationStep(rt, r, cur, direction)
+			if !ok {
 				continue
 			}
 			if _, seen := visited[nextID]; seen {
@@ -380,5 +373,45 @@ func sortHitsByHopsThenName(hits []expandTopologyHit) {
 			}
 			break
 		}
+	}
+}
+
+// topologyPropagationStep resolves one relation for the requested direction.
+//
+// A relation type's Direction says which way failure flows, which is NOT the
+// same as which way the edge happens to be stored: depends_on and deployed_on
+// are dst_to_src, so a failure on the stored destination reaches the source.
+// A bidirectional relation propagates both ways and is therefore both a cause
+// and an effect, so it matches either requested side; the hop label follows the
+// question the caller asked.
+func topologyPropagationStep(rt *topologymodel.RelationType, r *topologymodel.Relation, cur uint64, direction string) (next uint64, reachedVia string, ok bool) {
+	switch {
+	case r.SrcID == cur:
+		next = r.DstID
+	case r.DstID == cur:
+		next = r.SrcID
+	default:
+		return 0, "", false
+	}
+
+	switch rt.Direction {
+	case string(topologymodel.DirectionBidirectional):
+		reachedVia = "downstream"
+		if direction == "upstream" {
+			reachedVia = "upstream"
+		}
+		return next, reachedVia, true
+	case string(topologymodel.DirectionDstToSrc):
+		if r.DstID == cur {
+			return next, "downstream", direction != "upstream"
+		}
+		return next, "upstream", direction != "downstream"
+	default:
+		// src_to_dst, and an unset direction on a custom type, keep the
+		// stored orientation.
+		if r.SrcID == cur {
+			return next, "downstream", direction != "upstream"
+		}
+		return next, "upstream", direction != "downstream"
 	}
 }
