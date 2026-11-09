@@ -45,7 +45,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels bool
+	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -73,16 +73,22 @@ func main() {
 			ensureVocabulary = true
 		case "--ensure-builtin-models":
 			ensureBuiltinModels = true
+		case "--plan-service-layers":
+			planServiceLayers = true
 		}
 	}
 	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary {
 		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations or --ensure-relation-vocabulary")
 		os.Exit(1)
 	}
-	if (cleanupRelations && splitRelations) || (cleanupRelations && planRelationSplit) ||
-		(splitRelations && planRelationSplit) || (ensureVocabulary && (cleanupRelations || splitRelations || planRelationSplit)) ||
-		(ensureBuiltinModels && (cleanupRelations || splitRelations || planRelationSplit || ensureVocabulary)) {
-		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models")
+	commands := 0
+	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers} {
+		if on {
+			commands++
+		}
+	}
+	if commands > 1 {
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers")
 		os.Exit(1)
 	}
 
@@ -194,6 +200,21 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode relation split plan", err)
+		}
+		return
+	}
+	// The service-layer plan is read-only: it reports what the RFC-011 M1
+	// classification can decide and what needs a human. Creating the target
+	// CIs is a separate apply step after the review queue is empty.
+	if planServiceLayers {
+		report, err := cistore.PlanServiceLayers(rootCtx, db)
+		if err != nil {
+			fatal(log, "plan service layers", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode service layer plan", err)
 		}
 		return
 	}
