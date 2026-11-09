@@ -144,6 +144,27 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 			}
 			existing.PropsJSON = props
 		}
+		// A collector re-observing the pair refreshes the observation and the
+		// confidence; a manual write leaves them untouched because it supplies
+		// neither. The provenance only moves when the caller names one.
+		if in.ObservedAt != nil {
+			if err := tx.Model(existing).Update("observed_at", in.ObservedAt).Error; err != nil {
+				return nil, fmt.Errorf("update observed_at: %w", err)
+			}
+			existing.ObservedAt = in.ObservedAt
+		}
+		if in.Confidence != nil {
+			if err := tx.Model(existing).Update("confidence", in.Confidence).Error; err != nil {
+				return nil, fmt.Errorf("update confidence: %w", err)
+			}
+			existing.Confidence = in.Confidence
+		}
+		if evidence := strings.TrimSpace(in.EvidenceSource); evidence != "" && existing.EvidenceSource != evidence {
+			if err := tx.Model(existing).Update("evidence_source", evidence).Error; err != nil {
+				return nil, fmt.Errorf("update evidence source: %w", err)
+			}
+			existing.EvidenceSource = evidence
+		}
 		return existing, nil
 	}
 
@@ -168,6 +189,7 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 		Source:         in.Source,
 		EvidenceSource: evidence,
 		ObservedAt:     in.ObservedAt,
+		Confidence:     in.Confidence,
 		PropsJSON:      props,
 	}
 	if in.AncestorIDs != "" {

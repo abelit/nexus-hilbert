@@ -167,6 +167,16 @@ ongrid-cmdb --apply-service-edges [--dry-run]
 
 dev 结果（2026-11-09）：176 条 legacy 边中 87 条可映射创建、87 条因 service 仍在 review 跳过、2 条因 `application_service` 已被本批其他 business_service 包含而跳过；二次执行 0 创建 / 87 existing / 89 skipped。复核：87 条 `business_service --CONTAINS--> application_service` 活跃边，`evidence_source=inference`，没有 application_service 有多个父；176 条 legacy `DEPENDS_ON` 不变。共享的 2 个 `application_service` 需要业务决定归属，另一个业务服务应改用业务依赖而不是重复包含。3 条 service↔service `CONNECTS_TO` 保持原样，等 APM 的 `CALLS` 证据。
 
+### CALLS 摄取契约
+
+```bash
+ongrid-cmdb --ingest-call-edges calls.json [--dry-run]
+```
+
+JSON 数组，元素：`source_ci_id` / `target_ci_id`（必填，由生产方把 APM service name 解析为 CI）、`protocol` / `endpoint` / `method` / `sync` / `qps` / `latency_p95_ms` / `error_rate`（写入边属性，属性名为 `latency_p95`）、`observed_at`（RFC3339，必填）、`confidence`（0-1）、`evidence_source`（默认 `collector:apm`，必须以 `collector:` 开头）。
+
+校验：两端 CI 存在且非自环；模型对必须有 CALLS 规则；同一对已有其他关系类型时拒绝改写并报告；时间/置信度非法时跳过。重复摄取会刷新属性、观测时间和置信度。dev dry-run 示例（4508 → 4507）：1 创建，未写数据。生产方负责服务名到 CI 的映射，CMDB 不做猜测。
+
 ### M1 分类规则（初稿）
 
 1. 模型名精确匹配 `application` → `application_service`；`app_instance` → `service_instance`；`service` 使用上面的 service-layer-m1/v2 门禁，只把证据完整的业务子集推荐为 `business_service`，其余（含 ledger、测试环境、服务间连接）进入 review，不自动写。

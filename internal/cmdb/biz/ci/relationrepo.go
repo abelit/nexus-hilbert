@@ -169,6 +169,9 @@ type RelationAddSpec struct {
 	// writes leave it nil; created_at is their record.
 	ObservedAt *time.Time
 
+	// Confidence is the producer's confidence in [0,1]. Nil means unknown.
+	Confidence *float64
+
 	// PropsJSON is an optional JSON object with edge attributes (protocol,
 	// endpoint, method, ...). Empty means no attributes. The store validates the
 	// object and caps its size.
