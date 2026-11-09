@@ -89,6 +89,9 @@ type Usecase struct {
 	// ApplyServiceEdges uses it; every other path leaves it nil.
 	layerEdges ServiceLayerEdgeStore
 
+	// layerRollback is the optional operator rollback for the M1 batch.
+	layerRollback ServiceLayerRollbackStore
+
 	// Now is the clock the write path stamps defaults and audit rows with.
 	// Injected so a test can pin it; cantor read the wall clock inline, which
 	// made every timestamp assertion a range check.
