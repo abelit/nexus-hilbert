@@ -197,3 +197,44 @@ func valueLabel(row cibiz.ValueRow) string {
 		return ""
 	}
 }
+
+// LayerMappingFor returns the mapping for one source and target model, or nil.
+func (r *Repo) LayerMappingFor(ctx context.Context, sourceCIID model.ID, targetModel string) (*cimodel.LayerMapping, error) {
+	var row cimodel.LayerMapping
+	err := r.db.WithContext(ctx).
+		Where("source_ci_id = ? AND target_model = ?", sourceCIID, targetModel).
+		First(&row).Error
+	switch {
+	case err == nil:
+		return &row, nil
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("cmdb ci: service layers: load mapping: %w", err)
+	}
+}
+
+// SaveLayerMapping upserts the mapping for a source and target model. The apply
+// calls it after writing the target, and a retry that finds a stale mapping
+// points it at the recreated target instead of adding a second row.
+func (r *Repo) SaveLayerMapping(ctx context.Context, mapping *cimodel.LayerMapping) error {
+	var existing cimodel.LayerMapping
+	err := r.db.WithContext(ctx).
+		Where("source_ci_id = ? AND target_model = ?", mapping.SourceCIID, mapping.TargetModel).
+		First(&existing).Error
+	switch {
+	case err == nil:
+		return r.db.WithContext(ctx).Model(&existing).Updates(map[string]any{
+			"batch":        mapping.Batch,
+			"source_model": mapping.SourceModel,
+			"target_ci_id": mapping.TargetCIID,
+		}).Error
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		if err := r.db.WithContext(ctx).Create(mapping).Error; err != nil {
+			return fmt.Errorf("cmdb ci: service layers: save mapping: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("cmdb ci: service layers: find mapping: %w", err)
+	}
+}

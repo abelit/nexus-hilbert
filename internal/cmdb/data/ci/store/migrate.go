@@ -50,6 +50,8 @@ func Migrate(db *gorm.DB) error {
 		&cimodel.IPAMSubnetScan{},
 		&cimodel.IPAMSubnetScanHistory{},
 		&cimodel.IPAMOperationHistory{},
+		// The M1 service-layer migration's source -> target bookkeeping.
+		&cimodel.LayerMapping{},
 		// EAV value tables — the six cantor ever writes.
 		&valuemodel.ValueIndexInt{},
 		&valuemodel.ValueIndexFloat{},

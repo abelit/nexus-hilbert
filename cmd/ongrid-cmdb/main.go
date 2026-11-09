@@ -45,7 +45,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers bool
+	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -75,20 +75,22 @@ func main() {
 			ensureBuiltinModels = true
 		case "--plan-service-layers":
 			planServiceLayers = true
+		case "--apply-service-layers":
+			applyServiceLayers = true
 		}
 	}
-	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary {
-		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations or --ensure-relation-vocabulary")
+	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers {
+		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary or --apply-service-layers")
 		os.Exit(1)
 	}
 	commands := 0
-	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers} {
+	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers} {
 		if on {
 			commands++
 		}
 	}
 	if commands > 1 {
-		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers")
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers")
 		os.Exit(1)
 	}
 
@@ -215,6 +217,25 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode service layer plan", err)
+		}
+		return
+	}
+	// The apply is additive and resumable: it creates the target CIs for the
+	// deterministic sources and records the source -> target mapping. Services
+	// stay in the planner's review queue.
+	if applyServiceLayers {
+		citypeUC := cmdbcitypebiz.NewUsecase(cmdbcitypedata.NewRepo(db), log)
+		ciRepo := cistore.NewRepo(db)
+		ciUC := cibiz.NewUsecase(ciRepo, cmdbcitypebiz.NewCIResolver(citypeUC), log).
+			WithLayerMappings(ciRepo)
+		report, err := ciUC.ApplyServiceLayers(rootCtx, cibiz.ServiceLayerApplyInput{DryRun: dryRun})
+		if err != nil {
+			fatal(log, "apply service layers", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode service layer apply report", err)
 		}
 		return
 	}

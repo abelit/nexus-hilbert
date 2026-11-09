@@ -81,6 +81,10 @@ type Usecase struct {
 	fileCleaner FileCleaner
 	triggers    TriggerDispatcher
 
+	// layerMappings is the optional RFC-011 M1 bookkeeping. Only the
+	// service-layer apply uses it; every other path leaves it nil.
+	layerMappings LayerMappingStore
+
 	// Now is the clock the write path stamps defaults and audit rows with.
 	// Injected so a test can pin it; cantor read the wall clock inline, which
 	// made every timestamp assertion a range check.
