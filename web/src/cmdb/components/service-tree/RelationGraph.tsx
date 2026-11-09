@@ -28,7 +28,9 @@ import {
   type ModelGraph,
   type Position as ModelPosition,
 } from '../../lib/model-relation-graph';
+import { cardinalityLabel } from '../../lib/relation';
 import { CMDBIcon } from '../CMDBIcon';
+import { RelationGraphEdge } from './RelationGraphEdge';
 
 // The model-relation canvas.
 //
@@ -143,6 +145,7 @@ function ModelNode({ id, data }: NodeProps<Node<ModelNodeData>>) {
 }
 
 const nodeTypes = { model: ModelNode };
+const edgeTypes = { relation: RelationGraphEdge };
 
 export function RelationGraph({
   graph,
@@ -226,7 +229,7 @@ export function RelationGraph({
     // A dense estate is unreadable when every relation carries a label. Keep
     // labels for small graphs and for the chain that is currently highlighted.
     const showLabels = graph.links.length <= 28;
-    const type = edgeTypeForLayout(layoutMode);
+    const pathType = edgeTypeForLayout(layoutMode);
     const positionOf = (id: number) => dragged[id] ?? positions.get(id) ?? { x: 0, y: 0 };
     return graph.links.map((link) => {
       const key = `${link.from}:${link.to}`;
@@ -235,31 +238,31 @@ export function RelationGraph({
       // definition recedes the rest of the estate.
       const dimmed = !editMode && hasHighlight && !active;
       const handles = handlePair(positionOf(link.from), positionOf(link.to));
+      const edgeColor = active ? '#6366f1' : '#94a3b8';
+      // The chip is text on the canvas, so it uses the theme's readable neutral
+      // instead of the line's lighter grey; the two still read as one relation.
+      const labelColor = active ? '#6366f1' : isLight ? '#475569' : '#cbd5e1';
       return {
         id: key,
         source: String(link.from),
         target: String(link.to),
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
-        type,
-        label: dimmed || (!active && !showLabels) ? '' : link.label,
-        markerEnd: { type: MarkerType.ArrowClosed, color: active ? '#6366f1' : '#94a3b8' },
+        // The shared chip carries the relation name and the cardinality badge.
+        type: 'relation',
+        data: {
+          name: link.label,
+          cardinality: cardinalityLabel(link.constraint ?? '') ?? undefined,
+          color: labelColor,
+          showLabel: !dimmed && (active || showLabels),
+          pathType,
+        },
+        markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
         style: {
-          stroke: active ? '#6366f1' : '#94a3b8',
+          stroke: edgeColor,
           strokeWidth: active ? 2.4 : 1.2,
           opacity: dimmed ? 0.16 : 1,
         },
-        labelStyle: {
-          fill: isLight ? '#475569' : '#cbd5e1',
-          fontSize: 10,
-          opacity: dimmed ? 0 : 1,
-        },
-        labelBgStyle: {
-          fill: isLight ? '#ffffff' : '#18181b',
-          fillOpacity: 0.9,
-        },
-        labelBgPadding: [4, 2] as [number, number],
-        labelBgBorderRadius: 4,
       };
     });
   }, [dragged, editMode, graph.links, highlightedPairs, isLight, layoutMode, positions]);
@@ -317,6 +320,7 @@ export function RelationGraph({
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onNodeClick={(_, node) => {
             if (editMode) onToggleNode(Number(node.id));

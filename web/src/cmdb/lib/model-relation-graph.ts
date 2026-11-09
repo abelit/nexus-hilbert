@@ -24,7 +24,10 @@ export type ModelGraphNode = {
 export type ModelGraphLink = {
   from: number;
   to: number;
+  /** The display label: relation type plus compact cardinality. */
   label: string;
+  /** cantor's constraint code, kept so the label can be rebuilt or styled. */
+  constraint?: string;
 };
 
 export type ModelGraph = {
@@ -90,6 +93,7 @@ export function buildModelGraph(models: CIType[], relations: ModelRelation[]): M
         from: parent.id,
         to: child.id,
         label: relation.parent.relation_type?.name ?? '',
+        constraint: relation.parent.constraint,
       });
     }
   }

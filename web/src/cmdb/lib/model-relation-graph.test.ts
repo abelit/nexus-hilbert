@@ -22,7 +22,7 @@ const relation = (parent: number, child: number, name = '包含'): ModelRelation
     type,
     attributes: [],
     relation_type: { id: 1, name, color: '' },
-    constraint: '1-N',
+    constraint: '0',
     parent_attr_ids: [],
     child_attr_ids: [],
   });
@@ -40,6 +40,13 @@ describe('the type graph', () => {
     expect(graph.rootID).toBe(1);
     expect(graph.childrenOf.get(1)).toEqual(new Set([2, 4]));
     expect(graph.parentsOf.get(3)).toEqual(new Set([2]));
+  });
+
+  it('keeps the relation type and constraint code on each link', () => {
+    const graph = buildModelGraph(models, relations);
+    // The canvas builds the cardinality badge from the code, so the link keeps
+    // the name and the code apart instead of a pre-formatted string.
+    expect(graph.links[0]).toMatchObject({ label: '包含', constraint: '0' });
   });
 
   it('lays every node out deterministically for every mode', () => {

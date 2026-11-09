@@ -97,39 +97,15 @@ function edgeFrom(
   };
 }
 
-export type CardinalityMark = '1' | 'N';
-export type CardinalityEnds = { source: CardinalityMark; target: CardinalityMark };
-
-/**
- * The cardinality at each end of a parent -> child edge, in the familiar 1/N
- * notation. `null` means unknown: the graph renders no badge rather than
- * guessing a shape or printing the raw storage code.
- */
-export function cardinalityEnds(constraint: string): CardinalityEnds | null {
-  switch (constraint) {
-    case '0':
-      return { source: '1', target: 'N' };
-    case '1':
-      return { source: '1', target: '1' };
-    case '2':
-      return { source: 'N', target: 'N' };
-    default:
-      return null;
-  }
-}
-
-/**
- * The compact notation the relation badge shows: 1:N, 1:1, N:M (and N:1 for a
- * many-to-one pair). The child side of a many-to-many pair uses M so the two
- * ends remain distinguishable. Unknown codes return null, so the badge keeps
- * the relation name alone instead of printing a raw storage code.
- */
-export function cardinalityLabel(constraint: string): string | null {
-  const ends = cardinalityEnds(constraint);
-  if (!ends) return null;
-  if (ends.source === 'N' && ends.target === 'N') return 'N:M';
-  return `${ends.source}:${ends.target}`;
-}
+// Cardinality is shared with the instance topology and the relation-view
+// canvas; lib/relation.ts owns it. Re-exported here so the model graph and its
+// tests keep their existing import surface.
+export {
+  cardinalityEnds,
+  cardinalityLabel,
+  type CardinalityEnds,
+  type CardinalityMark,
+} from '../../lib/relation';
 
 /** Model id → color, in the admin-maintained group order. */
 export function groupColorMap(groups: ModelGroup[]): Map<number, string> {

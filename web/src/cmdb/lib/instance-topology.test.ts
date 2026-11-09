@@ -64,9 +64,9 @@ describe('the instance topology tree', () => {
   it('puts parents left, children right and labels the edges from the relation type', () => {
     const tree = buildInitialTree(input());
     expect(tree.root.children.map((node) => node.side)).toEqual(['left', 'right']);
-    expect(tree.edges.map((edge) => [edge.sourceId, edge.targetId, edge.label])).toEqual([
-      ['10', 'Root_1', '包含'],
-      ['Root_1', '11', '包含'],
+    expect(tree.edges.map((edge) => [edge.sourceId, edge.targetId, edge.label, edge.constraint])).toEqual([
+      ['10', 'Root_1', '包含', '0'],
+      ['Root_1', '11', '包含', '0'],
     ]);
     expect(rowLabel(row(10, 2, 'rack-01'), parentType)).toBe('rack-01');
     const ipRow: SearchRow = { ...row(20, 6, 'id-339'), unique: 'ipam_address_id', ipam_address_id: 339, ip: '172.30.16.6' };
@@ -94,6 +94,11 @@ describe('the instance topology tree', () => {
     expect(expanded.added).toBe(true);
     expect(findTreeNode(expanded.tree.root, '20')?.title).toBe('机房');
     expect(expanded.tree.edges.some((edge) => edge.sourceId === 'Root_1' && edge.targetId === '11')).toBe(true);
+    // Expansion keeps the relation type and the cantor constraint code, which
+    // the canvas turns into the cardinality badge.
+    const inward = expanded.tree.edges.find((edge) => edge.sourceId === 'Root_1' && edge.targetId === '11');
+    expect(inward?.label).toBe('包含');
+    expect(inward?.constraint).toBe('0');
     expect(expanded.tree.edges.some((edge) => edge.sourceId === 'Root_1' && edge.targetId === '20')).toBe(false);
   });
 

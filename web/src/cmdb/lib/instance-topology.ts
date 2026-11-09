@@ -31,7 +31,10 @@ export type TopoEdge = {
   id: string;
   sourceId: string;
   targetId: string;
+  /** The display label: relation type plus compact cardinality. */
   label: string;
+  /** cantor's constraint code, kept so the label can be rebuilt or styled. */
+  constraint?: string;
   color?: string;
 };
 
@@ -138,6 +141,7 @@ export function buildInitialTree(input: InitialTopoInput): TopoTree {
           sourceId,
           targetId,
           label: related.relation_type?.name || '',
+          constraint: related.constraint,
           color: related.relation_type?.color || undefined,
         });
       }
@@ -251,6 +255,7 @@ export function planExpansion(
         sourceId,
         targetId,
         label: related.relation_type?.name || '',
+        constraint: related.constraint,
         color: related.relation_type?.color || undefined,
       });
       if (existingID) continue;

@@ -903,9 +903,10 @@ html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabl
   transition: opacity 120ms ease;
 }
 
-/* The relation name truncates; the cardinality sits on the chip's top border
-   so a long name cannot push the number onto the edge line. */
-.cmdb-model-topology-edge-name {
+/* Shared by every relation canvas (model topology, resource topology, relation
+   view): the name truncates and the cardinality rides the chip's top border, so
+   a long name cannot push the number onto the edge line. */
+.cmdb-relation-edge-name {
   display: inline-block;
   max-width: 96px;
   overflow: hidden;
@@ -913,7 +914,7 @@ html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabl
   vertical-align: bottom;
 }
 
-.cmdb-model-topology-edge-cardinality {
+.cmdb-relation-edge-cardinality {
   position: absolute;
   top: -8px;
   left: 50%;

@@ -20,7 +20,6 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
-import { useThemeMode } from '@/store/mode';
 
 import type { CIType, TypeAttribute } from '../../api/citype';
 import { getInstanceFileValues } from '../../api/files';
@@ -36,10 +35,12 @@ import {
   type TopoLayout,
   type TopoTree,
 } from '../../lib/instance-topology';
+import { cardinalityLabel } from '../../lib/relation';
 import { displayValue } from '../../lib/valuetype';
 import { FileField } from '../files/FileField';
 import { CMDBIcon } from '../CMDBIcon';
 import { useToast } from '../Toast';
+import { InstanceRelationEdge } from './InstanceRelationEdge';
 
 // 资源拓扑 — the instance-centred graph ported from cantor's CIDetailRelationTopo.
 //
@@ -118,6 +119,7 @@ function TopoNodeView({ id, data, selected }: NodeProps<Node<TopoNodeData>>) {
 }
 
 const nodeTypes = { ci: TopoNodeView };
+const edgeTypes = { relation: InstanceRelationEdge };
 
 type DetailRow =
   | { key: string; label: string; value: string; attribute?: undefined }
@@ -238,7 +240,6 @@ export function InstanceTopology({
 }) {
   const { tr } = useI18n();
   const toast = useToast();
-  const { resolved } = useThemeMode();
   const [tree, setTree] = useState<TopoTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -438,20 +439,20 @@ export function InstanceTopology({
       id: edge.id,
       source: edge.sourceId,
       target: edge.targetId,
-      label: showRelationStyle && edge.label ? edge.label : undefined,
-      labelStyle: { fontSize: 11, fill: '#64748b' },
-      labelBgStyle: {
-        fill: resolved === 'dark' ? 'rgba(20,20,20,0.92)' : 'rgba(255,255,255,0.92)',
-        fillOpacity: 1,
+      // The shared chip carries the relation name and the cardinality badge.
+      type: 'relation',
+      data: {
+        name: edge.label,
+        cardinality: cardinalityLabel(edge.constraint ?? '') ?? undefined,
+        color: showRelationStyle ? edge.color : undefined,
+        showLabel: showRelationStyle,
       },
-      labelBgPadding: [4, 2],
-      labelBgBorderRadius: 3,
       style: showRelationStyle && edge.color ? { stroke: edge.color } : undefined,
       markerEnd: showRelationStyle
         ? { type: MarkerType.ArrowClosed, color: edge.color ?? '#94a3b8' }
         : undefined,
     }));
-  }, [resolved, showRelationStyle, tree]);
+  }, [showRelationStyle, tree]);
 
   if (loading) {
     return <p className="py-8 text-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</p>;
@@ -518,6 +519,7 @@ export function InstanceTopology({
               nodes={rfNodes}
               edges={edges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               fitView
               fitViewOptions={{ padding: 0.2, duration: reduceMotion ? 0 : 300 }}
               onInit={(instance) => {

@@ -62,7 +62,7 @@ describe('ModelTopologyEdge', () => {
 
     const cardinality = screen.getByTestId('edge-cardinality');
     expect(cardinality).toHaveTextContent('1:N');
-    expect(cardinality.className).toContain('cmdb-model-topology-edge-cardinality');
+    expect(cardinality.className).toContain('cmdb-relation-edge-cardinality');
     expect(cardinality.closest('[data-edge-label]')).toBe(screen.getByTestId('edge-label'));
   });
 
