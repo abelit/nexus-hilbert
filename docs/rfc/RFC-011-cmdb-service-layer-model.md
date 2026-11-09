@@ -88,7 +88,7 @@ CMDB 当前的 `service`、`application`、`app_instance`、`app_cluster` 是部
 
 **M1 已实现（2026-11-09）**：新增可空 `props_json`（text）列，写入边界只接受 JSON object、上限 8 KiB；单条关系写入 API 接受 `props`，邻居与关系图 API、AIOps `cmdb_get_ci_relations`/`cmdb_relation_graph` 在有值时返回 `props`。重复写入同一对端点且带 `props` 时刷新属性，不带则保留原值。边唯一键仍为 `(first_ci_id, second_ci_id, relation_type_id)`，同一对 caller/callee 只保留一条 `CALLS`，不同 endpoint 合并到属性中。
 
-分类、ID 映射和 APM 写入仍是 M1 的剩余部分。
+APM 写入、`service` 的业务/应用判定和 review 清零仍是 M1 的剩余部分。
 
 ## 迁移阶段
 
@@ -114,6 +114,21 @@ ongrid-cmdb --plan-service-layers
 - 输出每个来源模型的行数、可分类数、review 数，以及 review 列表（ci_id、名称、原因）。
 
 规划器不写任何数据。review 清零后，下一步是独立的 apply：创建目标 CI、写入独立 ID 映射表（`c_ci_layer_mappings`），再进入 M2。
+
+### M1 应用命令
+
+```bash
+ongrid-cmdb --apply-service-layers [--dry-run]
+```
+
+只处理规划器里可确定性分类的 `application` → `application_service`、`app_instance` → `service_instance`；`service` 仍留在 review，不自动写。命令语义：
+
+- **附加、可恢复**：来源 CI 不变；目标 CI 按唯一标识 upsert，随后写一行 `(batch, source_ci_id, target_model, target_ci_id)` 映射。重跑时已有映射且目标仍存在则计为 `existing`，不会重复创建；中途失败留下的是可继续的一致前缀。
+- **目标取值**：目标唯一属性取来源唯一值，目标显示属性取来源显示值；其余同名属性按名称复制。模型没有显示属性时（内置服务模型即如此），显示属性回退到唯一属性——此时不得再用显示名覆盖标识，否则同名实例会合并到同一个目标（dev 首次执行发现的缺陷，已加守卫并回归测试）。
+- **跳过**：来源缺唯一标识、唯一标识重复（整组跳过）、目标模型缺失时报错；跳过项带原因，供 review。
+- **dry-run**：只报告将要创建的行，不写目标 CI 和映射。
+
+dev 执行结果（2026-11-09）：399 条可分类实例生成 399 个目标 CI（172 + 227）和 399 行映射，0 跳过；二次执行 0 创建、399 existing。149 个 `service` 仍在 review。
 
 ### M1 分类规则（初稿）
 
@@ -175,6 +190,6 @@ M0 前已按推荐默认值确定：
 ## 实施顺序建议
 
 1. **M0（已实现）**：三个类、`HAS_INSTANCE`/`DEPLOYED_TO` 词表、`--ensure-builtin-models`/管理员 bootstrap、CALLS/HAS_INSTANCE/CONTAINS 声明；
-2. M1（部分实现）：边属性 `props_json` 和只读分类规划器 `--plan-service-layers` 已完成；剩余 apply、独立 ID 映射表和 review 清零；
+2. M1（大部分实现）：边属性 `props_json`、只读分类规划器 `--plan-service-layers`、apply `--apply-service-layers` 和独立 ID 映射表已完成；剩余 149 个 `service` 的业务/应用判定与 APM 接入；
 3. M2：边重分类 + APM 接入；
 4. M3/M4：对账、影子、下线。
