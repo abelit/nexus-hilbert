@@ -45,7 +45,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService bool
+	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService, applyServiceEdges bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -79,24 +79,26 @@ func main() {
 			applyServiceLayers = true
 		case "--classify-service":
 			classifyService = true
+		case "--apply-service-edges":
+			applyServiceEdges = true
 		}
 	}
 	if classifyService && !applyServiceLayers {
 		fmt.Fprintln(os.Stderr, "--classify-service is only valid with --apply-service-layers")
 		os.Exit(1)
 	}
-	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers {
-		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary or --apply-service-layers")
+	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers && !applyServiceEdges {
+		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary, --apply-service-layers or --apply-service-edges")
 		os.Exit(1)
 	}
 	commands := 0
-	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers} {
+	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, applyServiceEdges} {
 		if on {
 			commands++
 		}
 	}
 	if commands > 1 {
-		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers")
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers, --apply-service-edges")
 		os.Exit(1)
 	}
 
@@ -244,6 +246,26 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode service layer apply report", err)
+		}
+		return
+	}
+	// The M2 edge projection is additive toward the new layer: each mapped
+	// legacy service -> application edge becomes a new business_service ->
+	// application_service CONTAINS edge; the legacy edge is untouched.
+	if applyServiceEdges {
+		citypeUC := cmdbcitypebiz.NewUsecase(cmdbcitypedata.NewRepo(db), log)
+		ciRepo := cistore.NewRepo(db)
+		ciUC := cibiz.NewUsecase(ciRepo, cmdbcitypebiz.NewCIResolver(citypeUC), log).
+			WithLayerMappings(ciRepo).
+			WithServiceLayerEdges(ciRepo)
+		report, err := ciUC.ApplyServiceEdges(rootCtx, cibiz.ServiceLayerEdgeApplyInput{DryRun: dryRun})
+		if err != nil {
+			fatal(log, "apply service layer edges", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode service layer edge report", err)
 		}
 		return
 	}

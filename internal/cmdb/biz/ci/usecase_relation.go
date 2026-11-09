@@ -38,6 +38,10 @@ type AddRelationRequest struct {
 
 	// PropsJSON is an optional JSON object with edge attributes.
 	PropsJSON string
+
+	// EvidenceSource is the provenance of a derived or migration edge. Empty
+	// means manual, which is what the console's path leaves it as.
+	EvidenceSource string
 }
 
 // AddRelation relates two instances.
@@ -103,6 +107,7 @@ func (u *Usecase) AddRelation(ctx context.Context, req AddRelationRequest, audit
 		Constraint:        rule.Constraint,
 		EnforceConstraint: true,
 		PropsJSON:         req.PropsJSON,
+		EvidenceSource:    req.EvidenceSource,
 		Actor:             audit.Actor,
 	})
 	if err != nil {

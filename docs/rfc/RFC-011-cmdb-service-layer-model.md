@@ -143,11 +143,21 @@ ongrid-cmdb --apply-service-layers [--dry-run] [--classify-service]
 
 规划器和 apply 调用同一个分类函数，evidence 查询只有一份实现。dev 运行结果（2026-11-09）：149 个 `service` 中 **89 个推荐 `business_service`、60 个 review**，review 构成为 25 个 ledger、15 个 test 环境、13 个多应用目标、5 个 CONNECTS_TO 端点、2 个缺治理锚点。
 
-**dev 数据修正**：第一版宽松规则曾写入 144 个 `business_service` 目标（含 25 个 ledger），在对抗评审后已按映射表整批回滚（144 目标 / 144 映射，删除前确认 0 条活跃关系引用）；当前 dev 只有 399 个 application/app_instance 目标，`business_service` 为 0，等待 owner 对 89 条推荐清单签字后再执行 `--classify-service`。
+**dev 数据修正**：第一版宽松规则曾写入 144 个 `business_service` 目标（含 25 个 ledger），在对抗评审后已按映射表整批回滚（144 目标 / 144 映射，删除前确认 0 条活跃关系引用）。按现有 dev 迁移授权执行 `--classify-service` 后：89 个 `business_service` 目标、488 行活跃映射（172 + 227 + 89）、60 条 review；二次执行 0 创建 / 488 existing / 60 skipped。来源 CI 数量不变（172 / 227 / 149）。
 
 已知限制：目标唯一属性目前取来源模型声明的唯一值（dev 的 `service` 是 uuid），而来源还有更可读的 `bsvc-` code；优先使用 `_code` 标识是后续改进项。回滚以 `c_ci_layer_mappings` 的 `(batch, target_model)` 为准，M2 写入新边之前必须完成。
 
 dev 执行结果（2026-11-09）：399 条可分类实例生成 399 个目标 CI（172 + 227）和 399 行映射，0 跳过；二次执行 0 创建、399 existing。149 个 `service` 仍在 review。
+
+### M2 边投影
+
+```bash
+ongrid-cmdb --apply-service-edges [--dry-run]
+```
+
+只处理两端都已有 M1 映射的 `service --DEPENDS_ON--> application` 边：在目标层创建 `business_service --CONTAINS--> application_service` 新边，`evidence_source=inference`，旧边保持只读。重复执行按已存在的目标对计为 `existing`；同一 `application_service` 被第二个 business_service 认领时，按模型的一对多规则跳过并列入报告，不覆盖、不改类型。
+
+dev 结果（2026-11-09）：176 条 legacy 边中 87 条可映射创建、87 条因 service 仍在 review 跳过、2 条因 `application_service` 已被本批其他 business_service 包含而跳过；二次执行 0 创建 / 87 existing / 89 skipped。复核：87 条 `business_service --CONTAINS--> application_service` 活跃边，`evidence_source=inference`，没有 application_service 有多个父；176 条 legacy `DEPENDS_ON` 不变。共享的 2 个 `application_service` 需要业务决定归属，另一个业务服务应改用业务依赖而不是重复包含。3 条 service↔service `CONNECTS_TO` 保持原样，等 APM 的 `CALLS` 证据。
 
 ### M1 分类规则（初稿）
 
