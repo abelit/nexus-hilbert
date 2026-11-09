@@ -12,6 +12,7 @@ import (
 
 	"gorm.io/gorm"
 
+	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
 	valuemodel "github.com/ongridio/ongrid/internal/cmdb/model/value"
 )
@@ -63,7 +64,39 @@ func Migrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
-	return ensureIndexedTextCollation(db)
+	if err := ensureIndexedTextCollation(db); err != nil {
+		return err
+	}
+	return backfillRelationEvidence(db)
+}
+
+// backfillRelationEvidence gives existing edges a semantic provenance value.
+//
+// cantor stored a one-character `source` and left most rows NULL. The
+// semantic field (evidence_source) is what AIOps reads, so the migration maps
+// the two known legacy codes and marks everything else legacy — it does not
+// claim an unknown edge was manual. Rows that already carry an evidence source
+// (a later sync, or an edge written by this code) are left alone, which makes
+// the backfill idempotent. Soft-deleted rows are included so history has one
+// vocabulary.
+func backfillRelationEvidence(db *gorm.DB) error {
+	legacy := []struct{ source, evidence string }{
+		{string(model.RelationFromAttributeValues), string(model.RelationEvidenceAttributeRule)},
+		{string(model.RelationFromAutoDiscovery), string(model.RelationEvidenceAutoDiscovery)},
+	}
+	for _, step := range legacy {
+		if err := db.Unscoped().Model(&cimodel.Relation{}).
+			Where("evidence_source = '' AND source = ?", step.source).
+			Update("evidence_source", step.evidence).Error; err != nil {
+			return fmt.Errorf("cmdb ci: backfill relation evidence from source %s: %w", step.source, err)
+		}
+	}
+	if err := db.Unscoped().Model(&cimodel.Relation{}).
+		Where("evidence_source = ''").
+		Update("evidence_source", string(model.RelationEvidenceLegacy)).Error; err != nil {
+		return fmt.Errorf("cmdb ci: backfill relation evidence legacy: %w", err)
+	}
+	return nil
 }
 
 // ensureIndexedTextCollation re-creates the indexed-text value index on SQLite

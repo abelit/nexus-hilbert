@@ -322,6 +322,7 @@ func (u *Usecase) CreateIPScope(ctx context.Context, in IPScopeInput) (*WriteRes
 		Policy: ExistReject,
 		Specs:  u.plannerSpecs(set),
 		Values: values, Audit: in.Audit,
+		EvidenceSource: string(model.RelationEvidenceIPAM),
 		Parent: &ParentLink{
 			ParentID:       in.ParentID,
 			ParentTypeID:   scope.Type.ID,
@@ -846,7 +847,8 @@ func (u *Usecase) CreateSubnet(ctx context.Context, in SubnetInput) (*WriteResul
 			Policy: ExistReject,
 			Specs:  u.plannerSpecs(set),
 			Values: normalizedValues, Audit: in.Audit,
-			Parent: u.subnetParentLink(ctx, builtins, subnet, in.ParentID, in.Audit),
+			EvidenceSource: string(model.RelationEvidenceIPAM),
+			Parent:         u.subnetParentLink(ctx, builtins, subnet, in.ParentID, in.Audit),
 		},
 		CIDR: normalized,
 		Attrs: SubnetWriteAttrs{

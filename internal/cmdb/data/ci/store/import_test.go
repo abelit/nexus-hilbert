@@ -367,6 +367,9 @@ func TestImportRelationColumnsWriteEdges(t *testing.T) {
 	if edges[0].FirstCIID != parent.CIID || edges[0].SecondCIID != done.Rows[0].InstanceID {
 		t.Fatalf("edge = %+v", edges[0])
 	}
+	if edges[0].EvidenceSource != string(model.RelationEvidenceImport) {
+		t.Fatalf("import edge evidence = %q, want %q", edges[0].EvidenceSource, model.RelationEvidenceImport)
+	}
 }
 
 // A relation header may address the parent model by its display alias, which

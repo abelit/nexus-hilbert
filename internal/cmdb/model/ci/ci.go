@@ -91,7 +91,8 @@ type Relation struct {
 
 	// Edge provenance, mirroring the evidence model nexus-topocortex uses for
 	// AIOps. These columns are additive: `source` above stays cantor's enum,
-	// and `evidence_source` carries the richer vocabulary.
+	// and `evidence_source` carries the richer vocabulary
+	// (model.RelationEvidenceSource), which new writes populate.
 	EvidenceSource      string        `gorm:"column:evidence_source;size:64;not null;default:''"`
 	Confidence          *float64      `gorm:"column:confidence;type:decimal(3,2)"`
 	ObservedAt          *time.Time    `gorm:"column:observed_at"`

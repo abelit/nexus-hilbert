@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -523,6 +524,44 @@ func seedDeprecatedRelationType(t *testing.T, db *gorm.DB, id model.ID, name, re
 	rt.ID = id
 	if err := db.Create(&rt).Error; err != nil {
 		t.Fatalf("seed deprecated type %s: %v", name, err)
+	}
+}
+
+// Every new edge records semantic provenance. An unnamed source is manual; a
+// collector's edge keeps its source and observation time.
+func TestAddRelationRecordsEvidenceSource(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+
+	if _, err := repo.AddRelation(context.Background(), addSpec(isolatedA, isolatedB, model.ConstraintMany2Many)); err != nil {
+		t.Fatalf("AddRelation(manual) error = %v", err)
+	}
+	var got cimodel.Relation
+	if err := db.Where("first_ci_id = ? AND second_ci_id = ?", isolatedA, isolatedB).First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.EvidenceSource != string(model.RelationEvidenceManual) {
+		t.Fatalf("manual evidence source = %q, want %q", got.EvidenceSource, model.RelationEvidenceManual)
+	}
+	if got.ObservedAt != nil {
+		t.Fatalf("manual edge observed_at = %v, want nil", got.ObservedAt)
+	}
+
+	observed := time.Now().UTC().Truncate(time.Second)
+	spec := addSpec(isolatedA, isolatedC, model.ConstraintMany2Many)
+	spec.EvidenceSource = string(model.RelationEvidenceAutoDiscovery)
+	spec.ObservedAt = &observed
+	if _, err := repo.AddRelation(context.Background(), spec); err != nil {
+		t.Fatalf("AddRelation(collector) error = %v", err)
+	}
+	var collector cimodel.Relation
+	if err := db.Where("first_ci_id = ? AND second_ci_id = ?", isolatedA, isolatedC).First(&collector).Error; err != nil {
+		t.Fatal(err)
+	}
+	if collector.EvidenceSource != string(model.RelationEvidenceAutoDiscovery) {
+		t.Fatalf("collector evidence source = %q", collector.EvidenceSource)
+	}
+	if collector.ObservedAt == nil || !collector.ObservedAt.Equal(observed) {
+		t.Fatalf("collector observed_at = %v, want %v", collector.ObservedAt, observed)
 	}
 }
 

@@ -148,6 +148,8 @@ func writeCITx(tx *gorm.DB, in cibiz.WriteSpec) (cibiz.WriteResult, error) {
 			SecondTypeID:      in.Parent.ChildTypeID,
 			Constraint:        in.Parent.Constraint,
 			EnforceConstraint: true,
+			EvidenceSource:    in.EvidenceSource,
+			ObservedAt:        in.ObservedAt,
 			Actor:             in.Parent.Actor,
 		}); err != nil {
 			return result, err
@@ -181,7 +183,14 @@ func writeRelationSpecsTx(tx *gorm.DB, ciID model.ID, in cibiz.WriteSpec) error 
 			firstID, secondID = rel.PeerCIID, ciID
 			firstType, secondType = rel.PeerTypeID, rel.DiscoveredTypeID
 		}
-		source := string(model.RelationFromAutoDiscovery)
+		// Only the discovery accept path sets cantor's legacy code. The same
+		// helper writes import edges, which are NOT discovered; leaving the
+		// legacy field empty for them is what makes the two distinguishable.
+		var legacySource *string
+		if in.MarkAutoDiscovery {
+			source := string(model.RelationFromAutoDiscovery)
+			legacySource = &source
+		}
 		if _, err := addRelationTx(tx, cibiz.RelationAddSpec{
 			FirstCIID:         firstID,
 			SecondCIID:        secondID,
@@ -190,7 +199,9 @@ func writeRelationSpecsTx(tx *gorm.DB, ciID model.ID, in cibiz.WriteSpec) error 
 			SecondTypeID:      secondType,
 			Constraint:        rel.Constraint,
 			EnforceConstraint: true,
-			Source:            &source,
+			Source:            legacySource,
+			EvidenceSource:    in.EvidenceSource,
+			ObservedAt:        in.ObservedAt,
 			Actor:             in.Audit.Actor,
 		}); err != nil {
 			return fmt.Errorf("cmdb ci: write discovered relation: %w", err)

@@ -143,11 +143,17 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 		}
 	}
 
+	evidence := strings.TrimSpace(in.EvidenceSource)
+	if evidence == "" {
+		evidence = string(model.RelationEvidenceManual)
+	}
 	row := cimodel.Relation{
 		FirstCIID:      in.FirstCIID,
 		SecondCIID:     in.SecondCIID,
 		RelationTypeID: in.RelationTypeID,
 		Source:         in.Source,
+		EvidenceSource: evidence,
+		ObservedAt:     in.ObservedAt,
 	}
 	if in.AncestorIDs != "" {
 		ancestors := in.AncestorIDs

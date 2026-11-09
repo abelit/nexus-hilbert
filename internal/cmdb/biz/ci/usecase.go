@@ -212,6 +212,16 @@ func (u *Usecase) write(ctx context.Context, in WriteRequest, relations []Relati
 	// and closed it with a Redis lock keyed on the model's name; with no Redis
 	// the equivalent is a row lock inside the transaction, which only the
 	// repository can take.
+	// The discovery accept path is the only caller that marks an instance
+	// discovered, so it is also what decides the edge provenance and the
+	// observation time. Every other write is a person's or an import's.
+	evidence := string(model.RelationEvidenceManual)
+	var observedAt *time.Time
+	if markAutoDiscovery {
+		evidence = string(model.RelationEvidenceAutoDiscovery)
+		now := time.Now().UTC()
+		observedAt = &now
+	}
 	result, err := u.repo.WriteCI(ctx, WriteSpec{
 		TypeRef: set.Type.Name, TypeID: set.Type.ID,
 		UniqueAttrID: set.UniqueAttrID, UniqueValue: uniqueRaw,
@@ -220,6 +230,8 @@ func (u *Usecase) write(ctx context.Context, in WriteRequest, relations []Relati
 		Values: values, Audit: in.Audit,
 		MarkAutoDiscovery: markAutoDiscovery,
 		Relations:         relations,
+		EvidenceSource:    evidence,
+		ObservedAt:        observedAt,
 	})
 	if err != nil {
 		return nil, err

@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"fmt"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
@@ -159,7 +160,16 @@ type RelationAddSpec struct {
 	EnforceConstraint bool
 
 	Source *string
-	Actor  model.ID
+
+	// EvidenceSource is the semantic provenance (model.RelationEvidenceSource).
+	// Empty becomes manual at the store, so every new edge records a source.
+	EvidenceSource string
+
+	// ObservedAt is when a collector observed the edge. Manual and import
+	// writes leave it nil; created_at is their record.
+	ObservedAt *time.Time
+
+	Actor model.ID
 }
 
 // Relation errors.

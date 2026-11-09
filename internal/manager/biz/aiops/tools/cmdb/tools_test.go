@@ -229,6 +229,9 @@ func TestGetCIRelationsDirection(t *testing.T) {
 						"relation_type_name": "run", "relation_type_category": "runtime",
 						"relation_type_direction": "dst_to_src", "relation_type_propagates": true,
 						"relation_type_weight": 1.0,
+						"evidence_source":      "collector:autodiscovery",
+						"confidence":           0.9,
+						"observed_at":          "2026-11-08T10:00:00Z",
 					}},
 					"numfound": 1, "page": 2,
 				})
@@ -243,6 +246,10 @@ func TestGetCIRelationsDirection(t *testing.T) {
 				item["relation_type_direction"] != "dst_to_src" || item["relation_type_propagates"] != true ||
 				item["relation_type_weight"] != 1.0 {
 				t.Fatalf("relation type vocabulary missing: %v", item)
+			}
+			if item["evidence_source"] != "collector:autodiscovery" || item["confidence"] != 0.9 ||
+				item["observed_at"] != "2026-11-08T10:00:00Z" {
+				t.Fatalf("edge provenance missing: %v", item)
 			}
 		})
 	}

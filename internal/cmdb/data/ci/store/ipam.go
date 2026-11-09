@@ -442,6 +442,7 @@ func relateToSubnetTx(tx *gorm.DB, change cibiz.AddressChange, addressID model.I
 		SecondTypeID:      change.AddressTypeID,
 		Constraint:        change.Constraint,
 		EnforceConstraint: true,
+		EvidenceSource:    string(model.RelationEvidenceIPAM),
 		Actor:             change.Audit.Actor,
 	}
 	_, err := addRelationTx(tx, rule)
@@ -762,6 +763,7 @@ func (r *Repo) MoveSubnet(ctx context.Context, in cibiz.SubnetMove) error {
 				SecondTypeID:      in.SubnetTypeID,
 				Constraint:        in.Constraint,
 				EnforceConstraint: true,
+				EvidenceSource:    string(model.RelationEvidenceIPAM),
 				Actor:             in.Audit.Actor,
 			})
 			if err != nil {
