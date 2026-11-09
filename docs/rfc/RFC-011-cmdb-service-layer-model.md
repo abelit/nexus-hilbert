@@ -86,7 +86,9 @@ CMDB 当前的 `service`、`application`、`app_instance`、`app_cluster` 是部
 
 `c_ci_relations` 目前没有通用边属性列，CALLS 需要的 protocol、endpoint、method、sync、qps、latency、error_rate 无处存放。
 
-**M0 决策（2026-11-09）：延到 M1。** M0 不新增列；CALLS 的 APM 证据先使用现有的 `evidence_source`/`evidence_*`/`confidence`/`observed_at`。M1 与 APM 接入一起增加可空 `props_json`（text，限 8 KiB，写入时校验 JSON），并在邻居/关系图 API 与 AIOps 工具中按需返回；边唯一键仍为 `(first_ci_id, second_ci_id, relation_type_id)`，同一对 caller/callee 只保留一条 `CALLS`，不同 endpoint 合并到属性中，避免重复影响边。
+**M1 已实现（2026-11-09）**：新增可空 `props_json`（text）列，写入边界只接受 JSON object、上限 8 KiB；单条关系写入 API 接受 `props`，邻居与关系图 API、AIOps `cmdb_get_ci_relations`/`cmdb_relation_graph` 在有值时返回 `props`。重复写入同一对端点且带 `props` 时刷新属性，不带则保留原值。边唯一键仍为 `(first_ci_id, second_ci_id, relation_type_id)`，同一对 caller/callee 只保留一条 `CALLS`，不同 endpoint 合并到属性中。
+
+分类、ID 映射和 APM 写入仍是 M1 的剩余部分。
 
 ## 迁移阶段
 
@@ -142,7 +144,7 @@ CMDB 当前的 `service`、`application`、`app_instance`、`app_cluster` 是部
 M0 前已按推荐默认值确定：
 
 1. **外部服务**：用 `application_service.service_type=external`，不单独建类。
-2. **边属性**：延到 M1，与 APM 接入一起加 `props_json`；M0 用现有 evidence 字段。
+2. **边属性**：已在 M1 实现（可空 `props_json`、object/8 KiB 校验、API/AIOps 返回、重复写入刷新）；APM 写入方仍待接入。
 3. **手工 CALLS**：允许，`evidence_source=manual`、confidence 低并在报告中标注；没有 APM 时不要声称是观测到的调用。
 4. **分类责任人**：M1 设 review 队列，未分类项不自动写；业务/运维 owner 和 SLA 在 M1 启动前确定。
 5. **ID 映射**：M1 使用独立映射表，不塞进 CI 属性，供 connector 和回滚使用。
@@ -158,6 +160,6 @@ M0 前已按推荐默认值确定：
 ## 实施顺序建议
 
 1. **M0（已实现）**：三个类、`HAS_INSTANCE`/`DEPLOYED_TO` 词表、`--ensure-builtin-models`/管理员 bootstrap、CALLS/HAS_INSTANCE/CONTAINS 声明；
-2. M1：分类命令 + review 队列 + 独立 ID 映射表 + `props_json`；
+2. M1（部分实现）：边属性 `props_json` 已完成；剩余分类命令、review 队列、独立 ID 映射表；
 3. M2：边重分类 + APM 接入；
 4. M3/M4：对账、影子、下线。

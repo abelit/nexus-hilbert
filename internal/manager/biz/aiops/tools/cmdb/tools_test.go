@@ -232,6 +232,7 @@ func TestGetCIRelationsDirection(t *testing.T) {
 						"evidence_source":      "collector:autodiscovery",
 						"confidence":           0.9,
 						"observed_at":          "2026-11-08T10:00:00Z",
+						"props":                map[string]any{"protocol": "http", "endpoint": "/weather"},
 					}},
 					"numfound": 1, "page": 2,
 				})
@@ -250,6 +251,10 @@ func TestGetCIRelationsDirection(t *testing.T) {
 			if item["evidence_source"] != "collector:autodiscovery" || item["confidence"] != 0.9 ||
 				item["observed_at"] != "2026-11-08T10:00:00Z" {
 				t.Fatalf("edge provenance missing: %v", item)
+			}
+			props, _ := item["props"].(map[string]any)
+			if props["protocol"] != "http" || props["endpoint"] != "/weather" {
+				t.Fatalf("edge props missing: %v", item)
 			}
 		})
 	}
@@ -508,7 +513,7 @@ func TestRelationGraphRenderPayload(t *testing.T) {
 			_, _ = w.Write([]byte(`{"items":[{"id":7,"name":"runs_on"}],"total":1}`))
 		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/children":
 			childrenHits++
-			_, _ = w.Write([]byte(`{"items":[{"relation_id":1,"ci_id":2,"type_id":4,"relation_type_id":7,"relation_type_name":"runs_on","relation_type_direction":"dst_to_src","relation_type_propagates":true,"relation_type_weight":1.0,"evidence_source":"collector:autodiscovery","confidence":0.9,"observed_at":"2026-11-08T10:00:00Z"}],"numfound":1,"page":1}`))
+			_, _ = w.Write([]byte(`{"items":[{"relation_id":1,"ci_id":2,"type_id":4,"relation_type_id":7,"relation_type_name":"runs_on","relation_type_direction":"dst_to_src","relation_type_propagates":true,"relation_type_weight":1.0,"evidence_source":"collector:autodiscovery","confidence":0.9,"observed_at":"2026-11-08T10:00:00Z","props":{"protocol":"http","endpoint":"/weather"}}],"numfound":1,"page":1}`))
 		case r.URL.Path == "/api/v1/cmdb/ci-relations/1/parents":
 			parentHits++
 			_, _ = w.Write([]byte(`{"items":[{"relation_id":2,"ci_id":9,"type_id":3,"relation_type_id":7,"relation_type_name":"runs_on","relation_type_direction":"dst_to_src","relation_type_propagates":true,"relation_type_weight":1.0}],"numfound":1,"page":1}`))
@@ -565,6 +570,10 @@ func TestRelationGraphRenderPayload(t *testing.T) {
 	if childEdge["evidence_source"] != "collector:autodiscovery" || childEdge["confidence"] != 0.9 ||
 		childEdge["observed_at"] != "2026-11-08T10:00:00Z" {
 		t.Fatalf("edge provenance missing: %v", childEdge)
+	}
+	edgeProps, _ := childEdge["props"].(map[string]any)
+	if edgeProps["protocol"] != "http" || edgeProps["endpoint"] != "/weather" {
+		t.Fatalf("edge props missing: %v", childEdge)
 	}
 	nodes, _ := got["nodes"].([]any)
 	if len(nodes) != 3 {

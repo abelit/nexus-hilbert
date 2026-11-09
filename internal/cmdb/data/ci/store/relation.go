@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -101,6 +102,10 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 	if err != nil {
 		return nil, err
 	}
+	props, err := normalizeRelationProps(in.PropsJSON)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := lockCI(tx, in.SecondCIID); err != nil {
 		return nil, err
@@ -130,6 +135,15 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 			}
 			existing.RelationTypeID = in.RelationTypeID
 		}
+		// Edge attributes are refreshed when the caller provides them: a
+		// collector re-observing the same call should not leave stale metrics.
+		// Omitting them keeps whatever the row already carried.
+		if props != nil {
+			if err := tx.Model(existing).Update("props_json", *props).Error; err != nil {
+				return nil, fmt.Errorf("update relation props: %w", err)
+			}
+			existing.PropsJSON = props
+		}
 		return existing, nil
 	}
 
@@ -154,6 +168,7 @@ func addRelationTx(tx *gorm.DB, in cibiz.RelationAddSpec) (*cimodel.Relation, er
 		Source:         in.Source,
 		EvidenceSource: evidence,
 		ObservedAt:     in.ObservedAt,
+		PropsJSON:      props,
 	}
 	if in.AncestorIDs != "" {
 		ancestors := in.AncestorIDs
@@ -286,6 +301,26 @@ func assertRelationTypeUsable(rt *citypemodel.RelationType) error {
 		return fmt.Errorf("%w: %s; use %s", cibiz.ErrRelationTypeDeprecated, rt.Name, rt.Replacement)
 	}
 	return fmt.Errorf("%w: %s", cibiz.ErrRelationTypeDeprecated, rt.Name)
+}
+
+// maxRelationPropsBytes bounds the edge-attribute document. It is small enough
+// for neighbour payloads and large enough for protocol/endpoint/metrics.
+const maxRelationPropsBytes = 8 << 10
+
+// normalizeRelationProps validates the optional edge attributes and returns the
+// pointer stored on the row, or nil when the caller supplied none.
+func normalizeRelationProps(raw string) (*string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	if len(trimmed) > maxRelationPropsBytes {
+		return nil, fmt.Errorf("%w: relation props exceed %d bytes", cibiz.ErrRelationPropsInvalid, maxRelationPropsBytes)
+	}
+	if !json.Valid([]byte(trimmed)) || !strings.HasPrefix(trimmed, "{") {
+		return nil, fmt.Errorf("%w: relation props must be a JSON object", cibiz.ErrRelationPropsInvalid)
+	}
+	return &trimmed, nil
 }
 
 // lockCI takes a row lock on an instance, so two relation writes for the same

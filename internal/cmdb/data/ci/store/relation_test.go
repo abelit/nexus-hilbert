@@ -565,6 +565,55 @@ func TestAddRelationRecordsEvidenceSource(t *testing.T) {
 	}
 }
 
+// Edge attributes are stored as a JSON object, refreshed when a collector
+// re-observes the edge, and refused when they are not an object or too large.
+func TestAddRelationRecordsEdgeProps(t *testing.T) {
+	repo, db := newRelationRepo(t, treeEdges)
+	ctx := context.Background()
+
+	spec := addSpec(isolatedA, isolatedB, model.ConstraintMany2Many)
+	spec.PropsJSON = `{"protocol":"http","endpoint":"/weather"}`
+	if _, err := repo.AddRelation(ctx, spec); err != nil {
+		t.Fatalf("AddRelation(props) error = %v", err)
+	}
+	var got cimodel.Relation
+	if err := db.Where("first_ci_id = ? AND second_ci_id = ?", isolatedA, isolatedB).First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.PropsJSON == nil || *got.PropsJSON != spec.PropsJSON {
+		t.Fatalf("props = %v, want %s", got.PropsJSON, spec.PropsJSON)
+	}
+
+	// A re-observation refreshes the attributes; omitting them keeps the row.
+	spec.PropsJSON = `{"protocol":"grpc","endpoint":"/weather.v1.Weather"}`
+	if _, err := repo.AddRelation(ctx, spec); err != nil {
+		t.Fatalf("AddRelation(refresh props) error = %v", err)
+	}
+	var again cimodel.Relation
+	if err := db.Where("first_ci_id = ? AND second_ci_id = ?", isolatedA, isolatedB).First(&again).Error; err != nil {
+		t.Fatal(err)
+	}
+	if again.PropsJSON == nil || *again.PropsJSON != spec.PropsJSON {
+		t.Fatalf("refreshed props = %v, want %s", again.PropsJSON, spec.PropsJSON)
+	}
+
+	for _, raw := range []string{`[1,2]`, `{"bad":`, strings.Repeat("x", 8193)} {
+		bad := addSpec(isolatedA, isolatedC, model.ConstraintMany2Many)
+		bad.PropsJSON = raw
+		if _, err := repo.AddRelation(ctx, bad); !errors.Is(err, cibiz.ErrRelationPropsInvalid) {
+			t.Fatalf("AddRelation(props %q) error = %v, want ErrRelationPropsInvalid", raw, err)
+		}
+	}
+	var n int64
+	if err := db.Model(&cimodel.Relation{}).
+		Where("first_ci_id = ? AND second_ci_id = ?", isolatedA, isolatedC).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("an invalid-props edge survived: %d rows", n)
+	}
+}
+
 // The business layer refuses a self-edge, but discovery and repair paths call
 // the store directly. The store is the single write entry point, so it must
 // refuse one too — otherwise the 271 legacy self-loops can be created again.

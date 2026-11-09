@@ -121,6 +121,16 @@ func TestDecodeRelationToleratesAnEmptyBody(t *testing.T) {
 		t.Fatalf("decoded %+v", got)
 	}
 
+	withProps := httptest.NewRequest(http.MethodPost, "/x",
+		strings.NewReader(`{"relation_type_id":5,"props":{"protocol":"http","endpoint":"/weather"}}`))
+	got, err = decodeRelation(withProps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Props) != `{"protocol":"http","endpoint":"/weather"}` {
+		t.Fatalf("decoded props = %s", got.Props)
+	}
+
 	broken := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("{nope"))
 	if _, err := decodeRelation(broken); err == nil {
 		t.Fatal("a malformed body was accepted")
