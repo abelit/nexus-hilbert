@@ -38,6 +38,12 @@ func TargetRelationTypes() []RelationTypeSpec {
 			Propagates:  true, Weight: 0.8,
 		},
 		{
+			Name: "CALLS", Category: "dependency", Direction: "dst_to_src",
+			DisplayZH: "调用", DisplayEN: "Calls",
+			Description: "服务调用：调用方调用被调用方，目标故障影响源；同步 API/RPC 调用使用该类型。",
+			Propagates:  true, Weight: 0.9,
+		},
+		{
 			Name: "POWERED_BY", Category: "failure-domain", Direction: "dst_to_src",
 			DisplayZH: "供电于", DisplayEN: "Powered by",
 			Description: "供电依赖：消费者由供电方供电，供电故障影响消费者。",

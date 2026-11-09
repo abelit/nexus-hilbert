@@ -55,6 +55,7 @@ ongrid-cmdb --plan-relation-split
 | `depend` | `DEPENDS_ON` | `DEPENDS_ON` | 运行时依赖 |
 | `connect` | `POWERED_BY` | `POWERED_BY` | 供电链；当前方向是 provider→consumer，目标方向相反 |
 | `connect` | `CONNECTS_TO` | `CONNECTS_TO` | 逻辑连接；有 APM 证据后再细化为 `CALLS` |
+| （新增） | `CALLS` | `CALLS` | 同步服务调用：调用方→被调用方，故障沿反方向传播 |
 | `bind` | `UNDER_CONTRACT` | `COVERS`（`UNDER_CONTRACT`） | SLA/合同覆盖资源；CMDB 存合同→资源，目标读资源→合同 |
 
 结构类目标（`PART_OF` / `MEMBER_OF` / `BELONGS_TO` / `LOCATED_IN` / `ALLOCATED_TO`）读作 `部分→整体`，与 CMDB 现有 `contain` 的存储方向相反。直接改名会反转 1634 条边，并且 36 条 one2many 规则会变成 CMDB 不支持的 many2one；因此拆分保留存储方向，用反向命名的 CMDB 类型 + `inverse_of` 适配。
@@ -122,6 +123,22 @@ ongrid-cmdb --split-relations
 - AIOps `cmdb_list_relation_types` 仍返回完整字典（含 deprecated/replacement），由调用方判断。
 
 保留旧边是为了可回滚；回滚到旧类型需要按备份恢复或单独的数据迁移。
+
+### 目标词表的显式初始化
+
+拆分命令只为有存量规则的来源类型创建目标词。`CALLS` 这类没有旧规则可拆的词，以及新库上只由内置 bootstrap 创建的三类结构词，需要显式初始化：
+
+```bash
+# 只报告缺少哪些类型
+ongrid-cmdb --ensure-relation-vocabulary --dry-run
+
+# 创建缺失的类型（单事务）
+ongrid-cmdb --ensure-relation-vocabulary
+```
+
+命令按 `internal/cmdb/biz/ci.TargetRelationTypes()` 创建缺失类型，写入 category、direction、propagates、weight、inverse_of、transitive、显示名和 revision；已存在的行（topocortex 同步、运营编辑或早先拆分创建）不覆盖，可重复执行。
+
+`CALLS` 的方向是调用方→被调用方，`category=dependency`、`direction=dst_to_src`、`propagates=true`、`weight=0.9`，用于同步 API/RPC 调用。异步消息不应使用 `CALLS`；`PUBLISHES_TO`/`SUBSCRIBES_TO` 尚未加入词表。`connect service→service` 的存量边仍保留为 `CONNECTS_TO`，等 APM/Trace 证据出现后再逐条细化为 `CALLS`。
 
 ### 执行前
 

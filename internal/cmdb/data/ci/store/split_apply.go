@@ -244,7 +244,7 @@ func applySplitTx(ctx context.Context, tx *gorm.DB) (*SplitApplyReport, error) {
 		if !needed[spec.Name] {
 			continue
 		}
-		id, created, err := ensureSplitType(tx, spec)
+		id, created, err := ensureRelationType(tx, spec)
 		if err != nil {
 			return nil, err
 		}
@@ -289,14 +289,14 @@ func applySplitTx(ctx context.Context, tx *gorm.DB) (*SplitApplyReport, error) {
 	return report, nil
 }
 
-func ensureSplitType(tx *gorm.DB, spec cibiz.RelationTypeSpec) (model.ID, bool, error) {
+func ensureRelationType(tx *gorm.DB, spec cibiz.RelationTypeSpec) (model.ID, bool, error) {
 	var existing citypemodel.RelationType
 	err := tx.Where("name = ?", spec.Name).First(&existing).Error
 	switch {
 	case err == nil:
 		return existing.ID, false, nil
 	case !errors.Is(err, gorm.ErrRecordNotFound):
-		return 0, false, fmt.Errorf("cmdb ci: split: find type %s: %w", spec.Name, err)
+		return 0, false, fmt.Errorf("cmdb ci: ensure relation type: find %s: %w", spec.Name, err)
 	}
 	row := citypemodel.RelationType{
 		Name: spec.Name, Color: "#1890ff",
@@ -307,13 +307,13 @@ func ensureSplitType(tx *gorm.DB, spec cibiz.RelationTypeSpec) (model.ID, bool, 
 		Description: spec.Description, Revision: 1,
 	}
 	if err := tx.Create(&row).Error; err != nil {
-		return 0, false, fmt.Errorf("cmdb ci: split: create type %s: %w", spec.Name, err)
+		return 0, false, fmt.Errorf("cmdb ci: ensure relation type: create %s: %w", spec.Name, err)
 	}
 	// GORM substitutes the column default (1) for a zero WeightDefault, so a
 	// structural type's explicit 0 has to be written back.
 	if spec.Weight == 0 {
 		if err := tx.Model(&row).Update("weight_default", spec.Weight).Error; err != nil {
-			return 0, false, fmt.Errorf("cmdb ci: split: set weight for %s: %w", spec.Name, err)
+			return 0, false, fmt.Errorf("cmdb ci: ensure relation type: set weight for %s: %w", spec.Name, err)
 		}
 	}
 	return row.ID, true, nil

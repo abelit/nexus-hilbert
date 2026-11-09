@@ -42,7 +42,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, dryRun, planRelationSplit, splitRelations bool
+	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -66,14 +66,17 @@ func main() {
 			planRelationSplit = true
 		case "--split-relations":
 			splitRelations = true
+		case "--ensure-relation-vocabulary":
+			ensureVocabulary = true
 		}
 	}
-	if dryRun && !cleanupRelations && !splitRelations {
-		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations or --split-relations")
+	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary {
+		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations or --ensure-relation-vocabulary")
 		os.Exit(1)
 	}
-	if (cleanupRelations && splitRelations) || (cleanupRelations && planRelationSplit) || (splitRelations && planRelationSplit) {
-		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split")
+	if (cleanupRelations && splitRelations) || (cleanupRelations && planRelationSplit) ||
+		(splitRelations && planRelationSplit) || (ensureVocabulary && (cleanupRelations || splitRelations || planRelationSplit)) {
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary")
 		os.Exit(1)
 	}
 
@@ -185,6 +188,22 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode relation split plan", err)
+		}
+		return
+	}
+	// The managed vocabulary is provisioned EXPLICITLY. Some target words have
+	// no legacy rule to split and are not needed by the built-in bootstrap, so
+	// without this command a new writer would have no semantically configured
+	// type to use. Existing rows are never overwritten.
+	if ensureVocabulary {
+		report, err := cistore.EnsureRelationVocabulary(rootCtx, db, dryRun)
+		if err != nil {
+			fatal(log, "ensure relation vocabulary", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode vocabulary report", err)
 		}
 		return
 	}
