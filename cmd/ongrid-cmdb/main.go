@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	cmdbdata "github.com/ongridio/ongrid/internal/cmdb/data"
 	cistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
 	cmdbcitypedata "github.com/ongridio/ongrid/internal/cmdb/data/citype/store"
+	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/dbx"
@@ -46,8 +48,18 @@ const (
 
 func main() {
 	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService, applyServiceEdges, rollbackServiceLayers bool
-	for _, arg := range os.Args[1:] {
+	var serviceDecisionsPath string
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch arg {
+		case "--service-decisions":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--service-decisions requires a file path")
+				os.Exit(1)
+			}
+			serviceDecisionsPath = args[i+1]
+			i++
 		case "--version", "-v":
 			fmt.Fprintf(os.Stdout, "ongrid-cmdb %s\n", version)
 			return
@@ -83,10 +95,18 @@ func main() {
 			applyServiceEdges = true
 		case "--rollback-service-layers":
 			rollbackServiceLayers = true
+		default:
+			if strings.HasPrefix(arg, "--service-decisions=") {
+				serviceDecisionsPath = strings.TrimPrefix(arg, "--service-decisions=")
+			}
 		}
 	}
 	if classifyService && !applyServiceLayers {
 		fmt.Fprintln(os.Stderr, "--classify-service is only valid with --apply-service-layers")
+		os.Exit(1)
+	}
+	if serviceDecisionsPath != "" && !applyServiceLayers {
+		fmt.Fprintln(os.Stderr, "--service-decisions is only valid with --apply-service-layers")
 		os.Exit(1)
 	}
 	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers && !applyServiceEdges && !rollbackServiceLayers {
@@ -238,8 +258,15 @@ func main() {
 		ciRepo := cistore.NewRepo(db)
 		ciUC := cibiz.NewUsecase(ciRepo, cmdbcitypebiz.NewCIResolver(citypeUC), log).
 			WithLayerMappings(ciRepo)
+		var decisions map[model.ID]string
+		if serviceDecisionsPath != "" {
+			decisions, err = readServiceDecisions(serviceDecisionsPath)
+			if err != nil {
+				fatal(log, "read service decisions", err)
+			}
+		}
 		report, err := ciUC.ApplyServiceLayers(rootCtx, cibiz.ServiceLayerApplyInput{
-			DryRun: dryRun, ClassifyService: classifyService,
+			DryRun: dryRun, ClassifyService: classifyService, ServiceDecisions: decisions,
 		})
 		if err != nil {
 			fatal(log, "apply service layers", err)
@@ -377,6 +404,44 @@ func main() {
 		log.Warn("trigger dispatcher did not drain", slog.Any("err", err))
 	}
 	log.Info("shutdown complete", slog.String("version", version))
+}
+
+// readServiceDecisions reads the owner's review decisions for the RFC-011
+// service queue: a CSV with `ci_id,target_model`, optionally preceded by a
+// header. The only accepted targets are business_service and
+// application_service.
+func readServiceDecisions(path string) (map[model.ID]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = 2
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[model.ID]string, len(rows))
+	for i, row := range rows {
+		idText := strings.TrimSpace(row[0])
+		target := strings.TrimSpace(row[1])
+		if i == 0 && strings.EqualFold(idText, "ci_id") {
+			continue
+		}
+		id, parseErr := strconv.ParseUint(idText, 10, 64)
+		if parseErr != nil || id == 0 {
+			return nil, fmt.Errorf("row %d: ci_id %q", i+1, idText)
+		}
+		if target != "business_service" && target != "application_service" {
+			return nil, fmt.Errorf("row %d: target_model %q", i+1, target)
+		}
+		if _, dup := out[model.ID(id)]; dup {
+			return nil, fmt.Errorf("row %d: duplicate ci_id %d", i+1, id)
+		}
+		out[model.ID(id)] = target
+	}
+	return out, nil
 }
 
 func fatal(log *slog.Logger, msg string, err error) {
