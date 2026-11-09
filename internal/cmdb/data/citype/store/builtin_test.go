@@ -321,3 +321,101 @@ func TestEnsuredModelsResolveForIPAM(t *testing.T) {
 		}
 	}
 }
+
+// The RFC-011 template: three layers, their identity attributes, and the
+// CONTAINS / HAS_INSTANCE / CALLS spine. CALLS is a model self-pair and must be
+// created with AllowSelf; the public API still refuses one by default.
+func TestServiceBuiltinModelsCreateTheThreeLayers(t *testing.T) {
+	repo, db := newWriteRepo(t)
+	uc := citypebiz.NewUsecase(repo, nil)
+	ctx := context.Background()
+	in := citypebiz.BuiltinEnsureInput{
+		Models:    cibiz.ServiceBuiltinModels(),
+		Relations: cibiz.ServiceBuiltinRelations(),
+	}
+
+	first, err := uc.EnsureBuiltinModels(ctx, in)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	for _, label := range []string{
+		"model business_service", "model application_service", "model service_instance",
+		"relation business_service->application_service",
+		"relation application_service->service_instance",
+		"relation application_service->application_service",
+	} {
+		if !containsString(first.Created, label) {
+			t.Fatalf("%q was not created: %v", label, first.Created)
+		}
+	}
+
+	// The resolver is what the instance layer uses; a model without its
+	// identity attribute is a model every write refuses.
+	resolver := citypebiz.NewCIResolver(uc)
+	for _, spec := range cibiz.ServiceBuiltinModels() {
+		set, err := resolver.ResolveForCI(ctx, spec.Name)
+		if err != nil || set == nil {
+			t.Fatalf("resolve %s: %v", spec.Name, err)
+		}
+		if set.UniqueAttr.Name != spec.UniqueKey {
+			t.Fatalf("%s identifies by %q, want %q", spec.Name, set.UniqueAttr.Name, spec.UniqueKey)
+		}
+		for _, attr := range spec.Attributes {
+			if _, ok := set.ByName[attr.Name]; !ok {
+				t.Fatalf("%s does not carry %s", spec.Name, attr.Name)
+			}
+		}
+	}
+
+	var rules []struct {
+		Parent string
+		Child  string
+		Rel    string
+	}
+	if err := db.Table("c_ci_type_relations AS tr").
+		Select("p.name AS parent, c.name AS child, rt.name AS rel").
+		Joins("JOIN c_ci_types p ON p.id = tr.parent_id").
+		Joins("JOIN c_ci_types c ON c.id = tr.child_id").
+		Joins("JOIN c_relation_types rt ON rt.id = tr.relation_type_id").
+		Where("tr.delete_marker = 0 AND tr.deleted_at IS NULL").
+		Scan(&rules).Error; err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"business_service->application_service":    "CONTAINS",
+		"application_service->service_instance":    "HAS_INSTANCE",
+		"application_service->application_service": "CALLS",
+	}
+	seen := map[string]string{}
+	for _, rule := range rules {
+		seen[rule.Parent+"->"+rule.Child] = rule.Rel
+	}
+	for pair, rel := range want {
+		if seen[pair] != rel {
+			t.Fatalf("%s uses %q, want %q (rules %+v)", pair, seen[pair], rel, rules)
+		}
+	}
+
+	var calls citypemodel.RelationType
+	if err := db.Where("name = ?", "CALLS").First(&calls).Error; err != nil {
+		t.Fatalf("CALLS type: %v", err)
+	}
+	if calls.Direction != "dst_to_src" || !calls.PropagatesDefault || calls.WeightDefault != 0.9 {
+		t.Fatalf("CALLS semantics = %+v", calls)
+	}
+	var hasInstance citypemodel.RelationType
+	if err := db.Where("name = ?", "HAS_INSTANCE").First(&hasInstance).Error; err != nil {
+		t.Fatalf("HAS_INSTANCE type: %v", err)
+	}
+	if hasInstance.InverseOf != "INSTANCE_OF" || hasInstance.WeightDefault != 0 {
+		t.Fatalf("HAS_INSTANCE semantics = %+v", hasInstance)
+	}
+
+	second, err := uc.EnsureBuiltinModels(ctx, in)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(second.Created) != 0 {
+		t.Fatalf("second call created %v; the bootstrap is not idempotent", second.Created)
+	}
+}

@@ -44,6 +44,12 @@ func TargetRelationTypes() []RelationTypeSpec {
 			Propagates:  true, Weight: 0.9,
 		},
 		{
+			Name: "DEPLOYED_TO", Category: "dependency", Direction: "dst_to_src",
+			DisplayZH: "部署于", DisplayEN: "Deployed to",
+			Description: "部署关系：应用服务部署到集群/环境，环境故障影响应用服务。",
+			Propagates:  true, Weight: 0.7,
+		},
+		{
 			Name: "POWERED_BY", Category: "failure-domain", Direction: "dst_to_src",
 			DisplayZH: "供电于", DisplayEN: "Powered by",
 			Description: "供电依赖：消费者由供电方供电，供电故障影响消费者。",
@@ -68,6 +74,12 @@ func TargetRelationTypes() []RelationTypeSpec {
 			DisplayZH: "含有成员", DisplayEN: "Has member",
 			Description: "成员聚合：聚合体含有成员，不传播故障。",
 			InverseOf:   "MEMBER_OF", Weight: 0,
+		},
+		{
+			Name: "HAS_INSTANCE", Category: "structure", Direction: "src_to_dst",
+			DisplayZH: "含有实例", DisplayEN: "Has instance",
+			Description: "实例化：应用服务包含运行时实例，不传播故障。",
+			InverseOf:   "INSTANCE_OF", Weight: 0,
 		},
 		{
 			Name: "HAS_BELONGING", Category: "structure", Direction: "src_to_dst",

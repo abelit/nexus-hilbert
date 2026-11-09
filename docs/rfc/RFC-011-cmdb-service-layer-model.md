@@ -51,11 +51,18 @@ CMDB 当前的 `service`、`application`、`app_instance`、`app_cluster` 是部
 | `application_service` | 可部署的应用服务/微服务，调用链主图 | `code` | name、service_type（internal/external）、protocol、owner、criticality、repo、environment | FOC 运行控制服务、订单服务、会员服务、气象接口服务 |
 | `service_instance` | 运行时实例（Pod/进程/容器） | `code` 或 `instance_id` | name、version、host、port、status、started_at | order-api-7d9f、foc-worker-2 |
 
+标识属性在 CMDB 里按层加前缀（`business_service_code`、`application_service_code`、`service_instance_code`），因为 `c_attributes` 是共享字典，一个共享的 unique `code` 会让三个模型的唯一性互相影响；`name` 是共享的显示属性，只建索引。
+
 `application_service` 的外部服务（如气象接口）用 `service_type=external` 标记，并配合合同/供应商关系；不单独建类，避免同一层出现两套编号。
 
 ### 类如何创建
 
-三个类是固定模板，不是启动时隐式创建。建议扩展 `EnsureBuiltinModels` 的显式管理员入口（或新增同类命令），按上面的属性集创建缺失的模型和属性，已存在的模型不覆盖。新库和迁移库都走同一入口。
+三个类是固定模板，不是启动时隐式创建。两个入口共用同一份规格（`cibiz.AllBuiltinModels`/`AllBuiltinRelations`）：
+
+- 管理员 HTTP 入口 `POST /v1/cmdb/ci-types/ensure-builtin`（现有 bootstrap）；
+- 运维命令 `ongrid-cmdb --ensure-builtin-models`，适合没有交互会话的部署。
+
+两者都只创建缺失的模型/属性和关系，已存在的模型不覆盖，可重复执行。
 
 ## 关系模型
 
@@ -77,9 +84,9 @@ CMDB 当前的 `service`、`application`、`app_instance`、`app_cluster` 是部
 
 ### 边属性
 
-`c_ci_relations` 目前没有通用边属性列，CALLS 需要的 protocol、endpoint、method、sync、qps、latency、error_rate 无处存放。建议 M0 增加可空 `props_json`（text，限 8 KiB，写入时校验 JSON），并在邻居/关系图 API 与 AIOps 工具中按需返回；边唯一键仍为 `(first_ci_id, second_ci_id, relation_type_id)`，同一对 caller/callee 只保留一条 `CALLS`，不同 endpoint 合并到属性中，避免重复影响边。
+`c_ci_relations` 目前没有通用边属性列，CALLS 需要的 protocol、endpoint、method、sync、qps、latency、error_rate 无处存放。
 
-如果评审认为边属性可以延后，M0 只建类和关系，CALLS 的 APM 证据先落在 `evidence_*` 与 `confidence`，属性列在 M1 再加。
+**M0 决策（2026-11-09）：延到 M1。** M0 不新增列；CALLS 的 APM 证据先使用现有的 `evidence_source`/`evidence_*`/`confidence`/`observed_at`。M1 与 APM 接入一起增加可空 `props_json`（text，限 8 KiB，写入时校验 JSON），并在邻居/关系图 API 与 AIOps 工具中按需返回；边唯一键仍为 `(first_ci_id, second_ci_id, relation_type_id)`，同一对 caller/callee 只保留一条 `CALLS`，不同 endpoint 合并到属性中，避免重复影响边。
 
 ## 迁移阶段
 
@@ -130,20 +137,27 @@ CMDB 当前的 `service`、`application`、`app_instance`、`app_cluster` 是部
 - 映射表保留；停用新类即可回到旧图。
 - `props_json` 是可空列，回滚代码后旧代码忽略它。
 
-## 开放问题
+## 决策与剩余问题
 
-1. 现有 `service` 实例的分类由谁负责（业务/运维/自动规则），review 队列的 SLA 是什么？
-2. APM/Trace/eBPF 的数据源和接入顺序；没有 APM 时 `CALLS` 是否允许手工创建（建议允许，但 confidence 低并标注 source）。
-3. 外部服务是否统一用一个类 + `service_type`，还是拆 `external_service` 子类？
-4. 边属性 `props_json` 是否在 M0 加，还是延到 M1？
-5. 新旧 ID 映射放在独立表还是 CI 属性；是否需要暴露给 connector？
-6. topocortex 的 Contract/SLA 类映射与 `UNDER_CONTRACT` 声明仍未完成，是否影响 M0（不影响，但影响后续业务归属边）。
-7. 旧 `service` 模型是否在 M4 删除，还是永久保留为别名？
+M0 前已按推荐默认值确定：
+
+1. **外部服务**：用 `application_service.service_type=external`，不单独建类。
+2. **边属性**：延到 M1，与 APM 接入一起加 `props_json`；M0 用现有 evidence 字段。
+3. **手工 CALLS**：允许，`evidence_source=manual`、confidence 低并在报告中标注；没有 APM 时不要声称是观测到的调用。
+4. **分类责任人**：M1 设 review 队列，未分类项不自动写；业务/运维 owner 和 SLA 在 M1 启动前确定。
+5. **ID 映射**：M1 使用独立映射表，不塞进 CI 属性，供 connector 和回滚使用。
+6. **旧 `service` 模型**：M4 保留别名，一个发布周期后再删除。
+7. **topocortex Contract/SLA**：不在 M0；在 M2 业务归属边之前确认 `UNDER_CONTRACT`/Contract 类映射。
+
+仍待确认：
+
+- M1 分类 owner 和 review SLA 的具体人选；
+- APM/Trace/eBPF 数据源的接入顺序和覆盖范围；
+- 是否需要把 `PUBLISHES_TO`/`SUBSCRIBES_TO` 纳入同一批词表（当前只做同步 `CALLS`）。
 
 ## 实施顺序建议
 
-1. 评审本 RFC，确认类/关系/迁移门槛；
-2. M0：建类、加 `HAS_INSTANCE`/`DEPLOYED_TO`、按需加边属性、AIOps 工具识别；
-3. M1：分类命令 + review 队列；
-4. M2：边重分类 + APM 接入；
-5. M3/M4：对账、影子、下线。
+1. **M0（已实现）**：三个类、`HAS_INSTANCE`/`DEPLOYED_TO` 词表、`--ensure-builtin-models`/管理员 bootstrap、CALLS/HAS_INSTANCE/CONTAINS 声明；
+2. M1：分类命令 + review 队列 + 独立 ID 映射表 + `props_json`；
+3. M2：边重分类 + APM 接入；
+4. M3/M4：对账、影子、下线。

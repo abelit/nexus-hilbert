@@ -311,9 +311,10 @@ func (h *Handler) ensureBuiltinModels(w http.ResponseWriter, r *http.Request) {
 	}
 	// BOTH BUILT-IN FEATURES. The endpoint creates what is absent and binds
 	// missing attributes to existing models, so an installation that already
-	// has DCIM models gains the IPAM shape without them being touched.
-	models := append(cibiz.DCIMBuiltinModels(), cibiz.IPAMBuiltinModels()...)
-	relations := append(cibiz.DCIMBuiltinRelations(), cibiz.IPAMBuiltinRelations()...)
+	// has DCIM models gains the IPAM shape without them being touched. The
+	// service-layer template (RFC-011) travels with the same bootstrap.
+	models := cibiz.AllBuiltinModels()
+	relations := cibiz.AllBuiltinRelations()
 	got, err := h.uc.EnsureBuiltinModels(r.Context(), citypebiz.BuiltinEnsureInput{
 		Models:    models,
 		Relations: relations,
