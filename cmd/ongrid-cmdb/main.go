@@ -45,7 +45,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService, applyServiceEdges bool
+	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService, applyServiceEdges, rollbackServiceLayers bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -81,24 +81,26 @@ func main() {
 			classifyService = true
 		case "--apply-service-edges":
 			applyServiceEdges = true
+		case "--rollback-service-layers":
+			rollbackServiceLayers = true
 		}
 	}
 	if classifyService && !applyServiceLayers {
 		fmt.Fprintln(os.Stderr, "--classify-service is only valid with --apply-service-layers")
 		os.Exit(1)
 	}
-	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers && !applyServiceEdges {
-		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary, --apply-service-layers or --apply-service-edges")
+	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers && !applyServiceEdges && !rollbackServiceLayers {
+		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary, --apply-service-layers, --apply-service-edges or --rollback-service-layers")
 		os.Exit(1)
 	}
 	commands := 0
-	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, applyServiceEdges} {
+	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, applyServiceEdges, rollbackServiceLayers} {
 		if on {
 			commands++
 		}
 	}
 	if commands > 1 {
-		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers, --apply-service-edges")
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers, --apply-service-edges, --rollback-service-layers")
 		os.Exit(1)
 	}
 
@@ -266,6 +268,29 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode service layer edge report", err)
+		}
+		return
+	}
+	// The rollback is mapping-driven and refuses to delete a target whose live
+	// graph has grown beyond the projected containment edges. A dry run reports
+	// the scope; a refused run still prints the blocking relations.
+	if rollbackServiceLayers {
+		ciRepo := cistore.NewRepo(db)
+		ciUC := cibiz.NewUsecase(ciRepo, nil, log).WithServiceLayerRollback(ciRepo)
+		report, err := ciUC.RollbackServiceLayers(rootCtx, cibiz.ServiceLayerRollbackInput{DryRun: dryRun})
+		if err != nil {
+			fatal(log, "rollback service layers", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode service layer rollback report", err)
+		}
+		if len(report.Blocked) > 0 {
+			fmt.Fprintf(os.Stderr,
+				"rollback refused: %d live relation(s) are not inferred containment edges between batch targets\n",
+				len(report.Blocked))
+			os.Exit(1)
 		}
 		return
 	}

@@ -195,6 +195,16 @@ dev 结果（2026-11-09）：176 条 legacy 边中 87 条可映射创建、87 �
 - 映射表保留；停用新类即可回到旧图。
 - `props_json` 是可空列，回滚代码后旧代码忽略它。
 
+### 回滚命令
+
+```bash
+ongrid-cmdb --rollback-service-layers [--dry-run]
+```
+
+以 `c_ci_layer_mappings` 的 `service-layers` batch 为范围：先统计所有目标 CI 的活跃关系；只有“两端都在本批目标内、关系类型 `CONTAINS`、`evidence_source=inference`”的边允许随目标一起删除。任何其他关系（人工依赖、监控、归属）都会让命令拒绝执行并在报告中列出，先由人处理该关系。通过后按目标 CI 软删（值行沿用现有 `DeleteCI` 语义清理）并软删映射行，可重复执行。
+
+dev dry-run（2026-11-09）：488 映射 / 488 目标 / 87 条 inferred 边 / 0 阻塞（未执行真实回滚）。
+
 ## 决策与剩余问题
 
 M0 前已按推荐默认值确定：
