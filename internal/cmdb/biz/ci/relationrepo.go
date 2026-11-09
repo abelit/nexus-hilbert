@@ -169,6 +169,11 @@ type RelationAddSpec struct {
 	// writes leave it nil; created_at is their record.
 	ObservedAt *time.Time
 
+	// PropsJSON is an optional JSON object with edge attributes (protocol,
+	// endpoint, method, ...). Empty means no attributes. The store validates the
+	// object and caps its size.
+	PropsJSON string
+
 	Actor model.ID
 }
 
@@ -211,4 +216,8 @@ var (
 	// edge) names a relation type retired in favour of a replacement. Existing
 	// edges keep working; only new vocabulary is refused.
 	ErrRelationTypeDeprecated = fmt.Errorf("%w: relation type is deprecated", errs.ErrInvalid)
+
+	// ErrRelationPropsInvalid is returned when edge attributes are not a JSON
+	// object or exceed the size limit.
+	ErrRelationPropsInvalid = fmt.Errorf("%w: relation props are invalid", errs.ErrInvalid)
 )

@@ -333,8 +333,9 @@ func (h *Handler) listNeighbours(w http.ResponseWriter, r *http.Request, incomin
 // It is FLAT: `ancestor_ids` and `relation_type_id` are the only controls, and
 // the endpoints that take them are the two-element path form.
 type relationRequest struct {
-	AncestorIDs    string   `json:"ancestor_ids"`
-	RelationTypeID model.ID `json:"relation_type_id"`
+	AncestorIDs    string          `json:"ancestor_ids"`
+	RelationTypeID model.ID        `json:"relation_type_id"`
+	Props          json.RawMessage `json:"props"`
 }
 
 func decodeRelation(r *http.Request) (relationRequest, error) {
@@ -380,6 +381,7 @@ func (h *Handler) addRelation(w http.ResponseWriter, r *http.Request) {
 	got, err := h.uc.AddRelation(r.Context(), cibiz.AddRelationRequest{
 		FirstCIID: first, SecondCIID: second,
 		AncestorIDs: req.AncestorIDs, RelationTypeID: req.RelationTypeID,
+		PropsJSON: string(req.Props),
 	}, audit)
 	if err != nil {
 		writeErr(w, err)

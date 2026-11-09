@@ -468,6 +468,9 @@ type neighbour struct {
 	EvidenceSource string     `json:"evidence_source"`
 	Confidence     *float64   `json:"confidence"`
 	ObservedAt     *time.Time `json:"observed_at"`
+
+	// Props is the edge-attribute object (protocol, endpoint, ...).
+	Props json.RawMessage `json:"props"`
 }
 
 func newGetCIRelationsTool(c *Client) basetool.BaseTool {
@@ -536,6 +539,9 @@ func newGetCIRelationsTool(c *Client) basetool.BaseTool {
 				}
 				if n.ObservedAt != nil {
 					item["observed_at"] = n.ObservedAt
+				}
+				if len(n.Props) > 0 {
+					item["props"] = n.Props
 				}
 				items = append(items, item)
 			}
@@ -874,6 +880,9 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 				if e.ObservedAt != nil {
 					edge["observed_at"] = e.ObservedAt
 				}
+				if len(e.Props) > 0 {
+					edge["props"] = e.Props
+				}
 				edges = append(edges, edge)
 			}
 
@@ -990,6 +999,7 @@ type rawGraphEdge struct {
 	EvidenceSource   string
 	Confidence       *float64
 	ObservedAt       *time.Time
+	Props            json.RawMessage
 }
 
 type graphCounts struct {
@@ -1090,6 +1100,7 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 						EvidenceSource:   n.EvidenceSource,
 						Confidence:       n.Confidence,
 						ObservedAt:       n.ObservedAt,
+						Props:            n.Props,
 					})
 				}
 				if stop {

@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -34,6 +35,9 @@ type AddRelationRequest struct {
 
 	// RelationTypeID is the caller's choice; zero derives it from the models.
 	RelationTypeID model.ID
+
+	// PropsJSON is an optional JSON object with edge attributes.
+	PropsJSON string
 }
 
 // AddRelation relates two instances.
@@ -98,6 +102,7 @@ func (u *Usecase) AddRelation(ctx context.Context, req AddRelationRequest, audit
 		SecondTypeID:      second.TypeID,
 		Constraint:        rule.Constraint,
 		EnforceConstraint: true,
+		PropsJSON:         req.PropsJSON,
 		Actor:             audit.Actor,
 	})
 	if err != nil {
@@ -296,6 +301,10 @@ type Neighbours struct {
 	EvidenceSource string     `json:"evidence_source,omitempty"`
 	Confidence     *float64   `json:"confidence,omitempty"`
 	ObservedAt     *time.Time `json:"observed_at,omitempty"`
+
+	// Props is the edge-attribute object (protocol, endpoint, ...), when the
+	// edge carries one.
+	Props json.RawMessage `json:"props,omitempty"`
 }
 
 // NeighbourPage is one page of an instance's neighbours.
@@ -374,6 +383,9 @@ func (u *Usecase) neighbours(ctx context.Context, ciID, relationTypeID model.ID,
 			EvidenceSource: row.EvidenceSource,
 			Confidence:     row.Confidence,
 			ObservedAt:     row.ObservedAt,
+		}
+		if row.PropsJSON != nil && *row.PropsJSON != "" {
+			item.Props = json.RawMessage(*row.PropsJSON)
 		}
 		if row.AncestorIDs != nil {
 			item.AncestorIDs = *row.AncestorIDs

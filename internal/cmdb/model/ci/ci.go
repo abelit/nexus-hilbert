@@ -115,6 +115,13 @@ type Relation struct {
 	// cantor declares String(128); the width is preserved so an adopted
 	// database does not reject rows this port would otherwise accept.
 	AncestorIDs *string `gorm:"column:ancestor_ids;size:128;index:idx_c_ci_relations_ancestor_ids;index:idx_c_ci_relations_ancestor_parent,priority:1"`
+
+	// PropsJSON carries edge-specific attributes (protocol, endpoint, method,
+	// sync, qps, ...). It is NULLABLE so an existing table gains the column on
+	// both MySQL and SQLite without a table rewrite; a NULL or empty value means
+	// no attributes. The write boundary validates it as a JSON object capped at
+	// 8 KiB.
+	PropsJSON *string `gorm:"column:props_json;type:text"`
 }
 
 func (Relation) TableName() string { return "c_ci_relations" }
