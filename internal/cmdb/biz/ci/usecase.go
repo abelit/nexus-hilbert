@@ -85,6 +85,10 @@ type Usecase struct {
 	// service-layer apply uses it; every other path leaves it nil.
 	layerMappings LayerMappingStore
 
+	// layerEdges is the optional RFC-011 M2 edge projection. Only
+	// ApplyServiceEdges uses it; every other path leaves it nil.
+	layerEdges ServiceLayerEdgeStore
+
 	// Now is the clock the write path stamps defaults and audit rows with.
 	// Injected so a test can pin it; cantor read the wall clock inline, which
 	// made every timestamp assertion a range check.
