@@ -402,6 +402,11 @@ type BuiltinModelSpec struct {
 	// UniqueKey is the attribute that identifies an instance of the model.
 	UniqueKey string
 
+	// ShowKey is the attribute that labels an instance, cantor's show_id. A
+	// model without one is labelled by its unique attribute, so a model whose
+	// unique key is a UUID shows the UUID where a person expects a name.
+	ShowKey string
+
 	Attributes []BuiltinAttributeSpec
 }
 
@@ -565,7 +570,8 @@ func ServiceBuiltinModels() []BuiltinModelSpec {
 	}
 	return []BuiltinModelSpec{
 		{
-			Name: string(ModelBusinessService), Alias: "业务服务", UniqueKey: "business_service_code",
+			Name: string(ModelBusinessService), Alias: "业务服务",
+			UniqueKey: "business_service_code", ShowKey: "name",
 			Attributes: []BuiltinAttributeSpec{
 				identity("business_service_code"),
 				text("name"),
@@ -574,7 +580,8 @@ func ServiceBuiltinModels() []BuiltinModelSpec {
 			},
 		},
 		{
-			Name: string(ModelApplicationService), Alias: "应用服务", UniqueKey: "application_service_code",
+			Name: string(ModelApplicationService), Alias: "应用服务",
+			UniqueKey: "application_service_code", ShowKey: "name",
 			Attributes: []BuiltinAttributeSpec{
 				identity("application_service_code"),
 				text("name"),
@@ -586,7 +593,8 @@ func ServiceBuiltinModels() []BuiltinModelSpec {
 			},
 		},
 		{
-			Name: string(ModelServiceInstance), Alias: "服务实例", UniqueKey: "service_instance_code",
+			Name: string(ModelServiceInstance), Alias: "服务实例",
+			UniqueKey: "service_instance_code", ShowKey: "name",
 			Attributes: []BuiltinAttributeSpec{
 				identity("service_instance_code"),
 				text("name"),
