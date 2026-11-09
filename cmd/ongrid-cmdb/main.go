@@ -20,10 +20,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/errgroup"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
+	cmdbcitypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	cmdbdiscoverybiz "github.com/ongridio/ongrid/internal/cmdb/biz/discovery"
 	cmdbfilebiz "github.com/ongridio/ongrid/internal/cmdb/biz/file"
 	cmdbdata "github.com/ongridio/ongrid/internal/cmdb/data"
 	cistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
+	cmdbcitypedata "github.com/ongridio/ongrid/internal/cmdb/data/citype/store"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/dbx"
@@ -42,7 +45,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary bool
+	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -68,6 +71,8 @@ func main() {
 			splitRelations = true
 		case "--ensure-relation-vocabulary":
 			ensureVocabulary = true
+		case "--ensure-builtin-models":
+			ensureBuiltinModels = true
 		}
 	}
 	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary {
@@ -75,8 +80,9 @@ func main() {
 		os.Exit(1)
 	}
 	if (cleanupRelations && splitRelations) || (cleanupRelations && planRelationSplit) ||
-		(splitRelations && planRelationSplit) || (ensureVocabulary && (cleanupRelations || splitRelations || planRelationSplit)) {
-		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary")
+		(splitRelations && planRelationSplit) || (ensureVocabulary && (cleanupRelations || splitRelations || planRelationSplit)) ||
+		(ensureBuiltinModels && (cleanupRelations || splitRelations || planRelationSplit || ensureVocabulary)) {
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models")
 		os.Exit(1)
 	}
 
@@ -204,6 +210,26 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode vocabulary report", err)
+		}
+		return
+	}
+	// The built-in model bootstrap is the same explicit admin action the HTTP
+	// endpoint exposes, available to an operator without a session. It creates
+	// the DCIM/IPAM models and the RFC-011 service-layer template, and leaves
+	// every existing model untouched.
+	if ensureBuiltinModels {
+		citypeUC := cmdbcitypebiz.NewUsecase(cmdbcitypedata.NewRepo(db), log)
+		got, err := citypeUC.EnsureBuiltinModels(rootCtx, cmdbcitypebiz.BuiltinEnsureInput{
+			Models:    cibiz.AllBuiltinModels(),
+			Relations: cibiz.AllBuiltinRelations(),
+		})
+		if err != nil {
+			fatal(log, "ensure builtin models", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(got); err != nil {
+			fatal(log, "encode builtin model report", err)
 		}
 		return
 	}

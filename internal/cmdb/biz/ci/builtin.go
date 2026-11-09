@@ -45,6 +45,17 @@ const (
 
 	// ModelIPAMAddress is one address inside a subnet.
 	ModelIPAMAddress BuiltinModel = "ipam_address"
+
+	// ModelBusinessService is the business-service layer: the node AIOps rolls
+	// impact up to. It is a template model, not a cantor-resolved one.
+	ModelBusinessService BuiltinModel = "business_service"
+
+	// ModelApplicationService is the deployable application/microservice layer:
+	// the call graph's node.
+	ModelApplicationService BuiltinModel = "application_service"
+
+	// ModelServiceInstance is the runtime instance layer (Pod/process/container).
+	ModelServiceInstance BuiltinModel = "service_instance"
 )
 
 // The built-in RACK attributes, by name.
@@ -347,6 +358,16 @@ const (
 	// BuiltinAllocatedRelation is the address-allocation word for subnet ->
 	// address.
 	BuiltinAllocatedRelation = "ALLOCATES"
+
+	// BuiltinHasInstanceRelation is the application-service -> service-instance
+	// word. CMDB stores type -> instance; the topocortex target is INSTANCE_OF,
+	// so the type declares inverse_of.
+	BuiltinHasInstanceRelation = "HAS_INSTANCE"
+
+	// BuiltinCallsRelation is the synchronous caller -> callee word. The model
+	// pair is application_service -> application_service, a legitimate
+	// many-to-many self-pair.
+	BuiltinCallsRelation = "CALLS"
 )
 
 // DCIMBuiltinRelations is the fixed data-centre tree. The rack -> device edge is
@@ -524,4 +545,94 @@ func IPAMBuiltinModels() []BuiltinModelSpec {
 // the order the tree nests: a scope holds subnets, a subnet holds addresses.
 func IPAMModelNames() []BuiltinModel {
 	return []BuiltinModel{ModelIPAMScope, ModelIPAMSubnet, ModelIPAMAddress}
+}
+
+// ServiceBuiltinModels is the three-layer service template described by
+// RFC-011. The layers are created only by an explicit bootstrap; a deployment
+// that already has its own service models keeps them.
+//
+// EACH LAYER HAS ITS OWN IDENTITY ATTRIBUTE, following the DCIM models rather
+// than sharing one `code`: the attribute dictionary is shared, so a single
+// unique `code` would make three models' uniqueness one attribute's problem.
+// The display name is the ordinary `name` attribute; the RFC's `code` is the
+// model's unique key.
+func ServiceBuiltinModels() []BuiltinModelSpec {
+	identity := func(attr string) BuiltinAttributeSpec {
+		return BuiltinAttributeSpec{Name: attr, ValueType: builtinTextType, IsIndex: true, IsUnique: true}
+	}
+	text := func(attr string) BuiltinAttributeSpec {
+		return BuiltinAttributeSpec{Name: attr, ValueType: builtinTextType, IsIndex: true}
+	}
+	return []BuiltinModelSpec{
+		{
+			Name: string(ModelBusinessService), Alias: "业务服务", UniqueKey: "business_service_code",
+			Attributes: []BuiltinAttributeSpec{
+				identity("business_service_code"),
+				text("name"),
+				text("owner"),
+				text("criticality"),
+			},
+		},
+		{
+			Name: string(ModelApplicationService), Alias: "应用服务", UniqueKey: "application_service_code",
+			Attributes: []BuiltinAttributeSpec{
+				identity("application_service_code"),
+				text("name"),
+				text("service_type"),
+				text("protocol"),
+				text("owner"),
+				text("criticality"),
+				text("environment"),
+			},
+		},
+		{
+			Name: string(ModelServiceInstance), Alias: "服务实例", UniqueKey: "service_instance_code",
+			Attributes: []BuiltinAttributeSpec{
+				identity("service_instance_code"),
+				text("name"),
+				text("version"),
+				text("status"),
+			},
+		},
+	}
+}
+
+// ServiceBuiltinRelations is the three-layer graph's fixed spine:
+//
+//	business_service -CONTAINS-> application_service -HAS_INSTANCE-> service_instance
+//	application_service -CALLS-> application_service
+//
+// The CALLS pair is a model self-pair (a caller and a callee are both
+// application services); AllowSelf is what lets the bootstrap create it, while
+// the public API still refuses a self-pair by default.
+//
+// RUNS_ON (instance -> host), DEPLOYED_TO (application -> cluster/environment)
+// and ownership are deliberately NOT declared here: the host, cluster and
+// team/member model names are the deployment's choice. The vocabulary command
+// provisions the words; the declarations are created when those models exist.
+func ServiceBuiltinRelations() []BuiltinRelationSpec {
+	return []BuiltinRelationSpec{
+		{ParentModel: string(ModelBusinessService), ChildModel: string(ModelApplicationService), RelationTypeName: BuiltinPartOfRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelApplicationService), ChildModel: string(ModelServiceInstance), RelationTypeName: BuiltinHasInstanceRelation, Constraint: model.ConstraintOne2Many},
+		{ParentModel: string(ModelApplicationService), ChildModel: string(ModelApplicationService), RelationTypeName: BuiltinCallsRelation, Constraint: model.ConstraintMany2Many, AllowSelf: true},
+	}
+}
+
+// AllBuiltinModels is every model the admin bootstrap creates. The explicit
+// endpoint and the CLI command share it so the two cannot drift.
+func AllBuiltinModels() []BuiltinModelSpec {
+	out := make([]BuiltinModelSpec, 0, len(DCIMBuiltinModels())+len(IPAMBuiltinModels())+len(ServiceBuiltinModels()))
+	out = append(out, DCIMBuiltinModels()...)
+	out = append(out, IPAMBuiltinModels()...)
+	out = append(out, ServiceBuiltinModels()...)
+	return out
+}
+
+// AllBuiltinRelations is every model relation the admin bootstrap creates.
+func AllBuiltinRelations() []BuiltinRelationSpec {
+	out := make([]BuiltinRelationSpec, 0, len(DCIMBuiltinRelations())+len(IPAMBuiltinRelations())+len(ServiceBuiltinRelations()))
+	out = append(out, DCIMBuiltinRelations()...)
+	out = append(out, IPAMBuiltinRelations()...)
+	out = append(out, ServiceBuiltinRelations()...)
+	return out
 }

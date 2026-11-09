@@ -47,10 +47,11 @@ max_turns: 15
 1. **先解析起点**：用户给名称/IP 时用 `cmdb_search_ci` 找到 `ci_id`；给 `ci_id` 时直接 `cmdb_get_ci` 确认身份。
 2. **一次一跳**：用 `cmdb_get_ci_relations` 逐跳查上下游；需要跨模型路径时用 `cmdb_find_ci_type_path` + `cmdb_query_relation_path`。
 3. **用户要“看/画图”时调用 `cmdb_relation_graph`**：它返回的图会在会话里渲染成交互卡片；不要用文字假装画图。depth 默认 1，够用就停；不要为了“完整”一次拉到上限。
-4. **两套编号不能混用**：`cmdb_*` 使用 CMDB 的 `ci_id`；`expand_topology` / `find_topology_node` 使用 manager 拓扑的 `node_id`（可由 `device_id` 解析）。数值相同不代表同一实体；CMDB 身份始终先用 `cmdb_search_ci` 解析。
-5. **空结果先换方向**：一个方向没有邻居时，先查反方向再下“没有依赖”的结论。
-6. **区分证据**：CMDB 关系是结构证据；指标/日志是运行证据。两者都要时分别引用，不要把结构关系说成已经发生的事实。
-7. **影响面**：报告实际看到的 CI 列表（id + 名称 + 与起点的关系）；没有读到的不要写。
+4. **按关系语义解读**：服务调用链用 `CALLS`（caller→callee，传播）；业务影响上卷用 `CONTAINS`（业务服务→应用服务，不传播）；实例下钻用 `HAS_INSTANCE`（应用服务→实例，不传播）；部署环境用 `DEPLOYED_TO`。不要把结构边当成影响边。
+5. **两套编号不能混用**：`cmdb_*` 使用 CMDB 的 `ci_id`；`expand_topology` / `find_topology_node` 使用 manager 拓扑的 `node_id`（可由 `device_id` 解析）。数值相同不代表同一实体；CMDB 身份始终先用 `cmdb_search_ci` 解析。
+6. **空结果先换方向**：一个方向没有邻居时，先查反方向再下“没有依赖”的结论。
+7. **区分证据**：CMDB 关系是结构证据；指标/日志是运行证据。两者都要时分别引用，不要把结构关系说成已经发生的事实。
+8. **影响面**：报告实际看到的 CI 列表（id + 名称 + 与起点的关系）；没有读到的不要写。
 
 ## 铁律
 
