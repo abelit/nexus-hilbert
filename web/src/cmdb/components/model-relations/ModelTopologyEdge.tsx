@@ -37,18 +37,16 @@ export function ModelTopologyEdge(props: EdgeProps) {
     curvature: 0.35,
   });
 
-  // THE CARDINALITY LIVES IN THE MIDPOINT CHIP. Endpoint badges were tried and
-  // rejected: every edge converging on one node handle gets the same anchor, so
-  // a 1/N pair from different relations sits on the same pixel and one glyph
-  // occludes the other. The chip is the one place the graph already labels a
-  // relation, the relation table uses the same 一对多 vocabulary, and it
-  // inherits the existing focus / mobile / PNG-export rules.
-  const label = [data.label, data.constraintLabel].filter(Boolean).join(' · ');
+  // THE CARDINALITY SITS ON THE CHIP'S TOP BORDER, not in its text. Keeping it
+  // on the horizontal line made the chip long enough to hide a short edge's
+  // length and arrowhead; the relation name stays compact and the 1:N tag rides
+  // the top border. Both remain one chip for the focus / mobile / PNG rules.
+  const title = [data.label, data.constraintLabel].filter(Boolean).join(' · ');
 
   return (
     <>
       <g transform={`translate(0, ${offset * 12})`}>
-        {label ? <title>{label}</title> : null}
+        {title ? <title>{title}</title> : null}
         <BaseEdge
           id={props.id}
           path={path}
@@ -56,7 +54,7 @@ export function ModelTopologyEdge(props: EdgeProps) {
           style={{ ...props.style, stroke: color, opacity }}
         />
       </g>
-      {showLabel && label ? (
+      {showLabel && data.label ? (
         <EdgeLabelRenderer>
           <div
             data-edge-label=""
@@ -78,10 +76,17 @@ export function ModelTopologyEdge(props: EdgeProps) {
               opacity,
             }}
           >
-            {/* The name truncates; the cardinality never does. A long relation
-                name must not push the number out of the chip or into a node. */}
-            <span className="cmdb-model-topology-edge-name">{data.label}</span>
-            {data.constraintLabel ? <span> · {data.constraintLabel}</span> : null}
+            {/* The name truncates; the cardinality rides the top border so a
+                long name cannot push the number out of the chip or onto the
+                edge line. */}
+            <span data-testid="edge-label-name" className="cmdb-model-topology-edge-name">
+              {data.label}
+            </span>
+            {data.constraintLabel ? (
+              <span data-testid="edge-cardinality" className="cmdb-model-topology-edge-cardinality">
+                {data.constraintLabel}
+              </span>
+            ) : null}
           </div>
         </EdgeLabelRenderer>
       ) : null}

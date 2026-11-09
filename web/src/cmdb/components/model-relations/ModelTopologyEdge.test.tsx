@@ -42,19 +42,28 @@ function edgeProps(data: Partial<ModelEdgePaintData> = {}): EdgeProps {
 }
 
 function labelText(): string {
-  return screen.getByTestId('edge-label').textContent ?? '';
+  return screen.getByTestId('edge-label-name').textContent ?? '';
 }
 
 describe('ModelTopologyEdge', () => {
-  it('labels a visible edge with its relation name and compact cardinality', () => {
+  it('labels a visible edge with its relation name', () => {
     render(<ModelTopologyEdge {...edgeProps()} />);
 
     const label = screen.getByTestId('edge-label');
     expect(label).toHaveAttribute('data-edge-label');
     expect(label).toHaveAttribute('data-constraint-label', '1:N');
-    expect(label.textContent).toBe('contain · 1:N');
+    expect(labelText()).toBe('contain');
     expect(label).toHaveStyle({ color: '#0ea5e9', borderColor: '#0ea5e9' });
     expect(label.style.background).toBe('rgb(var(--bg))');
+  });
+
+  it('puts the cardinality on the chip border instead of the edge line', () => {
+    render(<ModelTopologyEdge {...edgeProps()} />);
+
+    const cardinality = screen.getByTestId('edge-cardinality');
+    expect(cardinality).toHaveTextContent('1:N');
+    expect(cardinality.className).toContain('cmdb-model-topology-edge-cardinality');
+    expect(cardinality.closest('[data-edge-label]')).toBe(screen.getByTestId('edge-label'));
   });
 
   it('keeps the relation name when the constraint code is unknown', () => {
@@ -62,6 +71,7 @@ describe('ModelTopologyEdge', () => {
 
     expect(screen.getByTestId('edge-label')).not.toHaveAttribute('data-constraint-label');
     expect(labelText()).toBe('contain');
+    expect(screen.queryByTestId('edge-cardinality')).not.toBeInTheDocument();
   });
 
   it('exposes the full relation and cardinality as the edge tooltip', () => {
