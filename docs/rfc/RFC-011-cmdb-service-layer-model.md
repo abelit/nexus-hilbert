@@ -118,24 +118,40 @@ ongrid-cmdb --plan-service-layers
 ### M1 应用命令
 
 ```bash
-ongrid-cmdb --apply-service-layers [--dry-run]
+ongrid-cmdb --apply-service-layers [--dry-run] [--classify-service]
 ```
 
-只处理规划器里可确定性分类的 `application` → `application_service`、`app_instance` → `service_instance`；`service` 仍留在 review，不自动写。命令语义：
+默认只处理确定性来源：`application` → `application_service`、`app_instance` → `service_instance`。`service` 默认全部跳过，并报告 `service classification requires --classify-service after owner review`。
 
 - **附加、可恢复**：来源 CI 不变；目标 CI 按唯一标识 upsert，随后写一行 `(batch, source_ci_id, target_model, target_ci_id)` 映射。重跑时已有映射且目标仍存在则计为 `existing`，不会重复创建；中途失败留下的是可继续的一致前缀。
 - **目标取值**：目标唯一属性取来源唯一值，目标显示属性取来源显示值；其余同名属性按名称复制。模型没有显示属性时（内置服务模型即如此），显示属性回退到唯一属性——此时不得再用显示名覆盖标识，否则同名实例会合并到同一个目标（dev 首次执行发现的缺陷，已加守卫并回归测试）。
 - **跳过**：来源缺唯一标识、唯一标识重复（整组跳过）、目标模型缺失时报错；跳过项带原因，供 review。
 - **dry-run**：只报告将要创建的行，不写目标 CI 和映射。
 
+### `service` 分类规则（service-layer-m1/v2）
+
+`--classify-service` 是显式开关，只在规划器把推荐清单交给业务/运维 owner 确认后使用。规则按顺序判定，命中即停；**M1 不会把 `service` 自动归为 `application_service`**：
+
+1. 唯一标识为空或重复（整组）→ review；
+2. `asset_use_type` 不是 `business` → review（`ledger` 是台账/IT 支撑条目的正向标记）；
+3. 存在 service↔service `CONNECTS_TO`（出或入）→ review，等待 APM 的 `CALLS` 证据；
+4. `environment` 不是 `prod` → review；
+5. `level=experimental` → review；
+6. 出向 `DEPENDS_ON` 的不同 application 目标数不等于 1 → review（0 个缺应用实现，多个是逐边 M2 决策）；
+7. 三个治理锚点缺一 → review：`product --HAS_BELONGING-->`、`sla --COVERS-->`、`members --manage-->`；
+8. 全部通过 → `business_service`。
+
+规划器和 apply 调用同一个分类函数，evidence 查询只有一份实现。dev 运行结果（2026-11-09）：149 个 `service` 中 **89 个推荐 `business_service`、60 个 review**，review 构成为 25 个 ledger、15 个 test 环境、13 个多应用目标、5 个 CONNECTS_TO 端点、2 个缺治理锚点。
+
+**dev 数据修正**：第一版宽松规则曾写入 144 个 `business_service` 目标（含 25 个 ledger），在对抗评审后已按映射表整批回滚（144 目标 / 144 映射，删除前确认 0 条活跃关系引用）；当前 dev 只有 399 个 application/app_instance 目标，`business_service` 为 0，等待 owner 对 89 条推荐清单签字后再执行 `--classify-service`。
+
+已知限制：目标唯一属性目前取来源模型声明的唯一值（dev 的 `service` 是 uuid），而来源还有更可读的 `bsvc-` code；优先使用 `_code` 标识是后续改进项。回滚以 `c_ci_layer_mappings` 的 `(batch, target_model)` 为准，M2 写入新边之前必须完成。
+
 dev 执行结果（2026-11-09）：399 条可分类实例生成 399 个目标 CI（172 + 227）和 399 行映射，0 跳过；二次执行 0 创建、399 existing。149 个 `service` 仍在 review。
 
 ### M1 分类规则（初稿）
 
-1. 模型名精确匹配 `application` → `application_service`；`app_instance` → `service_instance`；`service` 按实例属性/关系判定：
-   - 有下游 `app_instance` 或部署在集群/主机上的 → `application_service`；
-   - 只作为业务汇总、没有运行时属性的 → `business_service`；
-   - 两者都不满足 → review 队列，不自动写。
+1. 模型名精确匹配 `application` → `application_service`；`app_instance` → `service_instance`；`service` 使用上面的 service-layer-m1/v2 门禁，只把证据完整的业务子集推荐为 `business_service`，其余（含 ledger、测试环境、服务间连接）进入 review，不自动写。
 2. 标识优先用现有唯一属性（`code`/`name`/`uuid`），没有则生成稳定 code 并记录来源。
 3. 每个新 CI 记录 `source_ci_id`/映射（放在映射表或属性里），保证可回滚、可重跑。
 4. 外部服务（气象接口）由 `service_type=external` 标记，不自动猜测。

@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
@@ -18,15 +19,119 @@ import (
 // two. A rerun skips a source that already has a live target mapping, so a
 // failure half-way through leaves a consistent prefix rather than duplicates.
 //
-// ONLY THE DETERMINISTIC SOURCES ARE APPLIED. `application` and `app_instance`
-// map to the two lower layers; `service` is a business decision and stays in
-// the planner's review queue.
+// `application` AND `app_instance` MAP DETERMINISTICALLY to the two lower
+// layers. `service` is evidence-gated: only a service that aggregates
+// applications or belongs to a product is projected to business_service, and a
+// service-to-service connection still stays in the review queue.
 
 const serviceLayerBatch = "service-layers"
 
-var serviceLayerApplyMappings = []struct{ Source, Target string }{
+var serviceLayerApplyMappings = []struct {
+	Source, Target string
+	// Classify gates the source on live relation evidence. Only `service` needs
+	// it: application and app_instance map deterministically.
+	Classify bool
+}{
 	{Source: "application", Target: "application_service"},
 	{Source: "app_instance", Target: "service_instance"},
+	{Source: "service", Target: "business_service", Classify: true},
+}
+
+// ServiceLayerEvidence is the live relation evidence behind the RFC-011
+// service classification. The planner and the apply both read it, so a
+// recommendation and the applied target cannot disagree.
+type ServiceLayerEvidence struct {
+	// ApplicationTargets is the number of distinct applications this service
+	// depends on. The conservative M1 rule accepts exactly one application
+	// implementation; zero or several targets need the per-edge M2 decision.
+	ApplicationTargets int
+
+	// BelongsToProduct, CoveredBySLA and ManagedByMembers are the three
+	// governance anchors. A service is a business capability only when all
+	// three are present.
+	BelongsToProduct int
+	CoveredBySLA     int
+	ManagedByMembers int
+
+	// ConnectsToOutbound / ConnectsToInbound count service-to-service
+	// CONNECTS_TO edges. Without APM evidence the layer of either endpoint is
+	// undecided.
+	ConnectsToOutbound int
+	ConnectsToInbound  int
+
+	// AssetUseType, Environment and Level are the source attribute values the
+	// gates read. Empty means the model does not carry the attribute.
+	AssetUseType string
+	Environment  string
+	Level        string
+}
+
+// ServiceLayerFacts is the per-instance input the caller already has: the
+// identity and whether another instance shares it. The evidence carries the
+// rest.
+type ServiceLayerFacts struct {
+	Identifier string
+	Duplicate  bool
+	Evidence   ServiceLayerEvidence
+}
+
+// ClassifyServiceLayer is the conservative M1 rule. It NEVER returns
+// application_service for a legacy `service`: the layer of a service-to-service
+// endpoint needs APM evidence or a per-item decision, so it stays in review.
+//
+// THE GATES ARE ORDERED so the reason names the first fact that blocks the
+// classification. `ledger` is the only positive non-default asset_use_type;
+// `business` may be the attribute default, so the graph and the governance
+// anchors carry the rest of the decision.
+func ClassifyServiceLayer(facts ServiceLayerFacts) (target, reason string) {
+	if strings.TrimSpace(facts.Identifier) == "" {
+		return "", "missing the model's unique identifier"
+	}
+	if facts.Duplicate {
+		return "", "duplicate unique identifier " + facts.Identifier
+	}
+	ev := facts.Evidence
+	if !strings.EqualFold(ev.AssetUseType, "business") {
+		value := strings.TrimSpace(ev.AssetUseType)
+		if value == "" {
+			value = "unknown"
+		}
+		return "", "asset_use_type=" + value + "; only business entries enter the business layer"
+	}
+	if ev.ConnectsToOutbound+ev.ConnectsToInbound > 0 {
+		return "", fmt.Sprintf(
+			"service-to-service CONNECTS_TO (out %d / in %d); no APM CALLS evidence, layer decision deferred to M2",
+			ev.ConnectsToOutbound, ev.ConnectsToInbound)
+	}
+	if !strings.EqualFold(ev.Environment, "prod") {
+		value := strings.TrimSpace(ev.Environment)
+		if value == "" {
+			value = "unknown"
+		}
+		return "", "environment=" + value + "; only production entries enter the business roll-up"
+	}
+	if strings.EqualFold(ev.Level, "experimental") {
+		return "", "level=experimental; excluded from the production roll-up"
+	}
+	if ev.ApplicationTargets != 1 {
+		return "", fmt.Sprintf(
+			"%d application targets; CONTAINS vs technical dependency is a per-edge M2 decision",
+			ev.ApplicationTargets)
+	}
+	missing := make([]string, 0, 3)
+	if ev.BelongsToProduct == 0 {
+		missing = append(missing, "product HAS_BELONGING")
+	}
+	if ev.CoveredBySLA == 0 {
+		missing = append(missing, "SLA COVERS")
+	}
+	if ev.ManagedByMembers == 0 {
+		missing = append(missing, "members manage")
+	}
+	if len(missing) > 0 {
+		return "", "missing governance anchors: " + strings.Join(missing, ", ")
+	}
+	return "business_service", "production business service with one application implementation and all governance anchors"
 }
 
 // LayerMappingStore is the migration bookkeeping the apply needs. It is a
@@ -35,6 +140,11 @@ var serviceLayerApplyMappings = []struct{ Source, Target string }{
 type LayerMappingStore interface {
 	LayerMappingFor(ctx context.Context, sourceCIID model.ID, targetModel string) (*cimodel.LayerMapping, error)
 	SaveLayerMapping(ctx context.Context, mapping *cimodel.LayerMapping) error
+
+	// ServiceLayerEvidence is the read side of the service classification. It
+	// shares the planner's query so a recommendation and an applied target
+	// cannot disagree.
+	ServiceLayerEvidence(ctx context.Context, sourceTypeID model.ID) (map[model.ID]ServiceLayerEvidence, error)
 }
 
 // WithLayerMappings injects the M1 mapping store.
@@ -45,6 +155,11 @@ func (u *Usecase) WithLayerMappings(store LayerMappingStore) *Usecase {
 
 type ServiceLayerApplyInput struct {
 	DryRun bool
+
+	// ClassifyService enables the evidence-gated `service` classification. It
+	// is off by default: the RFC requires owner sign-off on the planner's
+	// recommendation list before the apply writes business_service targets.
+	ClassifyService bool
 }
 
 type ServiceLayerApplyReport struct {
@@ -113,6 +228,13 @@ func (u *Usecase) ApplyServiceLayers(ctx context.Context, in ServiceLayerApplyIn
 		if err != nil {
 			return nil, fmt.Errorf("cmdb ci: service layers: values of %s: %w", mapping.Source, err)
 		}
+		var evidence map[model.ID]ServiceLayerEvidence
+		if mapping.Classify && in.ClassifyService {
+			evidence, err = u.layerMappings.ServiceLayerEvidence(ctx, sourceSet.Type.ID)
+			if err != nil {
+				return nil, fmt.Errorf("cmdb ci: service layers: evidence of %s: %w", mapping.Source, err)
+			}
+		}
 
 		identifiers := make(map[model.ID]string, len(sourceCIs))
 		uniqueRows := make(map[model.ID]ValueRow, len(sourceCIs))
@@ -162,6 +284,37 @@ func (u *Usecase) ApplyServiceLayers(ctx context.Context, in ServiceLayerApplyIn
 					report.Existing = append(report.Existing, ServiceLayerAppliedRow{
 						SourceModel: mapping.Source, SourceCIID: ci.ID,
 						TargetModel: mapping.Target, TargetCIID: existing.TargetCIID, Name: name,
+					})
+					continue
+				}
+			}
+
+			// A classified source keeps its evidence gate after the resume
+			// check: an already-mapped source stays "existing" even if the
+			// graph changed, and only a source the rule can place is written.
+			if mapping.Classify {
+				if !in.ClassifyService {
+					report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
+						SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name,
+						Reason: "service classification requires --classify-service after owner review",
+					})
+					continue
+				}
+				target, reason := ClassifyServiceLayer(ServiceLayerFacts{
+					Identifier: identifiers[ci.ID],
+					Duplicate:  uniqueCounts[identifiers[ci.ID]] > 1,
+					Evidence:   evidence[ci.ID],
+				})
+				if target == "" {
+					report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
+						SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name, Reason: reason,
+					})
+					continue
+				}
+				if target != mapping.Target {
+					report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
+						SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name,
+						Reason: "classified as " + target + ", but this mapping targets " + mapping.Target,
 					})
 					continue
 				}
