@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"gorm.io/gorm"
@@ -132,6 +133,182 @@ func TestApplyServiceLayersCreatesAndResumes(t *testing.T) {
 	}
 }
 
+// A service is written only when every conservative gate passes, and only
+// when the operator opted into the classification; a connection or missing
+// evidence keeps it in the review queue.
+func TestApplyServiceLayersClassifiesServices(t *testing.T) {
+	db := newTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.AutoMigrate(&citypemodel.CIType{}, &citypemodel.Attribute{}); err != nil {
+		t.Fatalf("migrate types: %v", err)
+	}
+	for id, name := range map[model.ID]string{
+		10: "application", 11: "app_instance", 20: "application_service",
+		21: "service_instance", 30: "service", 40: "business_service",
+		43: "product", 44: "sla", 45: "members",
+	} {
+		ct := citypemodel.CIType{Name: name, Alias: name, Enabled: true}
+		ct.ID = id
+		if err := db.Create(&ct).Error; err != nil {
+			t.Fatalf("seed type %s: %v", name, err)
+		}
+	}
+	for id, spec := range map[model.ID]struct{ name, category string }{
+		50: {"DEPENDS_ON", "dependency"},
+		51: {"HAS_BELONGING", "structure"},
+		52: {"CONNECTS_TO", "dependency"},
+		53: {"COVERS", "ownership"},
+		54: {"manage", "ownership"},
+	} {
+		rt := citypemodel.RelationType{Name: spec.name, Category: spec.category}
+		rt.ID = id
+		if err := db.Create(&rt).Error; err != nil {
+			t.Fatalf("seed relation type %s: %v", spec.name, err)
+		}
+	}
+	for id, name := range map[model.ID]string{
+		60: "asset_use_type", 61: "environment", 62: "level",
+	} {
+		attr := citypemodel.Attribute{Name: name}
+		attr.ID = id
+		if err := db.Create(&attr).Error; err != nil {
+			t.Fatalf("seed attribute %s: %v", name, err)
+		}
+	}
+
+	repo := NewRepo(db)
+	uc := cibiz.NewUsecase(repo, serviceLayerResolver{}.withSets(), nil).WithLayerMappings(repo)
+	ctx := context.Background()
+
+	for _, ci := range []struct {
+		id, typeID model.ID
+	}{
+		{1101, 10},
+		{1201, 30}, {1202, 30}, {1203, 30},
+		{4301, 43}, {4401, 44}, {4501, 45},
+	} {
+		row := cimodel.CI{TypeID: ci.typeID, PropsJSON: "{}"}
+		row.ID = ci.id
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("seed ci %d: %v", ci.id, err)
+		}
+	}
+	values := []struct {
+		ciID, attrID model.ID
+		text         string
+	}{
+		{1101, 1, "app-a"}, {1101, 2, "App A"},
+		{1201, 1, "svc-a"}, {1201, 2, "Service A"},
+		{1202, 1, "svc-b"}, {1202, 2, "Service B"},
+		{1203, 1, "svc-c"}, {1203, 2, "Service C"},
+	}
+	for _, id := range []model.ID{1201, 1202, 1203} {
+		values = append(values,
+			struct {
+				ciID, attrID model.ID
+				text         string
+			}{id, 60, "business"},
+			struct {
+				ciID, attrID model.ID
+				text         string
+			}{id, 61, "prod"},
+			struct {
+				ciID, attrID model.ID
+				text         string
+			}{id, 62, "important"},
+		)
+	}
+	for _, v := range values {
+		row := value.ValueIndexText{CIID: v.ciID, AttrID: v.attrID, Value: v.text}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("seed value %v: %v", v, err)
+		}
+	}
+	for _, rel := range []struct {
+		first, second, typeID model.ID
+	}{
+		{1201, 1101, 50}, // the business service aggregates the application
+		{4301, 1201, 51}, // and all three governance anchors
+		{4401, 1201, 53},
+		{4501, 1201, 54},
+		{1202, 1101, 50}, // 1202 aggregates an application too, but
+		{1202, 1203, 52}, // a service-to-service connection keeps it in review
+	} {
+		row := cimodel.Relation{FirstCIID: rel.first, SecondCIID: rel.second, RelationTypeID: rel.typeID}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("seed relation %v: %v", rel, err)
+		}
+	}
+
+	// Without the explicit opt-in, no service target or mapping is written.
+	skippedReport, err := uc.ApplyServiceLayers(ctx, cibiz.ServiceLayerApplyInput{DryRun: true})
+	if err != nil {
+		t.Fatalf("dry run without classification: %v", err)
+	}
+	if len(skippedReport.Created) != 1 || len(skippedReport.Skipped) != 3 {
+		t.Fatalf("unclassified dry report = %+v", skippedReport)
+	}
+	for _, row := range skippedReport.Skipped {
+		if !strings.Contains(row.Reason, "--classify-service") {
+			t.Fatalf("unclassified skip reason = %q", row.Reason)
+		}
+	}
+
+	report, err := uc.ApplyServiceLayers(ctx, cibiz.ServiceLayerApplyInput{DryRun: true, ClassifyService: true})
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if len(report.Created) != 2 || len(report.Skipped) != 2 || len(report.Existing) != 0 {
+		t.Fatalf("dry report = %+v", report)
+	}
+
+	report, err = uc.ApplyServiceLayers(ctx, cibiz.ServiceLayerApplyInput{ClassifyService: true})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(report.Created) != 2 || len(report.Skipped) != 2 || len(report.Existing) != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+	var serviceRow *cibiz.ServiceLayerAppliedRow
+	for i := range report.Created {
+		if report.Created[i].SourceCIID == 1201 {
+			serviceRow = &report.Created[i]
+		}
+	}
+	if serviceRow == nil || serviceRow.TargetModel != "business_service" || serviceRow.TargetCIID == 0 {
+		t.Fatalf("service 1201 was not projected: %+v", report.Created)
+	}
+	reasons := map[model.ID]string{}
+	for _, row := range report.Skipped {
+		reasons[row.SourceCIID] = row.Reason
+	}
+	if !strings.Contains(reasons[1202], "CONNECTS_TO") {
+		t.Fatalf("service 1202 reason = %q", reasons[1202])
+	}
+	if !strings.Contains(reasons[1203], "CONNECTS_TO (out 0 / in 1)") {
+		t.Fatalf("service 1203 reason = %q", reasons[1203])
+	}
+	if got := serviceLayerTextValue(t, db, serviceRow.TargetCIID, 30); got != "svc-a" {
+		t.Fatalf("business_service_code = %q, want the source identifier", got)
+	}
+	if got := serviceLayerTextValue(t, db, serviceRow.TargetCIID, 31); got != "Service A" {
+		t.Fatalf("business_service name = %q", got)
+	}
+	if mapping, err := repo.LayerMappingFor(ctx, 1201, "business_service"); err != nil || mapping == nil {
+		t.Fatalf("mapping = %+v, err = %v", mapping, err)
+	}
+
+	again, err := uc.ApplyServiceLayers(ctx, cibiz.ServiceLayerApplyInput{ClassifyService: true})
+	if err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if len(again.Created) != 0 || len(again.Existing) != 2 || len(again.Skipped) != 2 {
+		t.Fatalf("second report = %+v, want an idempotent resume", again)
+	}
+}
+
 type serviceLayerResolver map[string]*cibiz.AttributeSet
 
 func (r serviceLayerResolver) withSets() serviceLayerResolver {
@@ -174,6 +351,15 @@ func (r serviceLayerResolver) withSets() serviceLayerResolver {
 		20: text(20, "service_instance_code", true),
 		21: text(21, "name", false),
 		22: text(22, "version", false),
+	})
+	r["service"] = set(30, 1, 2, "service", map[model.ID]cibiz.AttributeSpec{
+		1: text(1, "uuid", true),
+		2: text(2, "name", false),
+	})
+	r["business_service"] = set(40, 30, 31, "business_service", map[model.ID]cibiz.AttributeSpec{
+		30: text(30, "business_service_code", true),
+		31: text(31, "name", false),
+		32: text(32, "owner", false),
 	})
 	return r
 }

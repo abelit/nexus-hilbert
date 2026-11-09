@@ -45,7 +45,7 @@ const (
 )
 
 func main() {
-	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers bool
+	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService bool
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--version", "-v":
@@ -77,7 +77,13 @@ func main() {
 			planServiceLayers = true
 		case "--apply-service-layers":
 			applyServiceLayers = true
+		case "--classify-service":
+			classifyService = true
 		}
+	}
+	if classifyService && !applyServiceLayers {
+		fmt.Fprintln(os.Stderr, "--classify-service is only valid with --apply-service-layers")
+		os.Exit(1)
 	}
 	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers {
 		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary or --apply-service-layers")
@@ -228,7 +234,9 @@ func main() {
 		ciRepo := cistore.NewRepo(db)
 		ciUC := cibiz.NewUsecase(ciRepo, cmdbcitypebiz.NewCIResolver(citypeUC), log).
 			WithLayerMappings(ciRepo)
-		report, err := ciUC.ApplyServiceLayers(rootCtx, cibiz.ServiceLayerApplyInput{DryRun: dryRun})
+		report, err := ciUC.ApplyServiceLayers(rootCtx, cibiz.ServiceLayerApplyInput{
+			DryRun: dryRun, ClassifyService: classifyService,
+		})
 		if err != nil {
 			fatal(log, "apply service layers", err)
 		}
