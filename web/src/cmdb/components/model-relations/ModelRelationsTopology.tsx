@@ -32,6 +32,7 @@ import {
   MAX_VISIBLE_NODES,
   NEUTRAL_COLOR,
   badgeForNode,
+  cardinalityLabel,
   createInitialGraph,
   edgeHandles,
   groupColorMap,
@@ -409,16 +410,21 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
   );
 
   const rfEdges = useMemo<Edge[]>(() => {
+    // A reciprocal pair shares one offset group. Keying by the ordered pair
+    // would give A->B and B->A offset 0, stacking their midpoint labels on the
+    // same path.
+    const pairKey = (edge: ModelEdge) =>
+      edge.source <= edge.target ? `${edge.source}-${edge.target}` : `${edge.target}-${edge.source}`;
     const byPair = new Map<string, ModelEdge[]>();
     for (const edge of visible.edges) {
-      const pair = `${edge.source}-${edge.target}`;
-      const list = byPair.get(pair) ?? [];
+      const key = pairKey(edge);
+      const list = byPair.get(key) ?? [];
       list.push(edge);
-      byPair.set(pair, list);
+      byPair.set(key, list);
     }
     return visible.edges.map((edge) => {
-      const pair = [...(byPair.get(`${edge.source}-${edge.target}`) ?? [])].sort(
-        (left, right) => left.relationId - right.relationId,
+      const pair = [...(byPair.get(pairKey(edge)) ?? [])].sort(
+        (left, right) => left.relationId - right.relationId || left.key.localeCompare(right.key),
       );
       const index = pair.findIndex((item) => item.key === edge.key);
       const offset = index - (pair.length - 1) / 2;
@@ -432,6 +438,9 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         targetPosition ? targetPosition.x + targetPosition.width / 2 : 0,
       );
       const isConnected = Boolean(connected?.edgeKeys.has(edge.key));
+      const constraintLabel = cardinalityLabel(edge.constraint) ?? undefined;
+      const sourceAlias = visible.nodes.get(edge.source)?.alias ?? String(edge.source);
+      const targetAlias = visible.nodes.get(edge.target)?.alias ?? String(edge.target);
       const data: ModelEdgePaintData = {
         label: edge.relationName,
         color: edge.relationColor,
@@ -439,7 +448,9 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         showLabel: labelAllowed && (!connected || isConnected),
         connected: isConnected,
         offset,
+        constraintLabel,
       };
+      const relation = [edge.relationName, constraintLabel].filter(Boolean).join(' · ');
       return {
         id: edge.key,
         source: String(edge.source),
@@ -448,10 +459,14 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
         targetHandle: handles.targetHandle,
         type: 'model',
         data,
+        ariaLabel: tr(
+          `${relation}（${sourceAlias} 到 ${targetAlias}）`,
+          `${relation} (${sourceAlias} to ${targetAlias})`,
+        ),
         markerEnd: { type: MarkerType.ArrowClosed, color: edge.relationColor },
       };
     });
-  }, [visible.edges, connected, positions]);
+  }, [visible, connected, positions, tr]);
 
   return (
     <div

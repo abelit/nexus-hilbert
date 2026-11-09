@@ -40,7 +40,15 @@ vi.mock('@xyflow/react', async () => {
         id: string;
         sourceHandle?: string;
         targetHandle?: string;
-        data?: { label?: string; dimmed?: boolean; showLabel?: boolean; connected?: boolean; offset?: number };
+        ariaLabel?: string;
+        data?: {
+          label?: string;
+          dimmed?: boolean;
+          showLabel?: boolean;
+          connected?: boolean;
+          offset?: number;
+          constraintLabel?: string;
+        };
       }>;
       nodeTypes?: Record<string, React.ComponentType<{ id: string; data: unknown; selected: boolean }>>;
       children?: React.ReactNode;
@@ -76,6 +84,8 @@ vi.mock('@xyflow/react', async () => {
             data-show-label={edge.data?.showLabel ? 'true' : 'false'}
             data-connected={edge.data?.connected ? 'true' : 'false'}
             data-offset={edge.data?.offset}
+            data-constraint-label={edge.data?.constraintLabel}
+            aria-label={edge.ariaLabel}
             data-source-handle={edge.sourceHandle}
             data-target-handle={edge.targetHandle}
           />
@@ -201,6 +211,39 @@ describe('ModelRelationsTopology', () => {
     expect(screen.getByText('证书')).toBeInTheDocument();
     expect(screen.getByTestId('flow-edge-20-10-1')).toHaveAttribute('data-label', 'depend');
     expect(screen.getByTestId('flow-edge-10-30-2')).toHaveAttribute('data-label', 'contain');
+    expect(screen.getByTestId('flow-edge-20-10-1')).toHaveAttribute('data-constraint-label', '1:N');
+    expect(screen.getByTestId('flow-edge-20-10-1')).toHaveAttribute(
+      'aria-label',
+      'depend · 1:N（服务 到 业务应用）',
+    );
+  });
+
+  it('passes the many-to-many label to the edge', async () => {
+    const many = relation(7, parent, 'associate', '#8b5cf6');
+    many.constraint = '2';
+    render(view({ parents: [many] }));
+
+    const edge = await screen.findByTestId('flow-edge-20-10-7');
+    expect(edge).toHaveAttribute('data-label', 'associate');
+    expect(edge).toHaveAttribute('data-constraint-label', 'N:M');
+  });
+
+  it('separates a reciprocal pair into distinct offsets', async () => {
+    render(view({ parents: [parentRelation], children: [relation(2, parent, 'cycles', '#94a3b8')] }));
+
+    expect(await screen.findByTestId('flow-edge-20-10-1')).toHaveAttribute('data-offset', '-0.5');
+    expect(screen.getByTestId('flow-edge-10-20-2')).toHaveAttribute('data-offset', '0.5');
+  });
+
+  it('omits the cardinality attributes for an unknown constraint', async () => {
+    const unknown = relation(8, child, 'mystery', '#64748b');
+    unknown.constraint = '9';
+    render(view({ children: [unknown] }));
+
+    const edge = await screen.findByTestId('flow-edge-10-30-8');
+    expect(edge).toHaveAttribute('data-label', 'mystery');
+    expect(edge).not.toHaveAttribute('data-constraint-label');
+    expect(edge).toHaveAttribute('aria-label', 'mystery（业务应用 到 证书）');
   });
 
   it('probes a left node on hover and shows the real count', async () => {
