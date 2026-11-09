@@ -903,14 +903,31 @@ html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabl
   transition: opacity 120ms ease;
 }
 
-/* The relation name truncates before the cardinality suffix does, so a long
-   name cannot push the number out of the chip or into a node card. */
+/* The relation name truncates; the cardinality sits on the chip's top border
+   so a long name cannot push the number onto the edge line. */
 .cmdb-model-topology-edge-name {
   display: inline-block;
   max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
+}
+
+.cmdb-model-topology-edge-cardinality {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 3px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: rgb(var(--bg));
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* Fullscreen is the same canvas, not a second React Flow instance: the fixed
