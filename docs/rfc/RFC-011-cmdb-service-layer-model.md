@@ -118,7 +118,7 @@ ongrid-cmdb --plan-service-layers
 ### M1 应用命令
 
 ```bash
-ongrid-cmdb --apply-service-layers [--dry-run] [--classify-service]
+ongrid-cmdb --apply-service-layers [--dry-run] [--classify-service] [--service-decisions decisions.csv]
 ```
 
 默认只处理确定性来源：`application` → `application_service`、`app_instance` → `service_instance`。`service` 默认全部跳过，并报告 `service classification requires --classify-service after owner review`。
@@ -145,7 +145,15 @@ ongrid-cmdb --apply-service-layers [--dry-run] [--classify-service]
 
 **dev 数据修正**：第一版宽松规则曾写入 144 个 `business_service` 目标（含 25 个 ledger），在对抗评审后已按映射表整批回滚（144 目标 / 144 映射，删除前确认 0 条活跃关系引用）。按现有 dev 迁移授权执行 `--classify-service` 后：89 个 `business_service` 目标、488 行活跃映射（172 + 227 + 89）、60 条 review；二次执行 0 创建 / 488 existing / 60 skipped。来源 CI 数量不变（172 / 227 / 149）。
 
-已知限制：目标唯一属性目前取来源模型声明的唯一值（dev 的 `service` 是 uuid），而来源还有更可读的 `bsvc-` code；优先使用 `_code` 标识是后续改进项。回滚以 `c_ci_layer_mappings` 的 `(batch, target_model)` 为准，M2 写入新边之前必须完成。
+### owner 决策文件
+
+```bash
+ongrid-cmdb --apply-service-layers [--dry-run] --service-decisions decisions.csv
+```
+
+review 队列的逐条结论用 CSV 表达：`ci_id,target_model`，可带表头，target 只接受 `business_service` / `application_service`。决策覆盖分类规则且不需要 `--classify-service`；已映射的来源保持 existing；不在来源模型中的 id 列入 `unknown_decisions`；重复 id 或非法 target 直接报错。dev dry-run（示例）：2556 → `business_service`、3641 → `application_service`，其余 58 条仍 review，未写数据。
+
+已知限制：目标唯一属性目前取来源模型声明的唯一值（dev 的 `service` 是 uuid）。2026-11-09 审计了更可读的 `_code`：`service.code` 149/149 唯一、`application` 172/172 唯一，但 `app_instance.code` 227 个只有 218 个不同值（9 组重复），且只有 `service` 把 `code` 绑定为 `is_unique`；全量切换会引入重复和回退混杂，暂不实施，保持 uuid 并在后续按模型单独评估。回滚以 `c_ci_layer_mappings` 的 `(batch, target_model)` 为准，M2 写入新边之前必须完成。
 
 dev 执行结果（2026-11-09）：399 条可分类实例生成 399 个目标 CI（172 + 227）和 399 行映射，0 跳过；二次执行 0 创建、399 existing。149 个 `service` 仍在 review。
 

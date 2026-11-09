@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -160,6 +161,12 @@ type ServiceLayerApplyInput struct {
 	// is off by default: the RFC requires owner sign-off on the planner's
 	// recommendation list before the apply writes business_service targets.
 	ClassifyService bool
+
+	// ServiceDecisions records an owner's per-instance conclusion for a service
+	// the rule could not place. The value is the target model
+	// (business_service or application_service). A decision overrides the rule
+	// and does not require ClassifyService.
+	ServiceDecisions map[model.ID]string
 }
 
 type ServiceLayerApplyReport struct {
@@ -169,6 +176,10 @@ type ServiceLayerApplyReport struct {
 	Existing []ServiceLayerAppliedRow `json:"existing,omitempty"`
 	Skipped  []ServiceLayerSkippedRow `json:"skipped,omitempty"`
 	Total    int                      `json:"total"`
+
+	// UnknownDecisions are decision-file ids that are not a source instance of
+	// the classified model; they are reported rather than silently ignored.
+	UnknownDecisions []model.ID `json:"unknown_decisions,omitempty"`
 }
 
 type ServiceLayerAppliedRow struct {
@@ -212,6 +223,24 @@ func (u *Usecase) ApplyServiceLayers(ctx context.Context, in ServiceLayerApplyIn
 		if targetSet == nil {
 			return nil, fmt.Errorf("%w: service layer target %q", errs.ErrNotFound, mapping.Target)
 		}
+		// A classified source may be projected to either service layer, so both
+		// target sets are resolved once per source model.
+		targetSets := map[string]*AttributeSet{mapping.Target: targetSet}
+		if mapping.Classify {
+			for _, name := range []string{"business_service", "application_service"} {
+				if targetSets[name] != nil {
+					continue
+				}
+				set, err := u.types.ResolveForCI(ctx, name)
+				if err != nil {
+					return nil, err
+				}
+				if set == nil {
+					return nil, fmt.Errorf("%w: service layer target %q", errs.ErrNotFound, name)
+				}
+				targetSets[name] = set
+			}
+		}
 
 		sourceCIs, err := u.listAllCIs(ctx, sourceSet.Type.ID)
 		if err != nil {
@@ -219,6 +248,20 @@ func (u *Usecase) ApplyServiceLayers(ctx context.Context, in ServiceLayerApplyIn
 		}
 		if len(sourceCIs) == 0 {
 			continue
+		}
+		if mapping.Classify && len(in.ServiceDecisions) > 0 {
+			inSource := make(map[model.ID]bool, len(sourceCIs))
+			for _, ci := range sourceCIs {
+				inSource[ci.ID] = true
+			}
+			for id := range in.ServiceDecisions {
+				if !inSource[id] {
+					report.UnknownDecisions = append(report.UnknownDecisions, id)
+				}
+			}
+			sort.Slice(report.UnknownDecisions, func(i, j int) bool {
+				return report.UnknownDecisions[i] < report.UnknownDecisions[j]
+			})
 		}
 		ids := make([]model.ID, 0, len(sourceCIs))
 		for _, ci := range sourceCIs {
@@ -275,74 +318,119 @@ func (u *Usecase) ApplyServiceLayers(ctx context.Context, in ServiceLayerApplyIn
 				continue
 			}
 
-			if existing, err := u.layerMappings.LayerMappingFor(ctx, ci.ID, mapping.Target); err != nil {
-				return nil, err
-			} else if existing != nil {
-				if target, err := u.repo.LoadCI(ctx, existing.TargetCIID); err != nil {
+			targetModel := mapping.Target
+			if mapping.Classify {
+				otherTarget := "application_service"
+				if mapping.Target == "application_service" {
+					otherTarget = "business_service"
+				}
+				// A source projected by an earlier run keeps its target even
+				// when this run supplies neither a decision nor the rule.
+				if existing, err := u.layerMappings.LayerMappingFor(ctx, ci.ID, mapping.Target); err != nil {
 					return nil, err
-				} else if target != nil {
-					report.Existing = append(report.Existing, ServiceLayerAppliedRow{
-						SourceModel: mapping.Source, SourceCIID: ci.ID,
-						TargetModel: mapping.Target, TargetCIID: existing.TargetCIID, Name: name,
+				} else if existing != nil {
+					if target, err := u.repo.LoadCI(ctx, existing.TargetCIID); err != nil {
+						return nil, err
+					} else if target != nil {
+						report.Existing = append(report.Existing, ServiceLayerAppliedRow{
+							SourceModel: mapping.Source, SourceCIID: ci.ID,
+							TargetModel: mapping.Target, TargetCIID: existing.TargetCIID, Name: name,
+						})
+						continue
+					}
+				}
+				if existing, err := u.layerMappings.LayerMappingFor(ctx, ci.ID, otherTarget); err != nil {
+					return nil, err
+				} else if existing != nil {
+					if target, err := u.repo.LoadCI(ctx, existing.TargetCIID); err != nil {
+						return nil, err
+					} else if target != nil {
+						report.Existing = append(report.Existing, ServiceLayerAppliedRow{
+							SourceModel: mapping.Source, SourceCIID: ci.ID,
+							TargetModel: otherTarget, TargetCIID: existing.TargetCIID, Name: name,
+						})
+						continue
+					}
+				}
+
+				if decision, ok := in.ServiceDecisions[ci.ID]; ok {
+					if decision != "business_service" && decision != "application_service" {
+						report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
+							SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name,
+							Reason: "decision " + decision + " is not a service layer",
+						})
+						continue
+					}
+					targetModel = decision
+				} else if in.ClassifyService {
+					target, classReason := ClassifyServiceLayer(ServiceLayerFacts{
+						Identifier: identifier,
+						Duplicate:  uniqueCounts[identifier] > 1,
+						Evidence:   evidence[ci.ID],
+					})
+					if target == "" {
+						report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
+							SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name, Reason: classReason,
+						})
+						continue
+					}
+					targetModel = target
+				} else {
+					report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
+						SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name,
+						Reason: "service classification requires --classify-service or an owner decision",
 					})
 					continue
 				}
 			}
 
-			// A classified source keeps its evidence gate after the resume
-			// check: an already-mapped source stays "existing" even if the
-			// graph changed, and only a source the rule can place is written.
-			if mapping.Classify {
-				if !in.ClassifyService {
-					report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
-						SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name,
-						Reason: "service classification requires --classify-service after owner review",
-					})
-					continue
-				}
-				target, reason := ClassifyServiceLayer(ServiceLayerFacts{
-					Identifier: identifiers[ci.ID],
-					Duplicate:  uniqueCounts[identifiers[ci.ID]] > 1,
-					Evidence:   evidence[ci.ID],
+			targetSetForCI := targetSets[targetModel]
+			if targetSetForCI == nil {
+				report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
+					SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name,
+					Reason: "unsupported target model " + targetModel,
 				})
-				if target == "" {
-					report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
-						SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name, Reason: reason,
-					})
-					continue
-				}
-				if target != mapping.Target {
-					report.Skipped = append(report.Skipped, ServiceLayerSkippedRow{
-						SourceModel: mapping.Source, SourceCIID: ci.ID, Name: name,
-						Reason: "classified as " + target + ", but this mapping targets " + mapping.Target,
-					})
-					continue
+				continue
+			}
+			if !mapping.Classify {
+				if existing, err := u.layerMappings.LayerMappingFor(ctx, ci.ID, targetModel); err != nil {
+					return nil, err
+				} else if existing != nil {
+					if target, err := u.repo.LoadCI(ctx, existing.TargetCIID); err != nil {
+						return nil, err
+					} else if target != nil {
+						report.Existing = append(report.Existing, ServiceLayerAppliedRow{
+							SourceModel: mapping.Source, SourceCIID: ci.ID,
+							TargetModel: targetModel, TargetCIID: existing.TargetCIID, Name: name,
+						})
+						continue
+					}
 				}
 			}
 
 			if in.DryRun {
 				report.Created = append(report.Created, ServiceLayerAppliedRow{
-					SourceModel: mapping.Source, SourceCIID: ci.ID, TargetModel: mapping.Target, Name: name,
+					SourceModel: mapping.Source, SourceCIID: ci.ID, TargetModel: targetModel, Name: name,
 				})
 				continue
 			}
 
 			targetValues := serviceLayerTargetValues(
-				sourceSet, targetSet, values[ci.ID], uniqueRows[ci.ID], nameRow,
+				sourceSet, targetSetForCI, values[ci.ID], uniqueRows[ci.ID], nameRow,
 			)
 			written, err := u.Create(ctx, WriteRequest{
-				TypeRef:     targetSet.Type.Name,
+				TypeRef:     targetSetForCI.Type.Name,
 				Values:      targetValues,
 				ExistPolicy: ExistReplace,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("cmdb ci: service layers: create %s for %s %d: %w", mapping.Target, mapping.Source, ci.ID, err)
+				return nil, fmt.Errorf("cmdb ci: service layers: create %s for %s %d: %w", targetModel, mapping.Source, ci.ID, err)
 			}
 			mappingRow := &cimodel.LayerMapping{
 				Batch:       serviceLayerBatch,
 				SourceModel: mapping.Source,
 				SourceCIID:  ci.ID,
-				TargetModel: mapping.Target,
+				TargetModel: targetModel,
 				TargetCIID:  written.CIID,
 			}
 			if err := u.layerMappings.SaveLayerMapping(ctx, mappingRow); err != nil {
@@ -350,7 +438,7 @@ func (u *Usecase) ApplyServiceLayers(ctx context.Context, in ServiceLayerApplyIn
 			}
 			row := ServiceLayerAppliedRow{
 				SourceModel: mapping.Source, SourceCIID: ci.ID,
-				TargetModel: mapping.Target, TargetCIID: written.CIID, Name: name,
+				TargetModel: targetModel, TargetCIID: written.CIID, Name: name,
 			}
 			if written.Created {
 				report.Created = append(report.Created, row)

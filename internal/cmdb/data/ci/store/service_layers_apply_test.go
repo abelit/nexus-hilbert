@@ -307,6 +307,47 @@ func TestApplyServiceLayersClassifiesServices(t *testing.T) {
 	if len(again.Created) != 0 || len(again.Existing) != 2 || len(again.Skipped) != 2 {
 		t.Fatalf("second report = %+v, want an idempotent resume", again)
 	}
+
+	// Owner decisions place the two review services: 1202 was refused by the
+	// rule (the CONNECTS_TO endpoint) and 1203 had no application target. The
+	// decision overrides the rule without --classify-service; an id that is not
+	// a service is reported rather than silently ignored.
+	decided, err := uc.ApplyServiceLayers(ctx, cibiz.ServiceLayerApplyInput{
+		ServiceDecisions: map[model.ID]string{
+			1202: "business_service",
+			1203: "application_service",
+			9999: "business_service",
+		},
+	})
+	if err != nil {
+		t.Fatalf("decision apply: %v", err)
+	}
+	if len(decided.Created) != 2 || len(decided.Existing) != 2 || len(decided.Skipped) != 0 {
+		t.Fatalf("decision report = %+v", decided)
+	}
+	if len(decided.UnknownDecisions) != 1 || decided.UnknownDecisions[0] != 9999 {
+		t.Fatalf("unknown decisions = %+v", decided.UnknownDecisions)
+	}
+	decisionTargets := map[model.ID]string{}
+	var applicationTarget model.ID
+	for _, row := range decided.Created {
+		decisionTargets[row.SourceCIID] = row.TargetModel
+		if row.SourceCIID == 1203 {
+			applicationTarget = row.TargetCIID
+		}
+	}
+	if decisionTargets[1202] != "business_service" || decisionTargets[1203] != "application_service" {
+		t.Fatalf("decision targets = %+v", decisionTargets)
+	}
+	if mapping, err := repo.LayerMappingFor(ctx, 1203, "application_service"); err != nil || mapping == nil {
+		t.Fatalf("application_service mapping = %+v, err = %v", mapping, err)
+	}
+	if applicationTarget == 0 {
+		t.Fatalf("service 1203 target missing: %+v", decided.Created)
+	}
+	if got := serviceLayerTextValue(t, db, applicationTarget, 10); got != "svc-c" {
+		t.Fatalf("application_service code = %q", got)
+	}
 }
 
 type serviceLayerResolver map[string]*cibiz.AttributeSet
