@@ -36,6 +36,8 @@ export type ModelEdge = {
   relationId: number;
   relationName: string;
   relationColor: string;
+  /** cantor's code: `0` one-to-many, `1` one-to-one, `2` many-to-many. */
+  constraint: string;
   direction: 'in' | 'out';
 };
 
@@ -90,8 +92,43 @@ function edgeFrom(
     relationId: relation.ctr_id,
     relationName: relation.relation_type.name || String(relation.relation_type.id),
     relationColor: relation.relation_type.color || EDGE_FALLBACK_COLOR,
+    constraint: relation.constraint,
     direction,
   };
+}
+
+export type CardinalityMark = '1' | 'N';
+export type CardinalityEnds = { source: CardinalityMark; target: CardinalityMark };
+
+/**
+ * The cardinality at each end of a parent -> child edge, in the familiar 1/N
+ * notation. `null` means unknown: the graph renders no badge rather than
+ * guessing a shape or printing the raw storage code.
+ */
+export function cardinalityEnds(constraint: string): CardinalityEnds | null {
+  switch (constraint) {
+    case '0':
+      return { source: '1', target: 'N' };
+    case '1':
+      return { source: '1', target: '1' };
+    case '2':
+      return { source: 'N', target: 'N' };
+    default:
+      return null;
+  }
+}
+
+/**
+ * The compact notation the relation badge shows: 1:N, 1:1, N:M (and N:1 for a
+ * many-to-one pair). The child side of a many-to-many pair uses M so the two
+ * ends remain distinguishable. Unknown codes return null, so the badge keeps
+ * the relation name alone instead of printing a raw storage code.
+ */
+export function cardinalityLabel(constraint: string): string | null {
+  const ends = cardinalityEnds(constraint);
+  if (!ends) return null;
+  if (ends.source === 'N' && ends.target === 'N') return 'N:M';
+  return `${ends.source}:${ends.target}`;
 }
 
 /** Model id → color, in the admin-maintained group order. */

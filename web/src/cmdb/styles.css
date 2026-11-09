@@ -903,6 +903,16 @@ html.dark .cmdb-attribute-workspace .cmdb-liquid-action-danger:hover:not(:disabl
   transition: opacity 120ms ease;
 }
 
+/* The relation name truncates before the cardinality suffix does, so a long
+   name cannot push the number out of the chip or into a node card. */
+.cmdb-model-topology-edge-name {
+  display: inline-block;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
 /* Fullscreen is the same canvas, not a second React Flow instance: the fixed
    container keeps the graph, zoom and drag state intact. */
 .cmdb-model-topology.is-fullscreen {

@@ -7,6 +7,8 @@ import {
   GROUP_PALETTE,
   NEUTRAL_COLOR,
   badgeForNode,
+  cardinalityEnds,
+  cardinalityLabel,
   createInitialGraph,
   edgeHandles,
   groupColorMap,
@@ -91,8 +93,12 @@ describe('createInitialGraph', () => {
     expect(graph.nodes.get(parent.id)).toMatchObject({ side: 'left', depth: 1, groupColor: '#3b82f6' });
     expect(graph.nodes.get(child.id)).toMatchObject({ side: 'right', depth: 1, groupColor: NEUTRAL_COLOR });
     expect(graph.edges).toEqual([
-      expect.objectContaining({ source: parent.id, target: center.id, relationName: 'depend', direction: 'in' }),
-      expect.objectContaining({ source: center.id, target: child.id, relationName: 'contain', direction: 'out' }),
+      expect.objectContaining({
+        source: parent.id, target: center.id, relationName: 'depend', direction: 'in', constraint: '0',
+      }),
+      expect.objectContaining({
+        source: center.id, target: child.id, relationName: 'contain', direction: 'out', constraint: '0',
+      }),
     ]);
   });
 
@@ -205,6 +211,7 @@ describe('hiddenDescendantCount', () => {
         relationId: 99,
         relationName: 'contain',
         relationColor: '#0ea5e9',
+        constraint: '0',
         direction: 'out',
       }],
     };
@@ -278,6 +285,38 @@ describe('badgeForNode', () => {
   });
 });
 
+describe('cardinalityEnds', () => {
+  it('reads one-to-many as one at the parent and many at the child', () => {
+    expect(cardinalityEnds('0')).toEqual({ source: '1', target: 'N' });
+  });
+
+  it('reads one-to-one as one at both ends', () => {
+    expect(cardinalityEnds('1')).toEqual({ source: '1', target: '1' });
+  });
+
+  it('reads many-to-many as many at both ends', () => {
+    expect(cardinalityEnds('2')).toEqual({ source: 'N', target: 'N' });
+  });
+
+  it('returns null for an unknown code instead of guessing', () => {
+    expect(cardinalityEnds('9')).toBeNull();
+    expect(cardinalityEnds('')).toBeNull();
+  });
+});
+
+describe('cardinalityLabel', () => {
+  it('formats the three stored constraints compactly', () => {
+    expect(cardinalityLabel('0')).toBe('1:N');
+    expect(cardinalityLabel('1')).toBe('1:1');
+    expect(cardinalityLabel('2')).toBe('N:M');
+  });
+
+  it('returns null for an unknown code', () => {
+    expect(cardinalityLabel('9')).toBeNull();
+    expect(cardinalityLabel('')).toBeNull();
+  });
+});
+
 describe('edgeHandles', () => {
   it('connects facing sides when the target is to the right', () => {
     expect(edgeHandles(0, 100)).toEqual({ sourceHandle: 'source-right', targetHandle: 'target-left' });
@@ -331,6 +370,7 @@ describe('layoutModelGraph', () => {
           relationId: 99,
           relationName: 'cycles',
           relationColor: '#94a3b8',
+          constraint: '0',
           direction: 'in',
         },
       ],

@@ -28,25 +28,52 @@ function edgeProps(data: Partial<ModelEdgePaintData> = {}): EdgeProps {
     targetPosition: 'left',
     sourceHandleId: null,
     targetHandleId: null,
-    data: { label: 'contain', color: '#0ea5e9', dimmed: false, showLabel: true, offset: 0, ...data },
+    data: {
+      label: 'contain',
+      color: '#0ea5e9',
+      dimmed: false,
+      showLabel: true,
+      offset: 0,
+      constraintLabel: '1:N',
+      ...data,
+    },
     style: {},
   } as unknown as EdgeProps;
 }
 
+function labelText(): string {
+  return screen.getByTestId('edge-label').textContent ?? '';
+}
+
 describe('ModelTopologyEdge', () => {
-  it('labels a visible edge with its relation name', () => {
+  it('labels a visible edge with its relation name and compact cardinality', () => {
     render(<ModelTopologyEdge {...edgeProps()} />);
 
-    const label = screen.getByText('contain');
+    const label = screen.getByTestId('edge-label');
     expect(label).toHaveAttribute('data-edge-label');
+    expect(label).toHaveAttribute('data-constraint-label', '1:N');
+    expect(label.textContent).toBe('contain · 1:N');
     expect(label).toHaveStyle({ color: '#0ea5e9', borderColor: '#0ea5e9' });
     expect(label.style.background).toBe('rgb(var(--bg))');
+  });
+
+  it('keeps the relation name when the constraint code is unknown', () => {
+    render(<ModelTopologyEdge {...edgeProps({ constraintLabel: undefined })} />);
+
+    expect(screen.getByTestId('edge-label')).not.toHaveAttribute('data-constraint-label');
+    expect(labelText()).toBe('contain');
+  });
+
+  it('exposes the full relation and cardinality as the edge tooltip', () => {
+    render(<ModelTopologyEdge {...edgeProps()} />);
+
+    expect(screen.getByText('contain · 1:N', { selector: 'title' })).toBeInTheDocument();
   });
 
   it('hides the label when the layout asks it to', () => {
     render(<ModelTopologyEdge {...edgeProps({ showLabel: false })} />);
 
-    expect(screen.queryByText('contain')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('edge-label')).not.toBeInTheDocument();
     expect(screen.queryByTestId('edge-label-layer')).not.toBeInTheDocument();
   });
 
@@ -54,7 +81,13 @@ describe('ModelTopologyEdge', () => {
     render(<ModelTopologyEdge {...edgeProps({ dimmed: true })} />);
 
     expect(screen.getByTestId('edge-path')).toHaveStyle({ opacity: '0.18' });
-    expect(screen.getByText('contain')).toHaveStyle({ opacity: '0.18' });
+    expect(screen.getByTestId('edge-label')).toHaveStyle({ opacity: '0.18' });
+  });
+
+  it('marks the label of the focused path', () => {
+    render(<ModelTopologyEdge {...edgeProps({ connected: true })} />);
+
+    expect(screen.getByTestId('edge-label').className).toContain('is-connected');
   });
 
   it('keeps a fully opaque path by default', () => {
@@ -66,6 +99,6 @@ describe('ModelTopologyEdge', () => {
   it('offsets a parallel edge and its label by twelve pixels per index', () => {
     render(<ModelTopologyEdge {...edgeProps({ offset: 2 })} />);
 
-    expect(screen.getByText('contain').style.transform).toContain('translate(0px, 24px)');
+    expect(screen.getByTestId('edge-label').style.transform).toContain('translate(0px, 24px)');
   });
 });
