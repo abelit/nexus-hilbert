@@ -122,6 +122,88 @@ func TestExpandTopologyOnlyPropagating(t *testing.T) {
 	}
 }
 
+// The relation type's declared direction decides propagation, not the stored
+// orientation: depends_on/deployed_on are dst_to_src, routes_to is src_to_dst,
+// replicates_to is bidirectional.
+func TestExpandTopologyFollowsRelationTypeDirection(t *testing.T) {
+	uc := newTopologyUC(t)
+	ctx := context.Background()
+	_, orderID, dbID, hostID := seedGraph(t, uc)
+	gateway, err := uc.CreateNode(ctx, string(topologymodel.NodeTypeService), "gateway", "")
+	if err != nil {
+		t.Fatalf("create gateway: %v", err)
+	}
+	if _, err := uc.CreateRelation(ctx, orderID, gateway.ID, topologymodel.RelRoutesTo, ""); err != nil {
+		t.Fatalf("routes_to: %v", err)
+	}
+	replica, err := uc.CreateNode(ctx, string(topologymodel.NodeTypeService), "db-replica", "")
+	if err != nil {
+		t.Fatalf("create replica: %v", err)
+	}
+	if _, err := uc.CreateRelation(ctx, orderID, replica.ID, topologymodel.RelReplicatesTo, ""); err != nil {
+		t.Fatalf("replicates_to: %v", err)
+	}
+
+	tool := aiopstools.NewExpandTopologyTool(uc, nil, nil)
+	run := func(node uint64, direction string, onlyPropagating bool) map[uint64]string {
+		t.Helper()
+		args, _ := json.Marshal(map[string]any{
+			"node_id": node, "depth": 1, "direction": direction,
+			"only_propagating": onlyPropagating,
+		})
+		out, err := tool.InvokableRun(ctx, string(args))
+		if err != nil {
+			t.Fatalf("invoke: %v", err)
+		}
+		var got struct {
+			Hits []struct {
+				NodeID     uint64 `json:"node_id"`
+				ReachedVia string `json:"reached_via"`
+			} `json:"reachable"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("unmarshal: %v\n%s", err, out)
+		}
+		seen := map[uint64]string{}
+		for _, h := range got.Hits {
+			seen[h.NodeID] = h.ReachedVia
+		}
+		return seen
+	}
+
+	// dst_to_src: from the dependency (the stored destination), downstream
+	// reaches the dependent.
+	if got := run(dbID, "downstream", true); got[orderID] != "downstream" {
+		t.Fatalf("downstream from db = %+v, want order", got)
+	}
+	// From the dependent, downstream must not reach its dependency or its
+	// host; both are on the cause side.
+	got := run(orderID, "downstream", true)
+	if _, ok := got[dbID]; ok {
+		t.Fatalf("downstream from order reached its dependency: %+v", got)
+	}
+	if _, ok := got[hostID]; ok {
+		t.Fatalf("downstream from order reached its host: %+v", got)
+	}
+	// src_to_dst: downstream follows the stored orientation.
+	if got[gateway.ID] != "downstream" {
+		t.Fatalf("downstream from order via routes_to = %+v, want gateway", got)
+	}
+	// upstream is the cause side for dst_to_src edges.
+	got = run(orderID, "upstream", true)
+	if got[dbID] != "upstream" || got[hostID] != "upstream" {
+		t.Fatalf("upstream from order = %+v, want db and host", got)
+	}
+	// A bidirectional relation propagates and is caused both ways, so it
+	// matches either requested side.
+	if got := run(orderID, "downstream", false); got[replica.ID] != "downstream" {
+		t.Fatalf("downstream via bidirectional = %+v, want replica", got)
+	}
+	if got := run(orderID, "upstream", false); got[replica.ID] != "upstream" {
+		t.Fatalf("upstream via bidirectional = %+v, want replica", got)
+	}
+}
+
 func TestExpandTopologyIncludesNonPropagating(t *testing.T) {
 	uc := newTopologyUC(t)
 	appID, orderID, _, _ := seedGraph(t, uc)

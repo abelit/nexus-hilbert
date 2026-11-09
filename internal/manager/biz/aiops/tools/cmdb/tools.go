@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -487,6 +488,10 @@ func newGetCIRelationsTool(c *Client) basetool.BaseTool {
 			direction := strings.ToLower(strings.TrimSpace(args.Direction))
 			if direction == "up" {
 				side = "parents"
+			} else if direction == "" {
+				// The schema defaults to "down"; report the side actually
+				// queried instead of an empty string.
+				direction = "down"
 			}
 			page := args.Page
 			if page <= 0 {
@@ -742,18 +747,25 @@ var relationGraphSchema = json.RawMessage(`{
   "properties": {
     "ci_id": {"type": "integer", "minimum": 1, "description": "Root CI id; preferred when known."},
     "q": {"type": "string", "description": "Root search expression used when ci_id is absent, e.g. hostname:web-01."},
-    "direction": {"type": "string", "enum": ["down", "up", "both"], "default": "both"},
+    "direction": {
+      "type": "string",
+      "enum": ["down", "up", "both"],
+      "default": "both",
+      "description": "STRUCTURAL direction: down follows stored First->Second edges (children), up follows Second->First (parents). It is not the failure-propagation direction; read each edge's relation_type_direction and propagates to interpret impact."
+    },
     "depth": {"type": "integer", "minimum": 1, "maximum": 3, "default": 1, "description": "Hops to walk; capped at 3."},
-    "max_nodes": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20, "description": "Cap on returned nodes; capped at 50."}
+    "max_nodes": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20, "description": "Cap on returned nodes; capped at 50."},
+    "only_propagating": {"type": "boolean", "default": false, "description": "When true, keep only edges whose relation type propagates failure. Structural/ownership edges are skipped; the counts field still reports the raw direct-neighbour totals."}
   }
 }`)
 
 type relationGraphArgs struct {
-	CIID      int    `json:"ci_id"`
-	Q         string `json:"q"`
-	Direction string `json:"direction"`
-	Depth     int    `json:"depth"`
-	MaxNodes  int    `json:"max_nodes"`
+	CIID            int    `json:"ci_id"`
+	Q               string `json:"q"`
+	Direction       string `json:"direction"`
+	Depth           int    `json:"depth"`
+	MaxNodes        int    `json:"max_nodes"`
+	OnlyPropagating bool   `json:"only_propagating"`
 }
 
 type graphSide struct {
@@ -831,7 +843,8 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 				maxNodes = 50
 			}
 
-			order, rawEdges, counts, truncated, err := walkRelationGraph(ctx, c, ciID, sides, depth, maxNodes)
+			order, rawEdges, counts, truncated, truncatedLevels, err := walkRelationGraph(
+				ctx, c, ciID, sides, depth, maxNodes, args.OnlyPropagating)
 			if err != nil {
 				return nil, err
 			}
@@ -840,10 +853,28 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 			relationLabels := fetchRelationTypeLabels(ctx, c)
 			edges := make([]map[string]any, 0, len(rawEdges))
 			for _, e := range rawEdges {
-				edges = append(edges, map[string]any{
+				label := e.RelationTypeName
+				if label == "" {
+					label = relationLabels[e.RelationTypeID]
+				}
+				edge := map[string]any{
 					"source": e.From, "target": e.To,
-					"label": relationLabels[e.RelationTypeID],
-				})
+					"relation_type_id": e.RelationTypeID,
+					"label":            label,
+					"direction":        e.Direction,
+					"propagates":       e.Propagates,
+					"weight":           e.Weight,
+				}
+				if e.EvidenceSource != "" {
+					edge["evidence_source"] = e.EvidenceSource
+				}
+				if e.Confidence != nil {
+					edge["confidence"] = *e.Confidence
+				}
+				if e.ObservedAt != nil {
+					edge["observed_at"] = e.ObservedAt
+				}
+				edges = append(edges, edge)
 			}
 
 			nodes := make([]map[string]any, 0, len(order))
@@ -873,15 +904,19 @@ func newRelationGraphTool(c *Client) basetool.BaseTool {
 			}
 
 			out := map[string]any{
-				"root":      nodes[0],
-				"nodes":     nodes,
-				"edges":     edges,
-				"counts":    map[string]any{"upstream": counts.Upstream, "downstream": counts.Downstream},
-				"direction": direction,
-				"truncated": truncated,
+				"root":             nodes[0],
+				"nodes":            nodes,
+				"edges":            edges,
+				"counts":           map[string]any{"upstream": counts.Upstream, "downstream": counts.Downstream},
+				"direction":        direction,
+				"only_propagating": args.OnlyPropagating,
+				"truncated":        truncated,
+			}
+			if len(truncatedLevels) > 0 {
+				out["truncated_levels"] = truncatedLevels
 			}
 			if truncated {
-				out["note"] = "Results truncated: the card aggregates the overflow; open a node or narrow the query."
+				out["note"] = "Results truncated: a hop had more neighbours than the page/node budget; open a node or narrow the query."
 			}
 			return out, nil
 		},
@@ -943,6 +978,18 @@ type rawGraphEdge struct {
 	To             int
 	RelationID     int
 	RelationTypeID int
+
+	// Semantics and provenance carried from the neighbour payload. They make
+	// the graph interpretable without a second call per edge: direction says
+	// which way failure flows, propagates says whether it flows at all, and
+	// the evidence fields say where the edge came from.
+	RelationTypeName string
+	Direction        string
+	Propagates       bool
+	Weight           float64
+	EvidenceSource   string
+	Confidence       *float64
+	ObservedAt       *time.Time
 }
 
 type graphCounts struct {
@@ -957,18 +1004,18 @@ type graphCounts struct {
 // node set, so direction=both cannot produce duplicate or dangling edges.
 //
 // counts are the FIRST hop's numfound numbers — the true direct neighbour
-// counts, not the rows this walk happened to keep. truncated is also set when
-// numfound exceeds the rows fetched, because the card must be able to say
-// "there is more".
-func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSide, depth, maxNodes int) ([]int, []rawGraphEdge, graphCounts, bool, error) {
+// counts, not the rows this walk happened to keep. truncated is set whenever a
+// page reports more rows than it returned, including deeper hops, and
+// truncatedLevels lists the hop numbers where that happened.
+func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSide, depth, maxNodes int, onlyPropagating bool) ([]int, []rawGraphEdge, graphCounts, bool, []int, error) {
 	maxEdges := maxNodes * 2
 	visited := map[int]bool{ciID: true}
 	order := []int{ciID}
 	edges := make([]rawGraphEdge, 0, maxEdges)
 	edgeSeen := make(map[string]struct{}, maxEdges)
 	var counts graphCounts
-	firstHopReturned := map[string]int{}
 	truncated := false
+	truncatedLevels := map[int]bool{}
 	frontier := []int{ciID}
 
 	for level := 0; level < depth && len(frontier) > 0; level++ {
@@ -979,14 +1026,18 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 				query := url.Values{"page": {"1"}, "count": {strconv.Itoa(maxNodes)}}
 				data, err := c.Get(ctx, fmt.Sprintf("/ci-relations/%d/%s", id, side.path), query)
 				if err != nil {
-					return nil, nil, counts, false, err
+					return nil, nil, counts, false, nil, err
 				}
 				var page struct {
 					Items    []neighbour `json:"items"`
 					NumFound int         `json:"numfound"`
 				}
 				if err := json.Unmarshal(data, &page); err != nil {
-					return nil, nil, counts, false, fmt.Errorf("cmdb_relation_graph: decode neighbours: %w", err)
+					return nil, nil, counts, false, nil, fmt.Errorf("cmdb_relation_graph: decode neighbours: %w", err)
+				}
+				if page.NumFound > len(page.Items) {
+					truncated = true
+					truncatedLevels[level+1] = true
 				}
 				if level == 0 {
 					if side.path == "children" {
@@ -994,15 +1045,18 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 					} else {
 						counts.Upstream = page.NumFound
 					}
-					firstHopReturned[side.path] = len(page.Items)
 				}
 				for _, n := range page.Items {
 					if n.CIID <= 0 {
 						continue
 					}
+					if onlyPropagating && !n.RelationTypePropagates {
+						continue
+					}
 					if !visited[n.CIID] {
 						if len(visited) >= maxNodes {
 							truncated = true
+							truncatedLevels[level+1] = true
 							// The node will not be returned, so its edge
 							// would dangle; drop both.
 							continue
@@ -1021,6 +1075,7 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 					}
 					if len(edges) >= maxEdges {
 						truncated = true
+						truncatedLevels[level+1] = true
 						stop = true
 						break
 					}
@@ -1028,6 +1083,13 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 					edges = append(edges, rawGraphEdge{
 						From: from, To: to,
 						RelationID: n.RelationID, RelationTypeID: n.RelationTypeID,
+						RelationTypeName: n.RelationTypeName,
+						Direction:        n.RelationTypeDirection,
+						Propagates:       n.RelationTypePropagates,
+						Weight:           n.RelationTypeWeight,
+						EvidenceSource:   n.EvidenceSource,
+						Confidence:       n.Confidence,
+						ObservedAt:       n.ObservedAt,
 					})
 				}
 				if stop {
@@ -1043,10 +1105,12 @@ func walkRelationGraph(ctx context.Context, c *Client, ciID int, sides []graphSi
 		}
 		frontier = next
 	}
-	if counts.Downstream > firstHopReturned["children"] || counts.Upstream > firstHopReturned["parents"] {
-		truncated = true
+	levels := make([]int, 0, len(truncatedLevels))
+	for level := range truncatedLevels {
+		levels = append(levels, level)
 	}
-	return order, edges, counts, truncated, nil
+	sort.Ints(levels)
+	return order, edges, counts, truncated, levels, nil
 }
 
 // fetchCITypeNames maps model id -> display name. Best-effort: the graph is
