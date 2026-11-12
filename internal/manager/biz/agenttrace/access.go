@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
@@ -230,7 +231,7 @@ func (q *ScopedQuerier) search(ctx context.Context, opts tracequery.SearchOption
 	}
 	close(jobs)
 	var workers sync.WaitGroup
-	for range min(4, len(rows)) {
+	for range minmax.Min(4, len(rows)) {
 		workers.Go(func() {
 			for i := range jobs {
 				var row struct {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/tracequery"
 )
 
@@ -70,7 +71,7 @@ func queryTraceByID(ctx context.Context, client TraceQuerier, in QueryTraceQLArg
 		limit = 50
 	}
 	end, bytes := in.SpanOffset, 0
-	for end < len(spans) && end-in.SpanOffset < min(limit, 100) {
+	for end < len(spans) && end-in.SpanOffset < minmax.Min(limit, 100) {
 		size := len(spans[end].Resource) + len(spans[end].Span)
 		if bytes+size > 120*1024 {
 			break

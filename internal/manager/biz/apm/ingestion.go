@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -146,7 +147,7 @@ func ingestionLookupContext(ctx context.Context) (context.Context, context.Cance
 	budget := 8 * time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		// Leave time for the next phase and for returning healthy results.
-		budget = min(budget, time.Until(deadline)/2)
+		budget = minmax.Min(budget, time.Until(deadline)/2)
 	}
 	return context.WithTimeout(ctx, budget)
 }

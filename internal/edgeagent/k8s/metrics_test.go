@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins/metricscommon"
 	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
@@ -627,7 +628,7 @@ func (c *countingPromClient) Call(ctx context.Context, method string, req any, r
 	} else {
 		c.dataBatches++
 		c.dataSamples += len(in.Samples)
-		c.maxDataBatch = max(c.maxDataBatch, len(in.Samples))
+		c.maxDataBatch = minmax.Max(c.maxDataBatch, len(in.Samples))
 	}
 	if out, ok := resp.(*tunnel.PushPromSamplesResponse); ok {
 		out.Accepted = len(in.Samples)

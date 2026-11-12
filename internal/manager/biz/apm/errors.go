@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tracequery"
 )
@@ -94,7 +95,7 @@ func (s *Service) ErrorGroups(ctx context.Context, q Query) (*ErrorGroups, error
 	out := &ErrorGroups{Items: []ErrorGroup{}, Page: q.Page, PageSize: q.PageSize, Truncated: len(summaries) >= traceLimit, Metadata: metadata(q)}
 	out.Metadata.MetricSource, out.Metadata.Sampling = "tempo_error_spans", "sampled"
 	ids := []string{}
-	for _, summary := range summaries[:min(len(summaries), traceLimit)] {
+	for _, summary := range summaries[:minmax.Min(len(summaries), traceLimit)] {
 		id := canonicalTraceID(summary.TraceID)
 		if id == "" {
 			out.FailedTraces++
@@ -157,7 +158,7 @@ func (s *Service) ErrorGroups(ctx context.Context, q Query) (*ErrorGroups, error
 				continue
 			}
 			group.Count++
-			group.FirstSeen = min(group.FirstSeen, sample.FirstSeen)
+			group.FirstSeen = minmax.Min(group.FirstSeen, sample.FirstSeen)
 			if sample.LastSeen > group.LastSeen {
 				group.LastSeen, group.TraceID, group.SpanID = sample.LastSeen, sample.TraceID, sample.SpanID
 				group.RepresentativeVersion, group.RepresentativeInstance = sample.RepresentativeVersion, sample.RepresentativeInstance
@@ -193,8 +194,8 @@ func (s *Service) ErrorGroups(ctx context.Context, q Query) (*ErrorGroups, error
 
 func errorGroupsPage(out *ErrorGroups, q Query) *ErrorGroups {
 	out.Page, out.PageSize = q.Page, q.PageSize
-	start := min((q.Page-1)*q.PageSize, out.Total)
-	out.Items = out.Items[start:min(start+q.PageSize, out.Total)]
+	start := minmax.Min((q.Page-1)*q.PageSize, out.Total)
+	out.Items = out.Items[start:minmax.Min(start+q.PageSize, out.Total)]
 	return out
 }
 
@@ -300,7 +301,7 @@ func errorSamples(q Query, traceID string, resources []traceResource) ([]ErrorGr
 			}
 			fingerprint := fmt.Sprintf("%x", sha256.Sum256(key))
 			if len(stack) > 8192 {
-				stack = string([]rune(stack)[:min(2048, len([]rune(stack)))]) + "…"
+				stack = string([]rune(stack)[:minmax.Min(2048, len([]rune(stack)))]) + "…"
 			}
 			ts := float64(nanos) / 1e9
 			out = append(out, ErrorGroup{Fingerprint: fingerprint, Operation: operation, ErrorType: errorType, StatusCode: status, StackTrace: stack, Count: 1, FirstSeen: ts, LastSeen: ts, Versions: []string{attrs["service.version"]}, Instances: []string{attrs["service.instance.id"]}, TraceID: traceID, SpanID: span.SpanID, RepresentativeVersion: attrs["service.version"], RepresentativeInstance: attrs["service.instance.id"]})

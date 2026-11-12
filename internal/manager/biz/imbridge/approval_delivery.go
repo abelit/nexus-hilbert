@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 	"github.com/ongridio/ongrid/internal/pkg/secretbox"
 	"log/slog"
@@ -165,7 +166,7 @@ func (d *ApprovalDelivery) deliver(ctx context.Context, n *model.ApprovalNotific
 	fail := func(code string) {
 		n.Attempts++
 		n.LastError = code
-		delay := time.Duration(1<<min(n.Attempts, 9))*time.Second + time.Duration(rand.IntN(1000))*time.Millisecond
+		delay := time.Duration(1<<minmax.Min(n.Attempts, 9))*time.Second + time.Duration(rand.IntN(1000))*time.Millisecond
 		if n.Attempts >= 20 {
 			delay = time.Hour
 		}

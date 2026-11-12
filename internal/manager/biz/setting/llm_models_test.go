@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
@@ -44,7 +45,7 @@ func TestFetchModelsCatalog(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := min(count, maxLLMModels)
+			want := minmax.Min(count, maxLLMModels)
 			if len(got.Models) != want || got.Models == nil || got.Truncated != (count > maxLLMModels) {
 				t.Fatalf("unexpected catalog: %+v", got)
 			}

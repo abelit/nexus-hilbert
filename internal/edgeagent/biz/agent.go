@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/edgeagent/packetcapture"
 	skilldispatch "github.com/ongridio/ongrid/internal/edgeagent/skill"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
@@ -573,7 +574,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				err := a.registerEdge(rctx)
 				cancel()
 				if err != nil {
-					consecutiveFail = min(consecutiveFail+1, 63)
+					consecutiveFail = minmax.Min(consecutiveFail+1, 63)
 					a.log.Warn("agent: register_edge retry failed",
 						slog.Int("consecutive_fail", consecutiveFail),
 						slog.Any("err", err))
@@ -599,7 +600,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				}, nil)
 			cancel()
 			if err != nil {
-				consecutiveFail = min(consecutiveFail+1, 63)
+				consecutiveFail = minmax.Min(consecutiveFail+1, 63)
 				a.log.Warn("agent: heartbeat failed",
 					slog.Int("consecutive_fail", consecutiveFail),
 					slog.Any("err", err))
@@ -615,10 +616,10 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 // Cap failure backoff at one minute (or a longer configured interval). Jitter
 // also spreads healthy heartbeats from agents that started together.
 func heartbeatRetryDelay(interval time.Duration, failures int) time.Duration {
-	delay, limit := interval, max(interval, time.Minute)
+	delay, limit := interval, minmax.Max(interval, time.Minute)
 	if failures > 0 {
 		// Leave room for RPC latency before the default 90s offline threshold.
-		delay = max(interval/2, time.Nanosecond)
+		delay = minmax.Max(interval/2, time.Nanosecond)
 	}
 	for i := 1; i < failures && delay < limit; i++ {
 		if delay > limit/2 {

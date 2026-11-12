@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	oteltracing "github.com/ongridio/ongrid/internal/pkg/tracing"
 )
 
@@ -155,7 +156,7 @@ func (c *ElasticsearchClient) Search(ctx context.Context, req SearchRequest) (_ 
 	if response.PIT != "" {
 		cursor.PITID = response.PIT
 	}
-	records := make([]Record, 0, min(len(response.Hits.Hits), req.Limit))
+	records := make([]Record, 0, minmax.Min(len(response.Hits.Hits), req.Limit))
 	for i, hit := range response.Hits.Hits {
 		if i >= req.Limit {
 			break
@@ -260,7 +261,7 @@ func (c *ElasticsearchClient) CountGrouped(ctx context.Context, req SearchReques
 
 	const pageSize = 500
 	path := "/" + c.indexPattern + "/_search"
-	groups := make([]CountGroup, 0, min(pageSize, MaxCountGroups))
+	groups := make([]CountGroup, 0, minmax.Min(pageSize, MaxCountGroups))
 	var after map[string]json.RawMessage
 	previousAfter := ""
 	for {
@@ -1023,5 +1024,5 @@ func maxESSearchResponseBytes(limit int) int64 {
 		limit = DefaultSearchLimit
 	}
 	calculated := maxESSearchEnvelopeBytes + int64(limit+1)*maxESSearchHitBytes
-	return min(calculated, int64(maxESSearchResponseHardBytes))
+	return minmax.Min(calculated, int64(maxESSearchResponseHardBytes))
 }

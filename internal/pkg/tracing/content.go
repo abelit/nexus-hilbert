@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
 )
 
@@ -85,7 +86,7 @@ func MaskAgentContent(raw string) string {
 	snapshot["truncated"] = true
 	// Keep valid JSON and UTF-8 even when the original value is a large structure.
 	for size := AgentContentMaxBytes / 2; size >= 0; size /= 2 {
-		prefix := preview[:min(size, len(preview))]
+		prefix := preview[:minmax.Min(size, len(preview))]
 		for !utf8.Valid(prefix) {
 			prefix = prefix[:len(prefix)-1]
 		}

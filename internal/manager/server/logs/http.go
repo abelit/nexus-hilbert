@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	bizlogs "github.com/ongridio/ongrid/internal/manager/biz/logs"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
@@ -537,7 +538,7 @@ func (h *Handler) contextLogs(w http.ResponseWriter, r *http.Request) {
 	defer h.releaseSearchSlot()
 	before, err := h.search.Search(ctx, logquery.SearchRequest{
 		Start: in.Timestamp.Add(-15 * time.Minute), End: in.Timestamp,
-		Scope: in.Scope, Limit: max(in.Before, 1), Direction: logquery.SortBackward,
+		Scope: in.Scope, Limit: minmax.Max(in.Before, 1), Direction: logquery.SortBackward,
 	})
 	if err != nil {
 		writeSearchError(r.Context(), w, err)
@@ -549,7 +550,7 @@ func (h *Handler) contextLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	after, err := h.search.Search(ctx, logquery.SearchRequest{
 		Start: in.Timestamp, End: in.Timestamp.Add(15 * time.Minute),
-		Scope: in.Scope, Limit: max(in.After, 1), Direction: logquery.SortForward,
+		Scope: in.Scope, Limit: minmax.Max(in.After, 1), Direction: logquery.SortForward,
 	})
 	if err != nil {
 		writeSearchError(r.Context(), w, err)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
@@ -131,7 +132,7 @@ func (f *fakeEventCounter) CountEventsByType(_ context.Context, _ string, _ time
 	}
 	v := f.answers[f.calls]
 	f.calls++
-	return min(v, int64(limit)), nil
+	return minmax.Min(v, int64(limit)), nil
 }
 
 // matrix builds a synthetic Prom matrix payload with one series per

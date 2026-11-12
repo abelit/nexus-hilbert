@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 )
 
 const (
@@ -516,8 +518,8 @@ func normalizeDeviceIDs(values []uint64) ([]uint64, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
-	seen := make(map[uint64]struct{}, min(len(values), MaxScopeValueCount))
-	out := make([]uint64, 0, min(len(values), MaxScopeValueCount))
+	seen := make(map[uint64]struct{}, minmax.Min(len(values), MaxScopeValueCount))
+	out := make([]uint64, 0, minmax.Min(len(values), MaxScopeValueCount))
 	for _, id := range values {
 		if id == 0 {
 			return nil, errors.New("logquery: device_id must be greater than zero")

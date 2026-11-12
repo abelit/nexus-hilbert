@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	edgeconfig "github.com/ongridio/ongrid/internal/edgeagent/config"
 	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/config"
@@ -237,7 +238,7 @@ func RetryNodeEnrollment(ctx context.Context, cfg config.Config, version string,
 				return nil
 			}
 		}
-		backoff = min(2*backoff, time.Minute)
+		backoff = minmax.Min(2*backoff, time.Minute)
 	}
 }
 

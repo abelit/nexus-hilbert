@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
@@ -191,7 +192,7 @@ func (r metricCatalogRunner) run(ctx context.Context, args []byte) ([]byte, erro
 		return scored[i].item.Name < scored[j].item.Name
 	})
 
-	outItems := make([]MetricCatalogItem, 0, min(maxMetrics, len(scored)))
+	outItems := make([]MetricCatalogItem, 0, minmax.Min(maxMetrics, len(scored)))
 	for i, item := range scored {
 		if i >= maxMetrics {
 			break

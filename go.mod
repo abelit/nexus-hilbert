@@ -3,7 +3,6 @@ module github.com/ongridio/ongrid
 go 1.25.0
 
 require (
-	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/anush008/fastembed-go v1.0.0
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.67
@@ -32,6 +31,7 @@ require (
 	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/procfs v0.15.1
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/shirou/gopsutil/v3 v3.23.6
 	github.com/singchia/geminio v1.3.0-rc.2
@@ -46,6 +46,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0
 	go.opentelemetry.io/proto/otlp v1.10.0
 	golang.org/x/crypto v0.50.0
+	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93
 	golang.org/x/net v0.52.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.43.0
@@ -162,7 +163,6 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	golang.org/x/arch v0.11.0 // indirect
-	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/term v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect

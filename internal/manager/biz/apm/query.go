@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
 )
@@ -367,8 +368,8 @@ func sortedSummaries(rows []Summary, q Query) []Summary {
 }
 
 func pageRows(rows []Summary, q Query) []Summary {
-	start := min((q.Page-1)*q.PageSize, len(rows))
-	return rows[start:min(start+q.PageSize, len(rows))]
+	start := minmax.Min((q.Page-1)*q.PageSize, len(rows))
+	return rows[start:minmax.Min(start+q.PageSize, len(rows))]
 }
 
 // TraceQL scopes values separately from query syntax. Missing attributes are

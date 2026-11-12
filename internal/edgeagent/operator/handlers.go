@@ -21,6 +21,7 @@ import (
 
 	"github.com/creack/pty"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -132,7 +133,7 @@ func buildCommand(req tunnel.OperatorExecRequest) (string, []string, time.Durati
 	if err != nil {
 		return "", nil, 0, err
 	}
-	timeoutSeconds := max(1, int((timeout+time.Second-1)/time.Second))
+	timeoutSeconds := minmax.Max(1, int((timeout+time.Second-1)/time.Second))
 	switch strings.TrimSpace(req.Command) {
 	case "list_netns":
 		return "ip", []string{"netns", "list"}, timeout, nil

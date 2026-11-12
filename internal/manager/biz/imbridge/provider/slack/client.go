@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 )
 
@@ -160,7 +161,7 @@ func (c *Client) call(ctx context.Context, method, token string, body any, dst a
 	resp.Body.Close()
 	if resp.StatusCode == 429 {
 		seconds, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
-		return &bridge.DeliveryError{Code: "rate_limited", RetryAfter: time.Duration(max(seconds, 1)) * time.Second}
+		return &bridge.DeliveryError{Code: "rate_limited", RetryAfter: time.Duration(minmax.Max(seconds, 1)) * time.Second}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("slack %s: status %s body=%s", method, resp.Status, truncate(raw, 200))

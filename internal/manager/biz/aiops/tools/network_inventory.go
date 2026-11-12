@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	topologybiz "github.com/ongridio/ongrid/internal/manager/biz/topology"
@@ -329,7 +330,7 @@ func (t *QueryNetworkInterfacesTool) InvokableRun(ctx context.Context, argsJSON 
 
 // networkInterfacePage 先过滤再分页，保留快照顺序，避免一次返回全部端口。
 func networkInterfacePage(reported []networkInterfaceRow, in queryNetworkInterfacesArgs) ([]networkInterfaceRow, int) {
-	rows := make([]networkInterfaceRow, 0, min(len(reported), in.Limit))
+	rows := make([]networkInterfaceRow, 0, minmax.Min(len(reported), in.Limit))
 	total := 0
 	for _, row := range reported {
 		row.AdminStatus = strings.ToLower(strings.TrimSpace(row.AdminStatus))

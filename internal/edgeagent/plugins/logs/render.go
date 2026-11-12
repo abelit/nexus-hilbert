@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
 	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"gopkg.in/yaml.v3"
@@ -921,8 +922,8 @@ func stringSliceOrScalar(spec map[string]interface{}, key string) []string {
 }
 
 func normalizedStrings(values []string, limit int) []string {
-	seen := make(map[string]struct{}, min(len(values), limit))
-	out := make([]string, 0, min(len(values), limit))
+	seen := make(map[string]struct{}, minmax.Min(len(values), limit))
+	out := make([]string, 0, minmax.Min(len(values), limit))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {

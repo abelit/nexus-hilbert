@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	callback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	bridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	"io"
 	"net/http"
@@ -21,7 +22,7 @@ func feishuApprovalContent(card bridge.ApprovalCard) map[string]any {
 	addText := func(text string) {
 		runes := []rune(text)
 		for len(runes) > 0 {
-			n := min(len(runes), 1500)
+			n := minmax.Min(len(runes), 1500)
 			elements = append(elements, map[string]any{"tag": "div", "text": map[string]string{"tag": "plain_text", "content": string(runes[:n])}})
 			runes = runes[n:]
 		}
@@ -98,7 +99,7 @@ func (c *Client) approvalRequest(ctx context.Context, method, path, chat string,
 	}
 	if res.StatusCode == 429 {
 		seconds, _ := strconv.Atoi(res.Header.Get("Retry-After"))
-		return "", &bridge.DeliveryError{Code: "rate_limited", RetryAfter: time.Duration(max(seconds, 1)) * time.Second}
+		return "", &bridge.DeliveryError{Code: "rate_limited", RetryAfter: time.Duration(minmax.Max(seconds, 1)) * time.Second}
 	}
 	if res.StatusCode == 404 && method == http.MethodPatch {
 		return "", &bridge.DeliveryError{Code: "cannot_edit", CannotEdit: true}

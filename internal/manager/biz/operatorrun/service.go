@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -672,7 +673,7 @@ func buildRequest(in CreateInput) (tunnel.OperatorExecRequest, string, string, i
 	if timeoutMs > 300000 {
 		return tunnel.OperatorExecRequest{}, "", "", 0, fmt.Errorf("%w: timeout_ms max 300000", errs.ErrInvalid)
 	}
-	timeoutSeconds := max(1, (timeoutMs+999)/1000)
+	timeoutSeconds := minmax.Max(1, (timeoutMs+999)/1000)
 	switch strings.TrimSpace(in.Command) {
 	case "ping":
 		var args struct {

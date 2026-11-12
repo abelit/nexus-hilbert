@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	biz "github.com/ongridio/ongrid/internal/manager/biz/externalmcp"
 	monitorbiz "github.com/ongridio/ongrid/internal/manager/biz/monitor"
@@ -215,8 +216,8 @@ func bounds(a biz.Arguments, n int) (int, int) {
 	if limit == 0 {
 		limit = 20
 	}
-	start := min(int(biz.Number(a, "offset")), n)
-	return start, min(start+limit, n)
+	start := minmax.Min(int(biz.Number(a, "offset")), n)
+	return start, minmax.Min(start+limit, n)
 }
 func (r Resources) listRules(ctx context.Context, a biz.Arguments) (any, error) {
 	rows, err := r.Alerts.ListRules(ctx, caller(ctx), "")

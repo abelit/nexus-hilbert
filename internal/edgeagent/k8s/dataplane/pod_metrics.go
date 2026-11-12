@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	edgeconfig "github.com/ongridio/ongrid/internal/edgeagent/config"
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
 	"github.com/ongridio/ongrid/internal/pkg/autoapm"
@@ -78,7 +79,7 @@ func (f *podMetricsFetcher) Fetch(ctx context.Context) (map[string]plugins.Plugi
 		"action":        "keep", "regex": strings.Join(allowed, "|"),
 	}}, scrape["relabel_configs"].([]interface{})...)
 	interval := edgeconfig.EnvDuration("ONGRID_K8S_METRICS_INTERVAL", 30*time.Second)
-	timeout := min(edgeconfig.EnvDuration("ONGRID_K8S_METRICS_TIMEOUT", 15*time.Second), interval)
+	timeout := minmax.Min(edgeconfig.EnvDuration("ONGRID_K8S_METRICS_TIMEOUT", 15*time.Second), interval)
 	scrape["scrape_interval"], scrape["scrape_timeout"] = interval.String(), timeout.String()
 	scrape["sample_limit"] = edgeconfig.EnvInt("ONGRID_K8S_METRICS_SAMPLE_LIMIT", 250000)
 	labels := []interface{}{

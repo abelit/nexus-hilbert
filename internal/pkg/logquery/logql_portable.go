@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 )
 
 const (
@@ -74,7 +76,7 @@ func CompileLogQLSearch(opts QueryRangeOptions) (SearchRequest, error) {
 		End:       opts.End,
 		Keywords:  keywords,
 		Filters:   filters,
-		Limit:     min(limit, MaxSearchLimit),
+		Limit:     minmax.Min(limit, MaxSearchLimit),
 		Direction: direction,
 	}
 	if err := req.NormalizeAndValidate(); err != nil {

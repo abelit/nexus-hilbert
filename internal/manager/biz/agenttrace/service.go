@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tracequery"
 )
@@ -139,7 +140,7 @@ func (s *Service) List(ctx context.Context, q Query) (*ListResult, error) {
 		jobs <- i
 	}
 	close(jobs)
-	for range min(4, len(candidates)) {
+	for range minmax.Min(4, len(candidates)) {
 		workers.Go(func() {
 			for i := range jobs {
 				trace, err := s.Trace(ctx, candidates[i].TraceID)

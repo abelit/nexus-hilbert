@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	biz "github.com/ongridio/ongrid/internal/manager/biz/externalmcp"
 	service "github.com/ongridio/ongrid/internal/manager/service/externalmcp"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -138,7 +139,7 @@ func APITools(router chi.Router, writesEnabled bool) ([]biz.Tool, error) {
 			if limit == 0 {
 				limit = 50
 			}
-			start, end := min(offset, total), min(offset+limit, total)
+			start, end := minmax.Min(offset, total), minmax.Min(offset+limit, total)
 			return map[string]any{"items": items[start:end], "total": total, "offset": offset, "limit": limit, "has_more": end < total}, nil
 		},
 	}}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"github.com/prometheus/client_golang/prometheus"
 	"time"
+
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 )
 
 type DeliveryStats struct {
@@ -50,7 +52,7 @@ func (m *DeliveryMetrics) refresh(ctx context.Context, r ApprovalDeliveryRepo) e
 		}
 		m.backlog.WithLabelValues(row.Provider).Set(float64(row.Backlog))
 		if row.Oldest != nil {
-			m.oldest.WithLabelValues(row.Provider).Set(max(0, time.Since(*row.Oldest).Seconds()))
+			m.oldest.WithLabelValues(row.Provider).Set(minmax.Max(0, time.Since(*row.Oldest).Seconds()))
 		}
 	}
 	return nil

@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	alertmodel "github.com/ongridio/ongrid/internal/manager/model/alert"
@@ -140,8 +141,8 @@ func evidenceParts(call EvidenceCall) []evidencePart {
 			Results []json.RawMessage `json:"results"`
 		}
 		if json.Unmarshal([]byte(raw), &batch) == nil && len(batch.Results) > 0 {
-			parts := make([]evidencePart, 0, min(len(batch.Results), maxEvidenceSources+1))
-			for i, result := range batch.Results[:min(len(batch.Results), maxEvidenceSources+1)] {
+			parts := make([]evidencePart, 0, minmax.Min(len(batch.Results), maxEvidenceSources+1))
+			for i, result := range batch.Results[:minmax.Min(len(batch.Results), maxEvidenceSources+1)] {
 				parts = append(parts, evidencePart{string(result), &i})
 			}
 			return parts

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	bridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/card"
@@ -72,7 +73,7 @@ func (s *approvalSender) request(ctx context.Context, method, path, token string
 	}
 	if res.StatusCode == 429 {
 		seconds, _ := strconv.Atoi(res.Header.Get("Retry-After"))
-		return nil, &bridge.DeliveryError{Code: "rate_limited", RetryAfter: time.Duration(max(seconds, 1)) * time.Second}
+		return nil, &bridge.DeliveryError{Code: "rate_limited", RetryAfter: time.Duration(minmax.Max(seconds, 1)) * time.Second}
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return nil, fmt.Errorf("dingtalk card status=%d", res.StatusCode)

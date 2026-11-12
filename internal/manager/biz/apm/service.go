@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
@@ -311,8 +312,8 @@ func (s *Service) Overview(ctx context.Context, q Query) (*Overview, error) {
 	if err != nil || out.Summary.DataStatus == "no_data" {
 		return out, err
 	}
-	step := max(30*time.Second, time.Duration((q.End.Sub(q.Start).Seconds()+239)/240)*time.Second)
-	window := max(5*time.Minute, 4*step)
+	step := minmax.Max(30*time.Second, time.Duration((q.End.Sub(q.Start).Seconds()+239)/240)*time.Second)
+	window := minmax.Max(5*time.Minute, 4*step)
 	result, err := s.prom.QueryRange(ctx, combineExpressions(metricExpressions(q, window, identityLabels)), q.Start, q.End, step)
 	if err != nil {
 		return nil, fmt.Errorf("apm: query trend: %w", err)
@@ -472,7 +473,7 @@ func (s *Service) Dependencies(ctx context.Context, q Query) (*Dependencies, err
 		}
 		return fmt.Sprint(a.Client, a.Server, a.ConnectionType) < fmt.Sprint(b.Client, b.Server, b.ConnectionType)
 	})
-	out.Items = out.Items[:min(len(out.Items), 200)]
+	out.Items = out.Items[:minmax.Min(len(out.Items), 200)]
 	return out, nil
 }
 

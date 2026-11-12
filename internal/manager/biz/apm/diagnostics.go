@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 	"github.com/ongridio/ongrid/internal/pkg/tracequery"
 )
@@ -165,7 +166,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		return out, nil
 	}
 	var serviceSpans, downstream, missingParents int
-	for _, summary := range summaries[:min(3, len(summaries))] {
+	for _, summary := range summaries[:minmax.Min(3, len(summaries))] {
 		traceID := canonicalTraceID(summary.TraceID)
 		if traceID == "" {
 			continue

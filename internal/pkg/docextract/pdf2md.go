@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
+
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 )
 
 const pdfHeadingRatio = 1.2
@@ -48,7 +50,7 @@ func pdf2md(data []byte) (out string, err error) {
 
 	levels := make(map[float64]int, len(headingSizes))
 	for i, size := range headingSizes {
-		levels[size] = min(i+1, 3)
+		levels[size] = minmax.Min(i+1, 3)
 	}
 
 	var b strings.Builder

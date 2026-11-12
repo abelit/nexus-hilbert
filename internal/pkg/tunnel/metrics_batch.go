@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 )
 
 func metricsItemsField(method string) string {
@@ -51,7 +53,7 @@ func forEachMetricsBatch(ctx context.Context, body []byte, field string, limit i
 		// full request; callJSON still checks whether its wire encoding fits.
 		return send(body, len(items))
 	}
-	batch := make([]byte, 0, min(limit, len(body)))
+	batch := make([]byte, 0, minmax.Min(limit, len(body)))
 	batch = append(batch, prefix...)
 	count := 0
 	for _, item := range items {

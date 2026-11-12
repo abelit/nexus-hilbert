@@ -14,6 +14,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/edgeagent/biz"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -420,7 +421,7 @@ func TestAgent_ConcurrentHeartbeatTimeoutRecoversBeforeOfflineThreshold(t *testi
 					ts := time.Unix(time.Now().Unix(), 0)
 					time.Sleep(9900 * time.Millisecond)
 					if !lastSeen.IsZero() {
-						maxStaleness[id] = max(maxStaleness[id], time.Since(lastSeen))
+						maxStaleness[id] = minmax.Max(maxStaleness[id], time.Since(lastSeen))
 					}
 					lastSeen = ts
 					if count == 4 {
@@ -445,7 +446,7 @@ func TestAgent_ConcurrentHeartbeatTimeoutRecoversBeforeOfflineThreshold(t *testi
 			if age <= 0 || age >= 90*time.Second {
 				t.Errorf("agent %d: heartbeat staleness %s, want below default 90s offline threshold", id, age)
 			}
-			worst = max(worst, age)
+			worst = minmax.Max(worst, age)
 		}
 		t.Logf("%d agents recovered from one heartbeat timeout; worst staleness=%s", agents, worst)
 	})

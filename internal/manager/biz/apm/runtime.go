@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -266,8 +267,8 @@ func (s *Service) Runtime(ctx context.Context, q Query) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	step := max(30*time.Second, time.Duration((q.End.Sub(q.Start).Seconds()+239)/240)*time.Second)
-	expr := runtimeExpression(q, max(5*time.Minute, 4*step))
+	step := minmax.Max(30*time.Second, time.Duration((q.End.Sub(q.Start).Seconds()+239)/240)*time.Second)
+	expr := runtimeExpression(q, minmax.Max(5*time.Minute, 4*step))
 	current, err := s.instant(ctx, expr, q.End)
 	if err != nil {
 		return nil, err

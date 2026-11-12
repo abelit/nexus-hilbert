@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 )
 
@@ -61,7 +62,7 @@ func searchLogQLPages(ctx context.Context, searcher logquery.Searcher, req logqu
 		Backends: []string{},
 	}
 	for len(combined.Records) < desired {
-		req.Limit = min(logquery.MaxSearchLimit, desired-len(combined.Records))
+		req.Limit = minmax.Min(logquery.MaxSearchLimit, desired-len(combined.Records))
 		page, err := searcher.Search(ctx, req)
 		if err != nil {
 			return nil, err

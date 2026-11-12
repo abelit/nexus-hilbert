@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	bridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	"strings"
 )
@@ -13,7 +14,7 @@ func slackApprovalBody(channel string, card bridge.ApprovalCard) map[string]any 
 	blocks := []map[string]any{}
 	runes := []rune(text)
 	for len(runes) > 0 {
-		n := min(len(runes), 2500)
+		n := minmax.Min(len(runes), 2500)
 		blocks = append(blocks, map[string]any{"type": "section", "text": map[string]string{"type": "plain_text", "text": string(runes[:n])}})
 		runes = runes[n:]
 	}

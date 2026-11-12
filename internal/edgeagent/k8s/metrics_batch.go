@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ongridio/ongrid/internal/compat/minmax"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -55,7 +56,7 @@ func newMetricsBatcher(edgeID uint64, source string, maxSamples, maxBytes int, p
 		maxBytes:         maxBytes,
 		baseEncodedBytes: baseBytes,
 		encodedBytes:     baseBytes,
-		samples:          make([]tunnel.PromSample, 0, min(maxSamples, 1024)),
+		samples:          make([]tunnel.PromSample, 0, minmax.Min(maxSamples, 1024)),
 		push:             push,
 	}, nil
 }
