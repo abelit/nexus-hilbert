@@ -62,7 +62,7 @@ const ToolNameRestartService = "host_restart_service"
 
 // RestartServiceDescription is the one-line "what does this tool do"
 // blurb the LLM reads when picking tools.
-const RestartServiceDescription = "Restart an allow-listed systemd service on a device. " +
+const RestartServiceDescription = "Restart an allow-listed systemd or Windows service on a device. " +
 	"MUTATING — calls trigger a reviewer worker for SOP gating before execution."
 
 // restartServiceWhenToUse is the routing hint shown in the system
@@ -75,7 +75,8 @@ const RestartServiceDescription = "Restart an allow-listed systemd service on a 
 // ask first. The reviewer is the second line of defense — explicit
 // guidance here is the first.
 const restartServiceWhenToUse = "Use ONLY when the user explicitly asks to restart one of the allow-listed " +
-	"services (nginx / redis / prometheus / loki / tempo / grafana / mysql / ongrid). " +
+	"services (nginx / redis / prometheus / loki / tempo / grafana / mysql / ongrid, " +
+	"or a Windows service name such as W3SVC). " +
 	"DO NOT proactively suggest restart — diagnose first with query_logql / get_host_summary. " +
 	"This tool is MUTATING: the call spawns a reviewer worker (SOP gating); " +
 	"on reject, do NOT retry — convey the reviewer's reason to the user verbatim and let them decide."
@@ -90,8 +91,8 @@ var RestartServiceSchema = json.RawMessage(`{
     "device_id": {"type": "integer", "description": "Device id to restart on (same id as the @-mention chip and the Prom device_id label)."},
     "service": {
       "type": "string",
-      "enum": ["nginx", "redis", "prometheus", "loki", "tempo", "grafana", "mysql", "ongrid"],
-      "description": "Systemd unit short name (no .service suffix)."
+      "enum": ["nginx", "redis", "prometheus", "loki", "tempo", "grafana", "mysql", "ongrid", "w3svc"],
+      "description": "Service short name (case-insensitive): a systemd unit without the .service suffix (e.g. nginx), or a Windows service name (e.g. W3SVC)."
     },
     "reason": {"type": "string", "description": "Why the restart is being requested. Written verbatim to the audit row; encouraged for post-mortem trail."}
   },
@@ -100,19 +101,24 @@ var RestartServiceSchema = json.RawMessage(`{
 
 // AllowedRestartServices is the manager allow-list, matching the edge
 // sandbox. Exported so the reviewer / SPA approval UI can render the
-// same list without duplicating the literal.
+// same list without duplicating the literal. Entries are canonical
+// lowercase: the lookup is case-insensitive (Windows service names such
+// as W3SVC come in with mixed case), and the edge remains the second
+// gate for names it does not support on its platform.
 var AllowedRestartServices = []string{
-	"nginx", "redis", "prometheus", "loki", "tempo", "grafana", "mysql", "ongrid",
+	"nginx", "redis", "prometheus", "loki", "tempo", "grafana", "mysql", "ongrid", "w3svc",
 }
 
 // allowedRestartServicesSet is the lookup form, computed once at
-// init() so InvokableRun is O(1) per check.
+// init() so InvokableRun is O(1) per check. Entries are lowercased while
+// building the set so the lookup matches regardless of the casing the
+// LLM emits.
 var allowedRestartServicesSet map[string]struct{}
 
 func init() {
 	allowedRestartServicesSet = make(map[string]struct{}, len(AllowedRestartServices))
 	for _, s := range AllowedRestartServices {
-		allowedRestartServicesSet[s] = struct{}{}
+		allowedRestartServicesSet[strings.ToLower(s)] = struct{}{}
 	}
 }
 

@@ -68,8 +68,8 @@ type RestartService struct{}
 func (RestartService) Metadata() skill.Metadata {
 	return skill.Metadata{
 		Key:         Key,
-		Name:        "重启 systemd 服务",
-		Description: "重启允许列表内的 systemd service（mutating）— 触发 reviewer 二审，approve 后才执行",
+		Name:        "重启服务",
+		Description: "重启允许列表内的 systemd / Windows service（mutating）— 触发 reviewer 二审，approve 后才执行",
 		Class:       skill.ClassMutating,
 		Scope:       skill.ScopeHost,
 		Category:    "process",
@@ -80,7 +80,7 @@ func (RestartService) Metadata() skill.Metadata {
 			}},
 			{Name: "service", Param: skill.Param{
 				Type: "string", Required: true,
-				Desc: "systemd 短名（不带 .service 后缀），例: nginx / redis / prometheus",
+				Desc: "服务短名（大小写不敏感）：systemd unit 不带 .service 后缀，例: nginx / redis / prometheus；Windows 服务名，例: W3SVC",
 			}},
 			{Name: "reason", Param: skill.Param{
 				Type: "string",

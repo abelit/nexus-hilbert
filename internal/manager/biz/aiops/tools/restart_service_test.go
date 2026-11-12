@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -118,6 +119,75 @@ func TestRestartServiceTool_CanonicalizesService(t *testing.T) {
 	}
 	if sentReq.Service != "nginx" {
 		t.Errorf("canonicalised service = %q, want nginx", sentReq.Service)
+	}
+}
+
+func TestRestartServiceTool_AcceptsWindowsServiceNames(t *testing.T) {
+	// Windows service names are case-insensitive (W3SVC is the canonical
+	// spelling). Every casing must canonicalize to the lowercase allow-list
+	// entry and reach the tunnel caller instead of being rejected by the
+	// manager gate.
+	for _, service := range []string{"W3SVC", "w3svc", "W3Svc"} {
+		t.Run(service, func(t *testing.T) {
+			fc := &fakeCaller{respBody: mustMarshal(tunnel.RestartServiceResponse{Service: "w3svc", Restarted: true})}
+			resolver := &fakeHostFilesResolver{mapping: map[uint64]uint64{1: 7}}
+			tool := newRestartServiceToolFor(t, resolver, fc)
+
+			if _, err := tool.InvokableRun(context.Background(), fmt.Sprintf(`{"device_id":1,"service":%q}`, service)); err != nil {
+				t.Fatalf("InvokableRun(service=%q): %v", service, err)
+			}
+			if fc.lastID != 7 {
+				t.Errorf("caller invoked with edge id %d, want 7", fc.lastID)
+			}
+			if fc.lastName != tunnel.MethodRestartService {
+				t.Errorf("method = %q, want %q", fc.lastName, tunnel.MethodRestartService)
+			}
+			var sentReq tunnel.RestartServiceRequest
+			if err := json.Unmarshal(fc.lastBody, &sentReq); err != nil {
+				t.Fatalf("decode lastBody: %v", err)
+			}
+			if sentReq.Service != "w3svc" {
+				t.Errorf("sent service = %q, want w3svc", sentReq.Service)
+			}
+		})
+	}
+}
+
+func TestRestartServiceTool_WindowsServiceInSchemaAndAllowList(t *testing.T) {
+	// The schema enum is the structured allow-list the LLM sees; the
+	// runtime set is derived from AllowedRestartServices. Keep both in sync
+	// and keep the slice lowercase so the case-insensitive lookup matches.
+	var schema struct {
+		Properties struct {
+			Service struct {
+				Enum []string `json:"enum"`
+			} `json:"service"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(RestartServiceSchema, &schema); err != nil {
+		t.Fatalf("RestartServiceSchema not valid JSON: %v", err)
+	}
+	hasInEnum := false
+	for _, s := range schema.Properties.Service.Enum {
+		if s == "w3svc" {
+			hasInEnum = true
+		}
+	}
+	if !hasInEnum {
+		t.Errorf("schema enum %v missing w3svc", schema.Properties.Service.Enum)
+	}
+
+	hasInList := false
+	for _, s := range AllowedRestartServices {
+		if s == "w3svc" {
+			hasInList = true
+		}
+		if strings.ToLower(s) != s {
+			t.Errorf("AllowedRestartServices entry %q must be lowercase for case-insensitive lookup", s)
+		}
+	}
+	if !hasInList {
+		t.Errorf("AllowedRestartServices %v missing w3svc", AllowedRestartServices)
 	}
 }
 
