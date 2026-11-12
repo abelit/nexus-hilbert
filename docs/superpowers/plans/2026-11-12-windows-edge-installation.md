@@ -873,6 +873,50 @@ git commit -m "feat(edge): implement host file diagnostics on windows"
 
 ---
 
+## Task 7.5b: Windows host_files deny list
+
+**Files:**
+- Modify: `internal/edgeagent/host_files/sandbox.go`
+- Create: `internal/edgeagent/host_files/sandbox_windows.go`
+- Create: `internal/edgeagent/host_files/sandbox_windows_test.go`
+- Modify: `internal/edgeagent/host_files/sandbox_test.go`
+
+**Interfaces:**
+- Produces: Windows deny prefixes and case-insensitive prefix matching for `SandboxConfig.ValidatePath`.
+
+- [ ] **Step 1: Write failing tests**
+
+Add cases for Windows-style paths:
+
+```text
+C:\Users\alice\.ssh\id_rsa        -> denied
+c:\users\ALICE\.ssh\id_rsa        -> denied (case-insensitive)
+C:\Windows\System32\config\SAM    -> denied
+C:\ProgramData\ssh\sshd_config    -> denied
+C:\Users\alice\Documents\notes.txt -> allowed
+```
+
+- [ ] **Step 2: Implement the Windows deny list**
+
+- Add Windows deny prefixes: `C:\Windows\System32\config`, `C:\Windows\System32\SAM`, `C:\Windows\System32\SECURITY`, `C:\Windows\System32\SYSTEM`, `C:\Windows\repair`, `C:\ProgramData\ssh`, `C:\ProgramData\Microsoft\Crypto`.
+- Add per-user `C:\Users\<user>\.ssh` and `C:\Users\<user>\.gnupg`.
+- On Windows, compare prefixes case-insensitively; keep Unix matching byte-exact.
+- Keep the existing Unix denylist and `/home/<user>/.ssh` behavior unchanged.
+
+- [ ] **Step 3: Run tests**
+
+Run: `go test ./internal/edgeagent/host_files -run 'Denied|Sensitive|WithinRoot' -count=1`
+Expected: PASS, with Windows-style cases passing on Linux via the path matcher.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add internal/edgeagent/host_files/sandbox.go internal/edgeagent/host_files/sandbox_windows.go internal/edgeagent/host_files/sandbox_windows_test.go internal/edgeagent/host_files/sandbox_test.go
+git commit -m "fix(edge): deny windows sensitive paths in host_files"
+```
+
+---
+
 ## Task 8: Windows plugin set
 
 **Files:**
