@@ -1099,6 +1099,66 @@ git commit -m "build(edge): add go 1.20 legacy windows build harness"
 
 ---
 
+## Task 11a: Windows plugin binary packaging and version pins
+
+**Files:**
+- Modify: `Makefile`
+- Modify: `dist/build-edge-attachments.sh`
+- Create: `scripts/test-windows-plugin-assets.sh`
+- Modify: `docs/design/windows-edge-installation.md`（版本与能力记录）
+
+**Interfaces:**
+- Produces: `bin/windows-amd64/{windows_exporter,otelcol-contrib,...}.exe`, versioned release attachments, and a documented Windows plugin capability set.
+
+- [ ] **Step 1: Pin versions**
+
+- Choose a `WINDOWS_EXPORTER_VERSION` compatible with the hostmetrics flags (`--collectors.enabled/disabled`, plural `--collector.textfile.directories`). Prefer a release before 0.30; document the exact version and flag contract in the design doc.
+- Reuse `OTELCOL_VERSION` for Windows `otelcol-contrib`.
+- DB exporters: check whether the pinned versions publish Windows amd64 assets. If an exporter has no Windows asset, remove that source from the Windows `databasemetrics` capability (or drop the plugin from the Windows set) and document the decision.
+
+- [ ] **Step 2: Add fetch targets**
+
+- `make fetch-windows-exporter` downloads the standalone Windows `.exe` to `bin/windows-amd64/windows_exporter.exe`, verifies its checksum when upstream publishes one, and is idempotent.
+- Extend `fetch-otelcol` (or add `fetch-otelcol-windows`) to fetch `otelcol-contrib_<version>_windows_amd64` into `bin/windows-amd64/otelcol-contrib.exe`.
+- Add Windows DB exporter fetches only for the exporters that publish Windows assets.
+
+- [ ] **Step 3: Publish and stage**
+
+- Extend `dist/build-edge-attachments.sh` Windows mode to emit plugin files plus `.sha256` sidecars, e.g.:
+  ```text
+  ongrid-edge-windows-amd64-<version>-windows_exporter.exe
+  ongrid-edge-windows-amd64-<version>-otelcol-contrib.exe
+  ...
+  ```
+- Extend `fetch-edge-assets.sh` to download and stage them under `windows/modern-amd64/plugins/` and `windows/legacy-amd64/plugins/`.
+- Ensure the manifest generator lists every plugin file.
+
+- [ ] **Step 4: Test**
+
+`scripts/test-windows-plugin-assets.sh`:
+- uses fake fixture binaries and the real builder;
+- asserts the expected plugin attachments and sidecars;
+- asserts a missing required plugin fails loudly;
+- asserts version pins are present in the Makefile/design doc.
+
+- [ ] **Step 5: Run the tests**
+
+```bash
+bash scripts/test-windows-plugin-assets.sh
+bash scripts/test-edge-assets.sh
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add Makefile dist/build-edge-attachments.sh scripts/test-windows-plugin-assets.sh docs/design/windows-edge-installation.md
+git commit -m "build(edge): package windows plugin binaries"
+```
+
+---
+
 ## Task 11: Legacy packaging, docs, and release
 
 **Files:**
