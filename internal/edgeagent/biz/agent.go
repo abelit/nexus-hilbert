@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +134,14 @@ func (a *Agent) SetPluginHealthFn(fn func() []tunnel.PluginHealthWire) {
 	a.mu.Unlock()
 }
 
+// supportsPacketCapture reports whether the host packet-capture backend is
+// available on the current platform. Linux only today: the non-Linux
+// packetcapture stub returns an error, so Windows must not advertise the
+// capture methods or route the capture skills.
+func supportsPacketCapture() bool {
+	return runtime.GOOS != "windows"
+}
+
 // NewAgent builds an Agent; applies defaults for zero-valued Config
 // fields.
 func NewAgent(client tunnel.Client, collector Collector, cfg Config, log *slog.Logger) *Agent {
@@ -157,6 +166,12 @@ func NewAgent(client tunnel.Client, collector Collector, cfg Config, log *slog.L
 	}
 	if cfg.Kubernetes != nil {
 		agent.packetCaptureErr = errors.New("packet capture currently supports non-Kubernetes edges only")
+		return agent
+	}
+	if !supportsPacketCapture() {
+		// The Linux packet-capture backend is unavailable on this
+		// platform; the handlers are not registered either (see
+		// registerHandlers), so the manager sees "method not found".
 		return agent
 	}
 	captureDir := strings.TrimSpace(cfg.PacketCaptureDir)
@@ -393,26 +408,28 @@ func (a *Agent) registerHandlers() {
 			}
 			return jsonEncode(a.collector.GetProcessList(ctx, int(req.TopN), req.SortBy))
 		})
-	a.client.RegisterHandler(tunnel.MethodStartPacketCapture,
-		func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
-			return a.handleStartPacketCapture(ctx, body)
-		})
-	a.client.RegisterHandler(tunnel.MethodGetPacketCapture,
-		func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
-			return a.handleGetPacketCapture(ctx, body)
-		})
-	a.client.RegisterHandler(tunnel.MethodReadPacketCapture,
-		func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
-			return a.handleReadPacketCapture(ctx, body)
-		})
-	a.client.RegisterHandler(tunnel.MethodCancelPacketCapture,
-		func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
-			return a.handleCancelPacketCapture(ctx, body)
-		})
-	a.client.RegisterHandler(tunnel.MethodStopPacketCapture,
-		func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
-			return a.handleStopPacketCapture(ctx, body)
-		})
+	if supportsPacketCapture() {
+		a.client.RegisterHandler(tunnel.MethodStartPacketCapture,
+			func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
+				return a.handleStartPacketCapture(ctx, body)
+			})
+		a.client.RegisterHandler(tunnel.MethodGetPacketCapture,
+			func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
+				return a.handleGetPacketCapture(ctx, body)
+			})
+		a.client.RegisterHandler(tunnel.MethodReadPacketCapture,
+			func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
+				return a.handleReadPacketCapture(ctx, body)
+			})
+		a.client.RegisterHandler(tunnel.MethodCancelPacketCapture,
+			func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
+				return a.handleCancelPacketCapture(ctx, body)
+			})
+		a.client.RegisterHandler(tunnel.MethodStopPacketCapture,
+			func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
+				return a.handleStopPacketCapture(ctx, body)
+			})
+	}
 	// Skill dispatcher: one handler routes every execute_skill RPC by
 	// the skill key in the request body. The skill registry is populated
 	// by init() blocks in internal/skill/builtin/* packages — the agent
@@ -423,11 +440,13 @@ func (a *Agent) registerHandlers() {
 			if err := jsonDecode(body, &req); err != nil {
 				return nil, err
 			}
-			switch req.Key {
-			case builtin.CapturePCAPSkillKey:
-				return a.startPacketCapture(req.Params)
-			case builtin.GetPacketCaptureSkillKey:
-				return a.getPacketCapture(req.Params)
+			if supportsPacketCapture() {
+				switch req.Key {
+				case builtin.CapturePCAPSkillKey:
+					return a.startPacketCapture(req.Params)
+				case builtin.GetPacketCaptureSkillKey:
+					return a.getPacketCapture(req.Params)
+				}
 			}
 			return skilldispatch.Dispatch(ctx, body)
 		})

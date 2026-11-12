@@ -11,6 +11,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -52,6 +53,21 @@ const edgeMetricsAddr = ":9101"
 // Keep the Edge's own runtime profiles local and off the conventional :6060
 // application port so the default target cannot silently profile another app.
 const edgePprofAddr = "127.0.0.1:16060"
+
+// windowsHostToolsEnabled gates the Linux-tool-backed host handlers
+// (interactive operator exec and WebSSH) on Windows. The Windows Edge ships
+// the host_files + restart_service subset; the operator/WebSSH stack needs
+// bash/PTY parity that has not been validated. Flip this const (or wire it
+// to a Modern-variant capability probe) to enable them in one place once
+// that parity lands.
+const windowsHostToolsEnabled = false
+
+// supportsWindowsHostTools reports whether the current platform may expose
+// the operator/WebSSH host handlers. Non-Windows builds keep them
+// unconditionally.
+func supportsWindowsHostTools() bool {
+	return runtime.GOOS != "windows" || windowsHostToolsEnabled
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -194,30 +210,38 @@ func run() error {
 
 	edgesvc.RegisterWithCollector(client, collector, log)
 
-	// Platform-specific capabilities (host_files / restart_service /
-	// bash on Linux; host_files only on Windows — see
-	// capabilities_{linux,windows}.go). All Register calls are
-	// soft-fail: the edge boots and the operator sees a warning in the
-	// log when a capability is disabled. Kubernetes controllers skip
-	// host handlers; node-mode agents and standalone hosts keep them.
+	// Platform-specific capabilities (host_files / restart_service on both
+	// platforms; bash on Linux — see capabilities_{linux,windows}.go). All
+	// Register calls are soft-fail: the edge boots and the operator sees a
+	// warning in the log when a capability is disabled. Kubernetes
+	// controllers skip host handlers; node-mode agents and standalone hosts
+	// keep them.
 	if k8sInfo == nil || edgek8s.IsNode(k8sInfo) {
 		registerEdgeCapabilities(client, log)
-		operatorLog := log.With(slog.String("comp", "operator"))
-		edgeoperator.Register(client, operatorLog)
 
-		// WebSSH: edge is a stream port-forwarder. Manager carries the
-		// allowed loopback port in the SSH identification line, then edge
-		// io.Copy's bytes both ways. SSH client
-		// lives entirely on the manager — see internal/manager/server/
-		// webshell. The edge has no SSH lib, no PTY, no session map.
-		webshellLog := log.With(slog.String("comp", "webshell"))
-		edgestreamrouter.Register(client, map[string]edgestreamrouter.Handler{
-			tunnel.StreamKindOperatorExec: func(stream tunnel.StreamConn) {
-				edgeoperator.HandleStream(stream, operatorLog)
-			},
-		}, func(stream tunnel.StreamConn) {
-			edgewebshell.HandleStream(stream, webshellLog)
-		}, log.With(slog.String("comp", "streamrouter")))
+		// The interactive operator exec + WebSSH stack is backed by
+		// Linux host tools (bash/PTY). Windows does not advertise it
+		// until a validated parity implementation lands.
+		if supportsWindowsHostTools() {
+			operatorLog := log.With(slog.String("comp", "operator"))
+			edgeoperator.Register(client, operatorLog)
+
+			// WebSSH: edge is a stream port-forwarder. Manager carries the
+			// allowed loopback port in the SSH identification line, then edge
+			// io.Copy's bytes both ways. SSH client
+			// lives entirely on the manager — see internal/manager/server/
+			// webshell. The edge has no SSH lib, no PTY, no session map.
+			webshellLog := log.With(slog.String("comp", "webshell"))
+			edgestreamrouter.Register(client, map[string]edgestreamrouter.Handler{
+				tunnel.StreamKindOperatorExec: func(stream tunnel.StreamConn) {
+					edgeoperator.HandleStream(stream, operatorLog)
+				},
+			}, func(stream tunnel.StreamConn) {
+				edgewebshell.HandleStream(stream, webshellLog)
+			}, log.With(slog.String("comp", "streamrouter")))
+		} else {
+			log.Info("operator/WebSSH handlers disabled: host toolset unavailable on this platform")
+		}
 	} else {
 		log.Info("kubernetes controller: host handlers disabled",
 			slog.String("role", k8sInfo.Role),
