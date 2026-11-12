@@ -1192,7 +1192,13 @@ Do not use a zip; the manifest and installer verify each file individually.
 
 - [ ] **Step 2b: Extend release publish/verify to Windows**
 
-Update `verify-edge-version-release` and both file lists in `publish-edge-version-attachments` (in `Makefile`) to include the four Windows files for each variant. Decide the ordering relative to already-published tags: `scripts/publish-cnb-release-attachments.sh` refuses to add files to a partially populated immutable release, so Windows must be included before the first tagged publish that is meant to carry it.
+Update `verify-edge-version-release` and both file lists in `publish-edge-version-attachments` (in `Makefile`) to include every Windows payload and its `.sha256` sidecar:
+
+- per variant (modern/legacy): supervisor and worker `.exe`;
+- per included Windows plugin: `windows_exporter`, `otelcol-contrib`, and the DB exporters that have Windows assets (currently mysqld/postgres/redis; mongodb is omitted);
+- the installer bootstrap from Step 2c.
+
+Decide the ordering relative to already-published tags: `scripts/publish-cnb-release-attachments.sh` refuses to add files to a partially populated immutable release, so all Windows payloads must be included before the first tagged publish that is meant to carry them. Add an assertion/test that the publish and verify lists match the builder's output set.
 
 - [ ] **Step 2c: Build and stage the installer bootstrap**
 
