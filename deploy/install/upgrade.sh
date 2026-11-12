@@ -254,8 +254,8 @@ EDGE_STAGE_DIR=""
 EDGE_BACKUP_DIR=""
 EDGE_SWAP_COMPLETE=0
 prepare_edge_assets() {
-    local source_dir="$SCRIPT_DIR/edge" target deps_tag resolved_targets
-    local edge_targets=()
+    local source_dir="$SCRIPT_DIR/edge" target deps_tag resolved_targets resolved_windows_targets
+    local edge_targets=() linux_targets=() windows_targets=()
     [[ -d "$source_dir" ]] || return 0
 
     EDGE_STAGE_DIR=$(mktemp -d "$INSTALL_DIR/.edge-stage.XXXXXX")
@@ -280,10 +280,41 @@ prepare_edge_assets() {
         "$EDGE_STAGE_DIR/edge-artifacts.env" \
         "$INSTALL_DIR/edge/edge-artifacts.env" \
         "$INSTALL_DIR/edge"); then
-        log_error "cannot resolve Edge target; supported hosts are x86_64/amd64 and aarch64/arm64, and ONGRID_EDGE_TARGETS accepts linux-amd64 linux-arm64"
+        log_error "cannot resolve Edge target; supported hosts are x86_64/amd64 and aarch64/arm64, and ONGRID_EDGE_TARGETS accepts linux-amd64 linux-arm64; ONGRID_WINDOWS_EDGE_TARGETS accepts windows-amd64"
         return 1
     fi
     read -r -a edge_targets <<<"$resolved_targets"
+
+    # Windows artifacts live under edge/windows/ and are never part of the
+    # Linux upgrade bundle. Resolve the selection separately so an explicit
+    # empty value can keep older installs Linux-only.
+    if ! resolved_windows_targets=$(ongrid_resolve_windows_edge_targets \
+        "${ONGRID_WINDOWS_EDGE_TARGETS+1}" \
+        "${ONGRID_WINDOWS_EDGE_TARGETS:-}" \
+        "$INSTALL_DIR/.env" \
+        "$EDGE_STAGE_DIR/edge-artifacts.env" \
+        "$INSTALL_DIR/edge/edge-artifacts.env" \
+        "$SCRIPT_DIR/.env.example"); then
+        log_error "cannot resolve Windows Edge target; ONGRID_WINDOWS_EDGE_TARGETS accepts windows-amd64"
+        return 1
+    fi
+    windows_targets=()
+    if [[ -n "$resolved_windows_targets" ]]; then
+        read -r -a windows_targets <<<"$resolved_windows_targets"
+    fi
+    # A legacy ONGRID_EDGE_TARGETS may still list windows-amd64; route it away
+    # from the bundle loop instead of failing the Linux build.
+    for target in "${edge_targets[@]}"; do
+        case "$target" in
+            windows-amd64)
+                case " ${windows_targets[*]:-} " in
+                    *" windows-amd64 "*) ;;
+                    *) windows_targets+=(windows-amd64) ;;
+                esac
+                ;;
+            *) linux_targets+=("$target") ;;
+        esac
+    done
 
     local embedded=0
     compgen -G "$EDGE_STAGE_DIR/ongrid-edge-linux-*" >/dev/null && embedded=1
@@ -294,20 +325,28 @@ prepare_edge_assets() {
         }
         log_info "prefetching checksum-verified Edge assets for $resolved_targets before stopping the old stack"
         ongrid_with_shared_asset_umask "$EDGE_STAGE_DIR/fetch-edge-assets.sh" \
-            "$EDGE_STAGE_DIR" "$NEW_VERSION" "${edge_targets[@]}"
+            "$EDGE_STAGE_DIR" "$NEW_VERSION" \
+            ${linux_targets[@]+"${linux_targets[@]}"} \
+            ${windows_targets[@]+"${windows_targets[@]}"}
     else
         log_info "using complete Edge binaries embedded for $resolved_targets"
-        ongrid_validate_embedded_edge_assets "$EDGE_STAGE_DIR" "$resolved_targets" || return 1
+        ongrid_validate_embedded_edge_assets "$EDGE_STAGE_DIR" "${linux_targets[*]}" || return 1
+        if (( ${#windows_targets[@]} > 0 )) && [[ -d "$EDGE_STAGE_DIR/windows" ]]; then
+            ongrid_validate_embedded_edge_assets "$EDGE_STAGE_DIR" "${windows_targets[*]}" || return 1
+        fi
     fi
 
     deps_tag=$(ongrid_edge_config_value "$EDGE_STAGE_DIR/edge-artifacts.env" \
         ONGRID_EDGE_DEPS_TAG 2>/dev/null || true)
     ongrid_write_edge_artifact_config "$EDGE_STAGE_DIR/edge-artifacts.env" \
-        "$deps_tag" "$resolved_targets"
-    for target in "${edge_targets[@]}"; do
+        "$deps_tag" "${linux_targets[*]}" "${windows_targets[*]}"
+    for target in ${linux_targets[@]+"${linux_targets[@]}"}; do
         ongrid_with_shared_asset_umask "$EDGE_STAGE_DIR/build-edge-bundle.sh" \
             "$EDGE_STAGE_DIR" "$NEW_VERSION" "$target"
     done
+    # A Linux-only upgrade must not delete Windows installers that the Manager
+    # already serves.
+    ongrid_preserve_windows_edge_assets "$EDGE_STAGE_DIR" "$INSTALL_DIR/edge" || return 1
 }
 
 on_upgrade_error() {
