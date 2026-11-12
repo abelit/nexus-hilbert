@@ -773,6 +773,51 @@ git commit -m "feat(manager): allow windows services in restart_service"
 
 ---
 
+## Task 7c: External MCP restart_service case-insensitive schema
+
+**Files:**
+- Modify: `internal/manager/biz/aiops/tools/restart_service.go`
+- Modify: `internal/manager/service/externalmcp/actions.go`
+- Modify: `internal/manager/service/externalmcp/*_test.go`
+
+**Interfaces:**
+- Produces: an exported `tools.RestartServicePattern()` used by both the main tool and external MCP.
+
+- [ ] **Step 1: Write a failing test**
+
+Add an external MCP test that calls `ActionTools` with `service: "W3SVC"` and asserts the schema accepts it (and `spooler` is rejected). Add a tools-package test that `RestartServicePattern()` matches every allow-list entry in lower/upper case.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `go test ./internal/manager/service/externalmcp -run RestartService -count=1`
+Expected: FAIL because external MCP still builds a case-sensitive `enum`.
+
+- [ ] **Step 3: Export and reuse the pattern**
+
+- Export `RestartServicePattern()` from `internal/manager/biz/aiops/tools/restart_service.go`.
+- In `internal/manager/service/externalmcp/actions.go`, replace `enumSchema(tools.AllowedRestartServices...)` with a string schema carrying the exported pattern.
+- Keep the runtime allow-list as the second gate.
+
+- [ ] **Step 4: Run the tests**
+
+Run:
+
+```bash
+go test ./internal/manager/service/externalmcp -run RestartService -count=1
+go test ./internal/manager/biz/aiops/tools -run RestartService -count=1
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/manager/biz/aiops/tools/restart_service.go internal/manager/service/externalmcp/actions.go internal/manager/service/externalmcp
+git commit -m "fix(externalmcp): accept mixed-case restart services"
+```
+
+---
+
 ## Task 7.5: Windows host_files implementations
 
 **Files:**
