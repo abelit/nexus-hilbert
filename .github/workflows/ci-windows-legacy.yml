@@ -1,0 +1,53 @@
+name: CI Windows Legacy Build
+
+# Legacy Windows target is Windows Server 2008 R2 SP1 x64, which only runs Go
+# 1.20 binaries. The main module is Go 1.25, so tools/build-legacy-windows.sh
+# copies the edge closure into a temporary Go 1.20 module and builds the two
+# executables there. This job runs that harness and fails if either artifact is
+# missing, empty, or not built by Go 1.20.14.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'tools/build-legacy-windows.sh'
+      - 'scripts/test-legacy-build.sh'
+      - 'third_party/geminio/**'
+      - 'internal/compat/**'
+      - 'internal/edgeagent/**'
+      - 'internal/pkg/**'
+      - 'internal/skill/**'
+      - 'cmd/ongrid-edge/**'
+      - 'cmd/ongrid-edge-supervisor/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/ci-windows-legacy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-win-legacy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  legacy-windows-build:
+    name: Go 1.20 legacy Windows build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # The default toolchain only drives the test; the harness pins every go
+      # invocation to GOTOOLCHAIN=go1.20.14.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.x'
+          cache: false
+
+      - name: Build and verify legacy Windows binaries
+        run: bash scripts/test-legacy-build.sh

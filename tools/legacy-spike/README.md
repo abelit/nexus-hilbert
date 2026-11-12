@@ -12,7 +12,7 @@
 
 - `main.go`：探针主逻辑，仅使用 Go 1.20 标准库和 geminio client。
 - `main_test.go`：纯逻辑测试（参数解析、`/healthz` URL 归一化、TLS 版本名、本地 httptest TLS 1.2 检查）。不伪造 Windows 运行结果。
-- `third_party/geminio/`：从 module cache 复制的 geminio `v1.3.0-rc.2`，为 Go 1.20 做了最小补丁（见下）。
+- `../../third_party/geminio/`：从 module cache 复制的 geminio `v1.3.0-rc.2`，为 Go 1.20 做了最小补丁（见下）。Task 10 起该副本位于仓库根目录，供 legacy Windows 构建与探针共用。
 
 ## geminio 补丁说明
 
@@ -20,7 +20,7 @@
 
 - `go` 指令改为 `1.20`，删除 `toolchain` 行。
 - 删除仅测试/工具使用的依赖：`github.com/golang/mock`、`github.com/singchia/go-xtables`。
-- 删除 `third_party/geminio` 内的 `*_test.go`、`application/mock`、`examples/`、`test/`、`tools/`、`docs/`，以及 `conn/example`、`conn/bench`、`conn/batch`、`multiplexer/example`、`multiplexer/bench` 等示例/压测目录，避免非生产依赖进入构建图。
+- 删除 `third_party/geminio`（现位于仓库根目录）内的 `*_test.go`、`application/mock`、`examples/`、`test/`、`tools/`、`docs/`，以及 `conn/example`、`conn/bench`、`conn/batch`、`multiplexer/example`、`multiplexer/bench` 等示例/压测目录，避免非生产依赖进入构建图。
 - `github.com/jumboframes/armorigo` 从上游的 `v0.2.5` 固定到本地缓存可用的 `v0.4.1`（`go 1.18`，`log`/`synchub` API 兼容）。
 - 显式 pin `golang.org/x/crypto v0.31.0`（`go 1.20`）和 `golang.org/x/sys v0.28.0`（`go 1.18`）。当前 client-only 路径没有 import 它们，但 pin 可防止后续扩展时 MVS 选到要求 Go 1.21+ 的版本。
 

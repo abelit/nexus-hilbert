@@ -12,4 +12,4 @@ require (
 	k8s.io/klog/v2 v2.120.1 // indirect
 )
 
-replace github.com/singchia/geminio => ./third_party/geminio
+replace github.com/singchia/geminio => ../../third_party/geminio

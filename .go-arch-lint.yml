@@ -156,9 +156,12 @@ excludeFiles:
 # `npm install` makes the scan report node_modules' Go files as unattached.
 # tools/legacy-spike and tools/windows-installer are separate Go modules (Go
 # 1.20 spikes/installer), not part of the production dependency graph.
+# third_party/geminio is the patched Go 1.20 geminio copy used by the legacy
+# Windows build and the Phase 0 spike; it is a separate module as well.
 # .claude/worktrees holds local agent worktrees, not project source.
 exclude:
   - web/node_modules
   - tools/legacy-spike
   - tools/windows-installer
+  - third_party/geminio
   - .claude
