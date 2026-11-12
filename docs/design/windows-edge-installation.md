@@ -280,10 +280,10 @@ Windows 插件二进制命名：
 | 插件 | 二进制 |
 | --- | --- |
 | `hostmetrics` | `windows_exporter.exe` |
-| `procmetrics` | `process_exporter.exe`（若可用） |
-| `logs` / `traces` / `profiles` | `otelcol-contrib.exe` |
-| `databasemetrics` | `mysqld_exporter.exe` 等 |
+| `logs` / `traces` | `otelcol-contrib.exe` |
+| `databasemetrics` | `mysqld_exporter.exe`、`postgres_exporter.exe`、`redis_exporter.exe` |
 | `metrics` / `custommetrics` | 进程内，无二进制 |
+| `procmetrics` / `profiles` | Windows 不注册（无打包二进制） |
 
 需要改动：
 
@@ -291,6 +291,38 @@ Windows 插件二进制命名：
 - 插件二进制路径统一使用 `.exe`；
 - `hostmetrics` 的默认监听地址和指标前缀按 Windows exporter 适配；
 - 不支持的插件在 Manager 侧显示为不可用，不静默失败。
+
+#### 7.4.1 插件二进制版本与打包
+
+Windows 插件二进制随 `VERSION` 作为版本化 Release 附件发布，不进入不可变的 Linux 依赖归档。版本固定在 `Makefile`：
+
+| 插件 | 二进制 | 版本变量 | 固定版本 | 上游资产 |
+| --- | --- | --- | --- | --- |
+| `hostmetrics` | `windows_exporter.exe` | `WINDOWS_EXPORTER_VERSION` | `0.29.0` | `windows_exporter-0.29.0-amd64.exe` |
+| `logs` / `traces` | `otelcol-contrib.exe` | `OTELCOL_VERSION` | `0.157.0` | `otelcol-contrib_0.157.0_windows_amd64.tar.gz` |
+| `databasemetrics`（mysql） | `mysqld_exporter.exe` | `MYSQLD_EXPORTER_VERSION` | `0.19.0` | `mysqld_exporter-0.19.0.windows-amd64.tar.gz` |
+| `databasemetrics`（postgresql） | `postgres_exporter.exe` | `POSTGRES_EXPORTER_VERSION` | `0.19.1` | `postgres_exporter-0.19.1.windows-amd64.tar.gz` |
+| `databasemetrics`（redis） | `redis_exporter.exe` | `REDIS_EXPORTER_VERSION` | `1.86.0` | `redis_exporter-v1.86.0.windows-amd64.zip` |
+
+`WINDOWS_EXPORTER_VERSION=0.29.0` 是 0.30 配置重写前的最后一个版本，保留 pre-0.30 参数：
+
+- `--web.listen-address`;
+- `--collectors.enabled`（逗号分隔）；
+- `--collector.textfile.directories`（textfile collector 默认关闭，仅在显式启用 `textfile` 时传入）。
+
+0.29.0 不提供 `--collectors.disabled`；Windows `hostmetrics` 配置必须通过 `collectors_enabled` 或 `extra_args` 选择 collector，不能依赖 `collectors_disabled`。升级到 >= 0.30 前必须重新验证 `internal/edgeagent/plugins/hostmetrics` 的参数契约。
+
+数据库 exporter 能力按上游资产决定：
+
+- `percona/mongodb_exporter` 0.51.0 只发布 darwin/linux 资产，没有 Windows amd64 资产。因此 Windows 的 `databasemetrics` 能力只包含 mysql/postgresql/redis，不打包 `mongodb_exporter.exe`，Manager 不应向 Windows Edge 下发 mongodb source。若后续需要 mongodb，必须先确认上游 Windows 资产或换用其他 exporter，不能静默注册缺二进制的 source。
+- `redis_exporter` 上游只发布 `.zip`，构建机需要 `unzip`；缺失时 fetch 目标明确报错。
+
+获取与发布：
+
+- `make fetch-edge-plugins-windows`（`fetch-windows-exporter` + `fetch-otelcol-windows` + `fetch-db-exporters-windows`）把插件下载并校验到 `bin/windows-amd64/<plugin>.exe`；目标已存在时跳过。校验来源分别为 windows_exporter 的 `sha256sums.txt`、otelcol 的 `opentelemetry-collector-releases_otelcol-contrib_windows_checksums.txt`、各 DB exporter 的 `sha256sums.txt`。
+- `dist/build-edge-attachments.sh edge <version> <out> windows-amd64` 为每个插件生成 `ongrid-edge-windows-amd64-<version>-<plugin>.exe` 及 `.sha256` sidecar；任一必需插件缺失即构建失败。
+- `fetch-edge-assets.sh` 下载这些版本化附件，并同时 stage 到 `windows/modern-amd64/plugins/` 与 `windows/legacy-amd64/plugins/`，供 manifest 生成器引用。
+- `scripts/test-windows-plugin-assets.sh` 用 fixture 二进制校验附件、sidecar、缺失插件失败路径和版本固定。
 
 ## 8. Manager 与 UI
 

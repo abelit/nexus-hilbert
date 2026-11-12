@@ -40,6 +40,10 @@ EDGE_BIN_ROOT="$bin_root" \
 mkdir -p "$bin_root/windows-amd64"
 printf 'supervisor payload\n' > "$bin_root/windows-amd64/ongrid-edge-supervisor.exe"
 printf 'worker payload\n' > "$bin_root/windows-amd64/ongrid-edge-worker.exe"
+windows_plugins=(windows_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter)
+for plugin in "${windows_plugins[@]}"; do
+    printf '%s payload\n' "$plugin" > "$bin_root/windows-amd64/$plugin.exe"
+done
 EDGE_BIN_ROOT="$bin_root" \
     bash "$build_script" edge vtest "$attachments" windows-amd64
 
@@ -197,6 +201,22 @@ cmp -s "$bin_root/windows-amd64/ongrid-edge-supervisor.exe" \
 cmp -s "$bin_root/windows-amd64/ongrid-edge-worker.exe" \
     "$windows_dest/windows/modern-amd64/ongrid-edge-worker.exe" \
     || fail "staged windows worker does not match the verified attachment"
+for plugin in "${windows_plugins[@]}"; do
+    grep -Fqx "https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-${plugin}.exe" \
+        "$tmp_dir/windows-curl.log" \
+        || fail "windows ${plugin} attachment was not downloaded directly"
+    grep -Fqx "https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-${plugin}.exe.sha256" \
+        "$tmp_dir/windows-curl.log" \
+        || fail "windows ${plugin} checksum sidecar was not downloaded"
+    for variant in modern-amd64 legacy-amd64; do
+        staged="$windows_dest/windows/$variant/plugins/${plugin}.exe"
+        [[ -f "$staged" ]] || fail "windows ${plugin} was not staged under windows/$variant/plugins"
+        cmp -s "$bin_root/windows-amd64/$plugin.exe" "$staged" \
+            || fail "staged windows $variant $plugin does not match the verified attachment"
+    done
+done
+[[ ! -e "$windows_dest/windows/modern-amd64/plugins/mongodb_exporter.exe" ]] \
+    || fail "mongodb_exporter was staged without a Windows upstream asset"
 if grep -Fq 'edge-deps-' "$tmp_dir/windows-curl.log"; then
     fail "windows staging downloaded a linux dependency archive"
 fi

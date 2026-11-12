@@ -552,6 +552,13 @@ FETCH_CURL_FLAGS ?= -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-t
 # default install works without forcing users to compile their own.
 OTELCOL_VERSION ?= 0.157.0
 
+# windows_exporter pinned for the Windows hostmetrics plugin. 0.29.0 is the
+# last release before the 0.30 config-file rewrite and keeps the pre-0.30 flag
+# contract used by internal/edgeagent/plugins/hostmetrics:
+#   --web.listen-address, --collectors.enabled, --collector.textfile.directories
+# Do not bump to >= 0.30 without re-validating those args.
+WINDOWS_EXPORTER_VERSION ?= 0.29.0
+
 .PHONY: fetch-otelcol
 fetch-otelcol: ## [release] 下载 otelcol-contrib 到 bin/<os>-<arch>/otelcol-contrib (linux-only)
 	@for target in $(EDGE_PLUGIN_ARCHES); do \
@@ -579,6 +586,55 @@ fetch-otelcol: ## [release] 下载 otelcol-contrib 到 bin/<os>-<arch>/otelcol-c
 		echo "[otelcol] staged $$dest"; \
 	done
 	@echo "[otelcol] note: contrib distro is ~200MB per platform; operators wanting smaller agent can build a custom OCB collector and drop it under /usr/local/lib/ongrid-edge/otelcol-contrib"
+
+.PHONY: fetch-otelcol-windows
+fetch-otelcol-windows: ## [release] 下载 otelcol-contrib Windows 版到 bin/windows-amd64/otelcol-contrib.exe
+	@dest=$(BIN_DIR)/windows-amd64/otelcol-contrib.exe; \
+	if [ -f $$dest ]; then \
+		echo "[otelcol-windows] $$dest already present — skip"; \
+		exit 0; \
+	fi; \
+	mkdir -p $(BIN_DIR)/windows-amd64; \
+	asset=otelcol-contrib_$(OTELCOL_VERSION)_windows_amd64.tar.gz; \
+	checksums=opentelemetry-collector-releases_otelcol-contrib_windows_checksums.txt; \
+	base=https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$(OTELCOL_VERSION); \
+	tmpdir=$$(mktemp -d); trap 'rm -rf "$$tmpdir"' EXIT; \
+	echo "[otelcol-windows] downloading $$base/$$asset"; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/$$asset $$base/$$asset || { echo "otelcol-contrib windows download failed"; exit 1; }; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/$$checksums $$base/$$checksums || { echo "otelcol-contrib windows checksums download failed"; exit 1; }; \
+	expected=$$(awk -v asset="$$asset" '$$2 == asset || $$2 == "*" asset { print $$1; exit }' $$tmpdir/$$checksums); \
+	test -n "$$expected" || { echo "otelcol-contrib windows checksum missing for $$asset"; exit 1; }; \
+	if command -v sha256sum >/dev/null 2>&1; then actual=$$(sha256sum $$tmpdir/$$asset | awk '{print $$1}'); else actual=$$(shasum -a 256 $$tmpdir/$$asset | awk '{print $$1}'); fi; \
+	test "$$actual" = "$$expected" || { echo "otelcol-contrib windows checksum mismatch for $$asset"; exit 1; }; \
+	mkdir -p $$tmpdir/extract; \
+	tar -xzf $$tmpdir/$$asset -C $$tmpdir/extract || { echo "otelcol-contrib windows extract failed"; exit 1; }; \
+	found=$$(find $$tmpdir/extract -type f -name otelcol-contrib.exe -print -quit); \
+	test -n "$$found" || { echo "otelcol-contrib.exe missing in archive"; exit 1; }; \
+	install -m 0755 "$$found" $$dest; \
+	echo "[otelcol-windows] staged $$dest"
+
+# windows_exporter — the Windows hostmetrics source (the Linux bundle uses
+# node_exporter instead). Standalone .exe release asset with sha256sums.txt.
+.PHONY: fetch-windows-exporter
+fetch-windows-exporter: ## [release] 下载 windows_exporter 到 bin/windows-amd64/windows_exporter.exe (windows-only)
+	@dest=$(BIN_DIR)/windows-amd64/windows_exporter.exe; \
+	if [ -f $$dest ]; then \
+		echo "[windows_exporter] $$dest already present — skip"; \
+		exit 0; \
+	fi; \
+	mkdir -p $(BIN_DIR)/windows-amd64; \
+	asset=windows_exporter-$(WINDOWS_EXPORTER_VERSION)-amd64.exe; \
+	base=https://github.com/prometheus-community/windows_exporter/releases/download/v$(WINDOWS_EXPORTER_VERSION); \
+	tmpdir=$$(mktemp -d); trap 'rm -rf "$$tmpdir"' EXIT; \
+	echo "[windows_exporter] downloading $$base/$$asset"; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/$$asset $$base/$$asset || { echo "windows_exporter download failed"; exit 1; }; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/sha256sums.txt $$base/sha256sums.txt || { echo "windows_exporter checksums download failed"; exit 1; }; \
+	expected=$$(awk -v asset="$$asset" '$$2 == asset || $$2 == "*" asset { print $$1; exit }' $$tmpdir/sha256sums.txt); \
+	test -n "$$expected" || { echo "windows_exporter checksum missing for $$asset"; exit 1; }; \
+	if command -v sha256sum >/dev/null 2>&1; then actual=$$(sha256sum $$tmpdir/$$asset | awk '{print $$1}'); else actual=$$(shasum -a 256 $$tmpdir/$$asset | awk '{print $$1}'); fi; \
+	test "$$actual" = "$$expected" || { echo "windows_exporter checksum mismatch for $$asset"; exit 1; }; \
+	install -m 0755 $$tmpdir/$$asset $$dest; \
+	echo "[windows_exporter] staged $$dest"
 
 # node_exporter — host metric source bundled with the edge package
 # (CPU / memory / disk / network / load). Without this, install-edge
@@ -716,6 +772,83 @@ fetch-mongodb-exporter: ## [release] 下载 mongodb_exporter 到 bin/<os>-<arch>
 		echo "[mongodb_exporter] staged $$dest"; \
 	done
 
+# Windows database exporters. Only sources whose upstream release publishes a
+# windows-amd64 asset are packaged:
+#   mysqld_exporter 0.19.0  windows-amd64.tar.gz
+#   postgres_exporter 0.19.1 windows-amd64.tar.gz
+#   redis_exporter 1.86.0   windows-amd64.zip
+# percona/mongodb_exporter 0.51.0 has no Windows asset, so the Windows
+# databasemetrics capability omits the mongodb source (see the design doc).
+.PHONY: fetch-mysqld-exporter-windows fetch-postgres-exporter-windows fetch-redis-exporter-windows
+
+fetch-mysqld-exporter-windows: ## [release] 下载 mysqld_exporter Windows 版到 bin/windows-amd64/mysqld_exporter.exe
+	@dest=$(BIN_DIR)/windows-amd64/mysqld_exporter.exe; \
+	if [ -f $$dest ]; then echo "[mysqld_exporter] $$dest already present — skip"; exit 0; fi; \
+	mkdir -p $(BIN_DIR)/windows-amd64; \
+	asset=mysqld_exporter-$(MYSQLD_EXPORTER_VERSION).windows-amd64.tar.gz; \
+	base=https://github.com/prometheus/mysqld_exporter/releases/download/v$(MYSQLD_EXPORTER_VERSION); \
+	tmpdir=$$(mktemp -d); trap 'rm -rf "$$tmpdir"' EXIT; \
+	echo "[mysqld_exporter] downloading $$base/$$asset"; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/$$asset $$base/$$asset || { echo "mysqld_exporter windows download failed"; exit 1; }; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/sha256sums.txt $$base/sha256sums.txt || { echo "mysqld_exporter windows checksums download failed"; exit 1; }; \
+	expected=$$(awk -v asset="$$asset" '$$2 == asset || $$2 == "*" asset { print $$1; exit }' $$tmpdir/sha256sums.txt); \
+	test -n "$$expected" || { echo "mysqld_exporter windows checksum missing for $$asset"; exit 1; }; \
+	if command -v sha256sum >/dev/null 2>&1; then actual=$$(sha256sum $$tmpdir/$$asset | awk '{print $$1}'); else actual=$$(shasum -a 256 $$tmpdir/$$asset | awk '{print $$1}'); fi; \
+	test "$$actual" = "$$expected" || { echo "mysqld_exporter windows checksum mismatch for $$asset"; exit 1; }; \
+	mkdir -p $$tmpdir/extract; \
+	tar -xzf $$tmpdir/$$asset -C $$tmpdir/extract || { echo "mysqld_exporter windows extract failed"; exit 1; }; \
+	found=$$(find $$tmpdir/extract -type f -name mysqld_exporter.exe -print -quit); \
+	test -n "$$found" || { echo "mysqld_exporter.exe missing in archive"; exit 1; }; \
+	install -m 0755 "$$found" $$dest; \
+	echo "[mysqld_exporter] staged $$dest"
+
+fetch-postgres-exporter-windows: ## [release] 下载 postgres_exporter Windows 版到 bin/windows-amd64/postgres_exporter.exe
+	@dest=$(BIN_DIR)/windows-amd64/postgres_exporter.exe; \
+	if [ -f $$dest ]; then echo "[postgres_exporter] $$dest already present — skip"; exit 0; fi; \
+	mkdir -p $(BIN_DIR)/windows-amd64; \
+	asset=postgres_exporter-$(POSTGRES_EXPORTER_VERSION).windows-amd64.tar.gz; \
+	base=https://github.com/prometheus-community/postgres_exporter/releases/download/v$(POSTGRES_EXPORTER_VERSION); \
+	tmpdir=$$(mktemp -d); trap 'rm -rf "$$tmpdir"' EXIT; \
+	echo "[postgres_exporter] downloading $$base/$$asset"; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/$$asset $$base/$$asset || { echo "postgres_exporter windows download failed"; exit 1; }; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/sha256sums.txt $$base/sha256sums.txt || { echo "postgres_exporter windows checksums download failed"; exit 1; }; \
+	expected=$$(awk -v asset="$$asset" '$$2 == asset || $$2 == "*" asset { print $$1; exit }' $$tmpdir/sha256sums.txt); \
+	test -n "$$expected" || { echo "postgres_exporter windows checksum missing for $$asset"; exit 1; }; \
+	if command -v sha256sum >/dev/null 2>&1; then actual=$$(sha256sum $$tmpdir/$$asset | awk '{print $$1}'); else actual=$$(shasum -a 256 $$tmpdir/$$asset | awk '{print $$1}'); fi; \
+	test "$$actual" = "$$expected" || { echo "postgres_exporter windows checksum mismatch for $$asset"; exit 1; }; \
+	mkdir -p $$tmpdir/extract; \
+	tar -xzf $$tmpdir/$$asset -C $$tmpdir/extract || { echo "postgres_exporter windows extract failed"; exit 1; }; \
+	found=$$(find $$tmpdir/extract -type f -name postgres_exporter.exe -print -quit); \
+	test -n "$$found" || { echo "postgres_exporter.exe missing in archive"; exit 1; }; \
+	install -m 0755 "$$found" $$dest; \
+	echo "[postgres_exporter] staged $$dest"
+
+fetch-redis-exporter-windows: ## [release] 下载 redis_exporter Windows 版到 bin/windows-amd64/redis_exporter.exe
+	@dest=$(BIN_DIR)/windows-amd64/redis_exporter.exe; \
+	if [ -f $$dest ]; then echo "[redis_exporter] $$dest already present — skip"; exit 0; fi; \
+	command -v unzip >/dev/null 2>&1 || { echo "unzip is required to extract the redis_exporter windows zip"; exit 1; }; \
+	mkdir -p $(BIN_DIR)/windows-amd64; \
+	asset=redis_exporter-v$(REDIS_EXPORTER_VERSION).windows-amd64.zip; \
+	base=https://github.com/oliver006/redis_exporter/releases/download/v$(REDIS_EXPORTER_VERSION); \
+	tmpdir=$$(mktemp -d); trap 'rm -rf "$$tmpdir"' EXIT; \
+	echo "[redis_exporter] downloading $$base/$$asset"; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/$$asset $$base/$$asset || { echo "redis_exporter windows download failed"; exit 1; }; \
+	curl $(FETCH_CURL_FLAGS) -o $$tmpdir/sha256sums.txt $$base/sha256sums.txt || { echo "redis_exporter windows checksums download failed"; exit 1; }; \
+	expected=$$(awk -v asset="$$asset" '$$2 == asset || $$2 == "*" asset { print $$1; exit }' $$tmpdir/sha256sums.txt); \
+	test -n "$$expected" || { echo "redis_exporter windows checksum missing for $$asset"; exit 1; }; \
+	if command -v sha256sum >/dev/null 2>&1; then actual=$$(sha256sum $$tmpdir/$$asset | awk '{print $$1}'); else actual=$$(shasum -a 256 $$tmpdir/$$asset | awk '{print $$1}'); fi; \
+	test "$$actual" = "$$expected" || { echo "redis_exporter windows checksum mismatch for $$asset"; exit 1; }; \
+	mkdir -p $$tmpdir/extract; \
+	unzip -q $$tmpdir/$$asset -d $$tmpdir/extract || { echo "redis_exporter windows extract failed"; exit 1; }; \
+	found=$$(find $$tmpdir/extract -type f -name redis_exporter.exe -print -quit); \
+	test -n "$$found" || { echo "redis_exporter.exe missing in archive"; exit 1; }; \
+	install -m 0755 "$$found" $$dest; \
+	echo "[redis_exporter] staged $$dest"
+
+.PHONY: fetch-db-exporters-windows fetch-edge-plugins-windows
+fetch-db-exporters-windows: fetch-mysqld-exporter-windows fetch-postgres-exporter-windows fetch-redis-exporter-windows ## [release] 下载 Windows 数据库 exporter 到 bin/windows-amd64/ (windows-only)
+fetch-edge-plugins-windows: fetch-windows-exporter fetch-otelcol-windows fetch-db-exporters-windows ## [release] 下载全部 Windows 插件二进制到 bin/windows-amd64/ (windows-only)
+
 # package deps deliberately exclude `build-linux` and `build-web`:
 #   - the Compose installer pulls the published manager image at install time.
 #   - build-web produces web/dist/ which docker-build-web doesn't use
@@ -814,7 +947,7 @@ build-edge-deps-attachments: fetch-obi fetch-otelcol fetch-node-exporter fetch-p
 	MONGODB_EXPORTER_VERSION="$(MONGODB_EXPORTER_VERSION)" \
 		bash dist/build-edge-attachments.sh deps "$(EDGE_DEPS_TAG)" "$(EDGE_ATTACHMENTS_OUT)" $(EDGE_ATTACHMENT_TARGETS)
 
-build-edge-version-attachments: build-edge-linux-amd64 build-edge-linux-arm64 build-edge-windows-amd64 ## [release] 构建随 VERSION 变化的 ongrid-edge 附件
+build-edge-version-attachments: build-edge-linux-amd64 build-edge-linux-arm64 build-edge-windows-amd64 fetch-edge-plugins-windows ## [release] 构建随 VERSION 变化的 ongrid-edge 附件
 	bash dist/build-edge-attachments.sh edge "$(VERSION)" "$(EDGE_ATTACHMENTS_OUT)" $(EDGE_VERSION_ATTACHMENT_TARGETS)
 
 build-edge-attachments: build-edge-deps-attachments build-edge-version-attachments ## [release] 构建全部 CNB Edge 直链附件
@@ -865,6 +998,7 @@ test-edge-attachments: ## [test] 校验附件构建、直链下载和 checksum �
 	bash scripts/test-edge-assets-lib.sh
 	bash scripts/test-edge-bundle.sh
 	bash scripts/test-windows-attachments.sh
+	bash scripts/test-windows-plugin-assets.sh
 	bash scripts/test-verify-cnb-release-attachments.sh
 	bash scripts/test-ensure-cnb-release.sh
 	bash scripts/test-publish-cnb-release-attachments.sh

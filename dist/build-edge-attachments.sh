@@ -22,6 +22,14 @@ deps=(
     redis_exporter mongodb_exporter otelcol-contrib obi obi.NOTICES
 )
 
+# Windows plugin payloads are versioned (not part of the immutable Linux deps
+# archive). mongodb_exporter is absent because percona publishes no Windows
+# amd64 asset; the Windows databasemetrics capability omits the mongodb source.
+windows_plugins=(
+    windows_exporter otelcol-contrib mysqld_exporter postgres_exporter
+    redis_exporter
+)
+
 mkdir -p "$OUT_DIR"
 work=$(mktemp -d "${TMPDIR:-/tmp}/ongrid-edge-attachments.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -101,7 +109,20 @@ EOF
                     install -m 0755 "$worker_src" "$worker_output"
                     write_sidecar "$supervisor_output"
                     write_sidecar "$worker_output"
-                    output="$supervisor_output $worker_output"
+                    outputs=("$supervisor_output" "$worker_output")
+                    # Every Windows plugin is mandatory: a release that omits
+                    # one would register a plugin on the agent whose binary is
+                    # never staged, leaving it permanently unhealthy.
+                    for plugin in "${windows_plugins[@]}"; do
+                        plugin_src="$BIN_ROOT/$target/$plugin.exe"
+                        [[ -s "$plugin_src" ]] \
+                            || { echo "build-edge-attachments: missing $plugin_src" >&2; exit 1; }
+                        plugin_output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}-${plugin}.exe"
+                        install -m 0755 "$plugin_src" "$plugin_output"
+                        write_sidecar "$plugin_output"
+                        outputs+=("$plugin_output")
+                    done
+                    output="${outputs[*]}"
                     ;;
                 *)
                     src="$BIN_ROOT/$target/ongrid-edge"

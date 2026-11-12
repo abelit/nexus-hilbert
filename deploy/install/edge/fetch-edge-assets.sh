@@ -130,6 +130,14 @@ deps=(
     redis_exporter mongodb_exporter otelcol-contrib obi obi.NOTICES
 )
 
+# Windows plugin binaries are versioned attachments. Both variants read the
+# same payload; the legacy build only changes the supervisor/worker.
+# mongodb_exporter is omitted because upstream publishes no Windows asset.
+windows_plugins=(
+    windows_exporter otelcol-contrib mysqld_exporter postgres_exporter
+    redis_exporter
+)
+
 for target in "${TARGETS[@]}"; do
     case "$target" in
         linux-amd64|linux-arm64)
@@ -166,6 +174,18 @@ for target in "${TARGETS[@]}"; do
                 windows_name="ongrid-edge-windows-amd64-${VERSION}-${component}.exe"
                 windows_binary=$(download_verified "$VERSION" "$windows_name")
                 install -m 0755 "$windows_binary" "$windows_dir/ongrid-edge-${component}.exe"
+            done
+            # Plugin payloads are shared by the modern and legacy variants.
+            # Stage them under both so the manifest can reference either tree
+            # without a second download.
+            modern_plugins_dir="$windows_dir/plugins"
+            legacy_plugins_dir="$DEST_DIR/windows/legacy-amd64/plugins"
+            mkdir -p "$modern_plugins_dir" "$legacy_plugins_dir"
+            for plugin in "${windows_plugins[@]}"; do
+                windows_name="ongrid-edge-windows-amd64-${VERSION}-${plugin}.exe"
+                windows_binary=$(download_verified "$VERSION" "$windows_name")
+                install -m 0755 "$windows_binary" "$modern_plugins_dir/${plugin}.exe"
+                install -m 0755 "$windows_binary" "$legacy_plugins_dir/${plugin}.exe"
             done
             ;;
     esac
