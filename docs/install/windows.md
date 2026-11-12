@@ -18,7 +18,7 @@
 
 - 以本地管理员身份运行安装器；普通用户会直接失败。
 - 目标主机可访问 Manager 的 HTTPS 端口和 `--server-edge-addr` 指定的 Frontier 地址（通常为 `443` 与 `40012`）。
-- 生产制品必须带 Authenticode 签名；安装器会校验每个下载文件的 SHA-256。
+- 生产制品应带 Authenticode 签名；安装器只校验每个下载文件的 SHA-256，不校验签名。
 - 安装器不修改 Manager 与 Edge 之间的隧道协议，服务名固定为 `ongrid-edge`。
 
 ### 2.2 Windows Server 2008 R2 SP1
@@ -35,13 +35,13 @@
 
    如仍使用 WinHTTP 下载，可同时安装 KB3140245 并设置 `DefaultSecureProtocols`。
 
-2. **SHA-2 代码签名补丁已安装。** 缺少 SHA-2 支持时，Authenticode 签名验证或系统组件会失败：
+2. **SHA-2 代码签名补丁已安装。** 缺少 SHA-2 支持时，Windows 可能拒绝加载 SHA-2 签名的二进制，相关系统组件也可能失败：
    - KB3033929：Windows 7 / Server 2008 R2 SHA-2 代码签名支持；
    - KB4474419：SHA-2 签名支持更新。
 
-   未安装补丁时安装器会返回明确错误，不会静默跳过签名校验。无法安装补丁的实验环境只能使用未签名的应急包，并自行承担完整性风险。
+   安装器本身只校验下载文件的 SHA-256，不做 Authenticode 签名校验；未安装补丁时，错误可能来自 Windows 加载器而不是安装器。无法安装补丁的实验环境只能使用未签名的应急包，并自行承担完整性风险。
 
-3. **PowerShell 2.0 可用。** 2008 R2 自带 PowerShell 2.0；下文命令不使用 PowerShell 3.0+ 语法。
+3. **PowerShell 2.0 可用。** 2008 R2 自带 PowerShell 2.0；下文命令不使用 PowerShell 3.0+ 语法（例如用 `certutil` 代替 `Get-FileHash`，用 `Select-Object -Last` 代替 `-Tail`）。
 4. **分发包来源可信。** 安装器文件从 Manager 主机或受控文件共享获取，并通过发布附件 `.sha256` 核对。
 
 ## 3. 获取安装器（GPO / SCCM / 文件共享）
@@ -76,7 +76,7 @@ ongrid-edge-windows-amd64-<version>-installer.exe.sha256
 在目标机核对文件：
 
 ```powershell
-Get-FileHash .\ongrid-edge-installer.exe -Algorithm SHA256
+certutil -hashfile .\ongrid-edge-installer.exe SHA256
 ```
 
 ## 4. 安装命令
@@ -108,7 +108,7 @@ $f="$env:TEMP\ongrid-edge-installer.exe"
 - `--tls-insecure` 只用于自签名测试；生产环境改用 `--tls-ca-file` 或 `--tls-server-name`。
 - `--variant auto|modern|legacy` 控制制品选择；默认 `auto`。
 - `--dry-run` 只校验参数，不修改主机。
-- `--log-file <path>` 写入安装器日志；日志不包含 token 或 secret。
+- `--log-file <path>` 为预留参数；当前版本尚未写入安装器日志。
 - 单设备命令会把 key 放在命令行上。批量部署优先使用 enrollment token，并限制 GPO/SCCM 任务和命令行的可见范围。
 - 安装器把 secret 写入临时配置文件（受限 ACL），交给 `supervisor.exe --install --config-file` 后立即删除；明文不落长期文件。服务端 secret 使用 DPAPI 机器级加密保存为 `C:\ProgramData\ongrid-edge\secrets.enc`。
 
@@ -120,8 +120,8 @@ $f="$env:TEMP\ongrid-edge-installer.exe"
 sc.exe query ongrid-edge
 Get-Service ongrid-edge
 Get-Content C:\ProgramData\ongrid-edge\health.json
-Get-Content C:\ProgramData\ongrid-edge\supervisor.log -Tail 50
-Get-Content C:\ProgramData\ongrid-edge\worker-stderr.log -Tail 50
+Get-Content C:\ProgramData\ongrid-edge\supervisor.log | Select-Object -Last 50
+Get-Content C:\ProgramData\ongrid-edge\worker-stderr.log | Select-Object -Last 50
 ```
 
 预期：
@@ -245,7 +245,7 @@ sc.exe query ongrid-edge
 ## 10. 安全声明
 
 - **Windows Server 2008 R2 已 EOL。** 仅用于无法升级的隔离环境；限制入站访问、限制管理面来源，并尽快迁移。
-- 所有制品下载都校验 SHA-256；生产发布必须使用 Authenticode 签名。2008 R2 缺少 SHA-2 补丁时签名验证会失败。
+- 所有制品下载都校验 SHA-256。安装器不做 Authenticode 签名校验；生产发布应使用 Authenticode 签名，并在 2008 R2 上先安装 SHA-2 补丁，否则 Windows 加载器可能拒绝运行已签名的二进制。
 - 安装目录 ACL 为 SYSTEM + Administrators，禁止继承；`secrets.enc` 使用 DPAPI `CRYPTPROTECT_LOCAL_MACHINE`。
 - 安装器不把 token/secret 写入日志；临时配置文件在 supervisor 返回后删除。批量部署仍应控制 enrollment token 的分发范围，并定期轮换。
 - Legacy 不提供 bash、WebSSH、抓包、K8s、OBI/autoapm/profiles。不要把 Windows Edge 当作通用远程 shell 使用。

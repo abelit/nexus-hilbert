@@ -40,6 +40,9 @@ bash "$generator" "$windows_dir" vtest || fail "manifest generation failed"
 
 manifest="$windows_dir/manifest.json"
 [[ -s "$manifest" ]] || fail "manifest.json was not written"
+# nginx serves the manager directory as a non-root user.
+[[ "$(stat -c '%a' "$manifest")" == "644" ]] \
+    || fail "manifest.json is not world-readable (mode $(stat -c '%a' "$manifest"))"
 
 python3 - "$manifest" "$windows_dir" <<'PY' || exit 1
 import hashlib

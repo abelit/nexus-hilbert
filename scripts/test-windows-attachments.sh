@@ -119,6 +119,24 @@ grep -Fq 'for name in $(EDGE_VERSION_ATTACHMENT_NAMES)' "$makefile" \
 grep -Fq "EDGE_VERSION_ATTACHMENT_TARGETS" "$makefile" \
     || fail "Makefile does not declare the versioned attachment target set"
 
+# The override above proves the shared list tracks the builder. Also check the
+# production default: if legacy-windows-amd64 silently dropped out of
+# EDGE_VERSION_ATTACHMENT_TARGETS, verify/publish would omit legacy artifacts
+# and this test would still pass without the default expansion.
+mapfile -t default_names < <(
+    env -u EDGE_ATTACHMENT_TARGETS -u EDGE_VERSION_ATTACHMENT_TARGETS \
+        make -s -C "$repo_root" edge-version-attachment-names VERSION="$version"
+)
+for required in \
+    "ongrid-edge-windows-amd64-$version-supervisor.exe" \
+    "ongrid-edge-windows-amd64-$version-worker.exe" \
+    "ongrid-edge-windows-amd64-$version-installer.exe" \
+    "ongrid-edge-legacy-windows-amd64-$version-supervisor.exe" \
+    "ongrid-edge-legacy-windows-amd64-$version-worker.exe"; do
+    grep -Fxq "$required" < <(printf '%s\n' "${default_names[@]}") \
+        || fail "production default does not include $required"
+done
+
 # Both inputs are required. A missing worker must fail instead of emitting a
 # partial Windows release.
 rm "$bin_root/windows-amd64/ongrid-edge-worker.exe"

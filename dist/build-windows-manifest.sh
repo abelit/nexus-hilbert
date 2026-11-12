@@ -138,4 +138,7 @@ min_os_for() {
 
 mv -f "$tmp_manifest" "$manifest"
 trap - EXIT
+# mktemp creates 0600; nginx runs as a different user and must be able to
+# serve the manifest from the read-only /edge/windows/ route.
+chmod 0644 "$manifest"
 echo "wrote $manifest"

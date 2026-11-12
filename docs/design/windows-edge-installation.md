@@ -430,4 +430,5 @@ Windows 插件二进制随 `VERSION` 作为版本化 Release 附件发布，不�
 - **mongodb 不进入 Windows 插件集。** 上游 `percona/mongodb_exporter` 0.51.0 只发布 darwin/linux 资产；Windows 的 `databasemetrics` 仅包含 mysql/postgresql/redis，Manager 不得向 Windows Edge 下发 mongodb source。
 - **Windows 安装器引导位置。** 安装器作为版本化附件 `ongrid-edge-windows-amd64-<version>-installer.exe`（配 `.sha256`）发布，并固定暂存为 Manager 的 `windows/ongrid-edge-installer.exe`，UI 从 `https://<host>/edge/windows/ongrid-edge-installer.exe` 下载；manifest 不引用安装器自身。
 - **Windows 发布附件集合。** 每个 `VERSION` Release 同时包含 modern `supervisor`/`worker`/`installer`/5 个插件、legacy `supervisor`/`worker`，以及每个文件的 `.sha256`；`Makefile` 的发布与校验共用 `EDGE_VERSION_ATTACHMENT_NAMES`，避免不可变 Release 的部分发布。
+- **不可变 Release 的发布顺序。** `scripts/publish-cnb-release-attachments.sh` 拒绝向已部分填充的 Release 追加文件；如果某个 tag 在 Windows 制品加入前已经发布且缺少这些文件，不能原地补齐，必须重新切一个版本/tag 再发布。
 - **Windows manifest 生成。** `dist/build-windows-manifest.sh` 在制品暂存后遍历 `modern-amd64/` 和 `legacy-amd64/`，为每个文件写入 SHA-256 和 `bin`/`plugins` 目标；变体顺序和文件顺序固定，缺任一必需文件即失败。
