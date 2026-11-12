@@ -67,7 +67,7 @@ components:
       - internal/edgeagent/upgrademachine/**
       - internal/edgeagent/webshell/**
 
-  shared_pkg: { in: internal/pkg/** }
+  shared_pkg: { in: [internal/pkg/**, internal/compat/**] }
   api:        { in: api/** }
   cmd_manager: { in: cmd/ongrid/** }
   cmd_edge: { in: [cmd/ongrid-edge/**, cmd/ongrid-edge-supervisor/**] }
@@ -154,5 +154,11 @@ excludeFiles:
 
 # Installed web dependencies are not project Go code. Without this, a local
 # `npm install` makes the scan report node_modules' Go files as unattached.
+# tools/legacy-spike and tools/windows-installer are separate Go modules (Go
+# 1.20 spikes/installer), not part of the production dependency graph.
+# .claude/worktrees holds local agent worktrees, not project source.
 exclude:
   - web/node_modules
+  - tools/legacy-spike
+  - tools/windows-installer
+  - .claude
