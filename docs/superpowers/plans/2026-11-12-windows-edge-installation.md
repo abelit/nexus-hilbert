@@ -263,6 +263,62 @@ git commit -m "feat(edge): stage windows install artifacts on the manager"
 
 ---
 
+## Task 2.5: Persist and validate Windows staging in install/upgrade
+
+**Files:**
+- Modify: `deploy/install/install.sh`
+- Modify: `deploy/install/upgrade.sh`
+- Modify: `deploy/install/edge/edge-assets-lib.sh`
+- Modify: `deploy/install/.env.example`
+- Modify: `scripts/test-edge-assets-lib.sh`
+- Create: `scripts/test-windows-staging-upgrade.sh`
+
+**Interfaces:**
+- Produces: `ONGRID_WINDOWS_EDGE_TARGETS` persisted in `edge-artifacts.env`; `install.sh`/`upgrade.sh` validate it, stage `windows/`, and preserve it across upgrades without passing it to the Linux-only bundle builder.
+
+- [ ] **Step 1: Write failing tests**
+
+`scripts/test-windows-staging-upgrade.sh` asserts:
+
+- a Windows target is accepted by `edge-assets-lib.sh`;
+- `install.sh`/`upgrade.sh` pass `windows-amd64` to the fetch script but never to `deploy/install/edge/build-edge-bundle.sh`;
+- a simulated upgrade with a Linux-only target set preserves an existing `edge/windows/` tree;
+- the error strings list the supported Windows target.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `bash scripts/test-windows-staging-upgrade.sh`
+Expected: FAIL because the wiring does not exist.
+
+- [ ] **Step 3: Implement the wiring**
+
+- Add `ONGRID_WINDOWS_EDGE_TARGETS` to `.env.example` and the artifact config.
+- `edge-assets-lib.sh`: validate `windows-amd64` and include it in the resolved target list.
+- `install.sh`/`upgrade.sh`: pass Windows targets to `fetch-edge-assets.sh`; exclude them from `build-edge-bundle.sh`; update error strings.
+- Preserve `edge/windows/` across upgrade by staging it from the new package plus fetched artifacts, rather than deleting it with the rest of the edge tree.
+- `ongrid_validate_embedded_edge_assets`: handle the Windows directory.
+
+- [ ] **Step 4: Run the tests**
+
+Run:
+
+```bash
+bash scripts/test-windows-staging-upgrade.sh
+bash scripts/test-edge-assets-lib.sh
+bash scripts/test-edge-assets.sh
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add deploy/install/install.sh deploy/install/upgrade.sh deploy/install/edge/edge-assets-lib.sh deploy/install/.env.example scripts/test-edge-assets-lib.sh scripts/test-windows-staging-upgrade.sh
+git commit -m "feat(edge): persist windows artifacts across manager upgrades"
+```
+
+---
+
 ## Task 3: Installer module skeleton and manifest
 
 **Files:**
