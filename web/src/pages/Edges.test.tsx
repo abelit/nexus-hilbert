@@ -500,6 +500,119 @@ describe("EdgesPage", () => {
     expect(within(dialog).getAllByText(/--tls-insecure/)).toHaveLength(2);
   });
 
+  it("单设备安装命令默认 Linux，可切换到 Windows PowerShell", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    server.use(
+      http.post("/api/v1/edges", () =>
+        HttpResponse.json(
+          {
+            id: 21,
+            name: "win-host",
+            access_key_id: "ak-windows",
+            secret_key: "sk-windows",
+            created_at: "2026-11-12T00:00:00Z",
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+
+    await screen.findByText("bare-metal-1");
+    await user.click(screen.getByRole("button", { name: "新建设备" }));
+    const createDialog = await screen.findByRole("dialog", { name: "新建设备" });
+    await user.click(within(createDialog).getByRole("button", { name: "创建" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "已创建设备" });
+    expect(within(dialog).getByRole("radio", { name: "Linux" })).toBeChecked();
+    expect(
+      within(dialog).getByText(/curl -k -sSL https:\/\/.*\/install\.sh/),
+    ).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("radio", { name: "Windows" }));
+
+    expect(within(dialog).getByText(/ongrid-edge-installer\.exe/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/--manager-url/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/--access-key ak-windows/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/--secret-key sk-windows/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/--server-edge-addr [^ ]+:40012/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Windows Server 2008 R2/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/curl/)).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "复制安装命令" }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("--manager-url"));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("ongrid-edge-installer.exe"));
+    expect(writeText.mock.calls[0][0]).not.toContain("curl");
+
+    await user.click(within(dialog).getByRole("radio", { name: "Linux" }));
+    expect(within(dialog).getByText(/curl -k -sSL/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Windows Server 2008 R2/)).not.toBeInTheDocument();
+    writeText.mockRestore();
+  });
+
+  it("批量安装命令默认 Linux，可切换到 Windows 并复制所选命令", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    server.use(
+      http.get("/api/v1/topology/nodes", () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.get("/api/v1/edge-enrollment-profiles", () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.post("/api/v1/edge-enrollment-profiles", () =>
+        HttpResponse.json(
+          {
+            profile: {
+              id: 11,
+              name: "Windows 批次",
+              assignment_mode: "batch_only",
+              expires_at: "2026-08-01T00:00:00Z",
+              max_uses: 100,
+              used_count: 0,
+              status: "active",
+              created_at: "2026-07-31T00:00:00Z",
+            },
+            enrollment_token: "oen_windows_token",
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+
+    await screen.findByText("bare-metal-1");
+    await user.click(screen.getByRole("button", { name: "批量安装设备" }));
+    const dialog = await screen.findByRole("dialog", { name: "批量安装 Edge" });
+    await within(dialog).findByText("暂无安装批次");
+    await user.type(within(dialog).getByLabelText("安装批次名称"), "Windows 批次");
+    await user.click(within(dialog).getByRole("button", { name: "生成安装命令" }));
+
+    expect(await within(dialog).findByText(/curl -k -sSL/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("radio", { name: "Linux" })).toBeChecked();
+
+    await user.click(within(dialog).getByRole("radio", { name: "Windows" }));
+
+    expect(within(dialog).getByText(/ongrid-edge-installer\.exe/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/--manager-url/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/--enrollment-token oen_windows_token/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/--tls-insecure/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Windows Server 2008 R2/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/curl/)).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "复制批量安装命令" }));
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining("--enrollment-token oen_windows_token"),
+    );
+    expect(writeText.mock.calls[0][0]).not.toContain("curl");
+
+    await user.click(within(dialog).getByRole("radio", { name: "Linux" }));
+    expect(within(dialog).getByText(/--enrollment-token=oen_windows_token/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Windows Server 2008 R2/)).not.toBeInTheDocument();
+    writeText.mockRestore();
+  });
+
   it("直接删除已有安装批次", async () => {
     const user = userEvent.setup();
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);

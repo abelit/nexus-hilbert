@@ -2488,6 +2488,51 @@ function SecretRevealModal({
   );
 }
 
+type InstallOS = "linux" | "windows";
+
+// InstallOsToggle switches the generated command between the Linux
+// installer script and the Windows PowerShell bootstrap. It reuses the
+// same bordered Radio row pattern as the cluster choice in
+// BatchEnrollmentModal so both install dialogs look alike.
+function InstallOsToggle({
+  name,
+  value,
+  onChange,
+}: {
+  name: string;
+  value: InstallOS;
+  onChange(value: InstallOS): void;
+}) {
+  const { tr } = useI18n();
+  return (
+    <div
+      role="radiogroup"
+      aria-label={tr("目标操作系统", "Target operating system")}
+      className="flex flex-wrap items-center gap-2"
+    >
+      {(["linux", "windows"] as const).map((os) => (
+        <Label
+          key={os}
+          className={cn(
+            "inline-flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs",
+            value === os
+              ? "border-zinc-600 bg-zinc-800 text-zinc-100"
+              : "border-zinc-800 bg-zinc-950 text-zinc-400",
+          )}
+        >
+          <Radio
+            name={name}
+            value={os}
+            checked={value === os}
+            onChange={() => onChange(os)}
+          />
+          {os === "linux" ? tr("Linux", "Linux") : tr("Windows", "Windows")}
+        </Label>
+      ))}
+    </div>
+  );
+}
+
 function InstallCommandRow({
   accessKey,
   secretKey,
@@ -2497,67 +2542,92 @@ function InstallCommandRow({
 }) {
   const { tr } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [os, setOs] = useState<InstallOS>("linux");
   const host =
     typeof window !== "undefined" ? window.location.host : "ongrid.example.com";
   const hostnameOnly = host.split(":")[0] || host;
   const tunnelAddr = `${hostnameOnly}:40012`;
-  const cmd =
+  const linuxCmd =
     `curl -k -sSL https://${host}/install.sh | bash -s -- ` +
     `--access-key=${accessKey} ` +
     `--secret-key=${secretKey} ` +
     `--server-edge-addr=${tunnelAddr} ` +
     `--server-http-addr=${host}`;
-  const display =
+  const linuxDisplay =
     `curl -k -sSL https://${host}/install.sh | bash -s -- \\\n` +
     `  --access-key=${accessKey} \\\n` +
     `  --secret-key=${secretKey} \\\n` +
     `  --server-edge-addr=${tunnelAddr} \\\n` +
     `  --server-http-addr=${host}`;
+  // PowerShell 2.0 compatible: one statement per line, no fancy syntax.
+  const windowsDisplay =
+    `$u='https://${host}/edge/windows/ongrid-edge-installer.exe'\n` +
+    `$f="$env:TEMP\\ongrid-edge-installer.exe"\n` +
+    `(New-Object Net.WebClient).DownloadFile($u,$f)\n` +
+    `& $f --manager-url https://${host} --access-key ${accessKey} --secret-key ${secretKey} --server-edge-addr ${tunnelAddr}`;
+  const cmd = os === "windows" ? windowsDisplay : linuxCmd;
+  const display = os === "windows" ? windowsDisplay : linuxDisplay;
   return (
     <div className="mt-4">
-      <div className="mb-1 flex items-center justify-between">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="text-[11px] uppercase tracking-wider text-zinc-500">
           {tr("在目标主机上一键安装", "One-line install on the target host")}
         </div>
-        <Button variant="subtle" size="sm"
-          type="button"
-          onClick={() => {
-            navigator.clipboard
-              .writeText(cmd)
-              .then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              })
-              .catch(() => {
-                /* noop */
-              });
-          }}
-          aria-label={tr("复制安装命令", "Copy install command")}
-          className={cn(
-            "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs",
-            copied
-              ? "bg-emerald-500/15 text-emerald-300"
-              : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
-          )}
-        >
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-          {copied ? tr("已复制", "Copied") : tr("复制单行", "Copy one-liner")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <InstallOsToggle
+            name="install-os-single"
+            value={os}
+            onChange={setOs}
+          />
+          <Button variant="subtle" size="sm"
+            type="button"
+            onClick={() => {
+              navigator.clipboard
+                .writeText(cmd)
+                .then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                })
+                .catch(() => {
+                  /* noop */
+                });
+            }}
+            aria-label={tr("复制安装命令", "Copy install command")}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs",
+              copied
+                ? "bg-emerald-500/15 text-emerald-300"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
+            )}
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            {copied ? tr("已复制", "Copied") : tr("复制单行", "Copy one-liner")}
+          </Button>
+        </div>
       </div>
       <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-200">
         {display}
       </pre>
-      <p className="mt-1.5 text-[11px] text-zinc-500">
-        {tr(
-          "自签证书：浏览器警告 + curl ",
-          "Self-signed cert: browser warning + curl ",
-        )}
-        <code className="rounded bg-zinc-800 px-1">-k</code>
-        {tr(
-          " 已忽略校验。目标主机需 root（脚本会自动 sudo 重试）；支持 linux amd64 / arm64。",
-          " skips verification. The target host needs root (the script auto-retries with sudo); linux amd64 / arm64 are supported.",
-        )}
-      </p>
+      {os === "linux" ? (
+        <p className="mt-1.5 text-[11px] text-zinc-500">
+          {tr(
+            "自签证书：浏览器警告 + curl ",
+            "Self-signed cert: browser warning + curl ",
+          )}
+          <code className="rounded bg-zinc-800 px-1">-k</code>
+          {tr(
+            " 已忽略校验。目标主机需 root（脚本会自动 sudo 重试）；支持 linux amd64 / arm64。",
+            " skips verification. The target host needs root (the script auto-retries with sudo); linux amd64 / arm64 are supported.",
+          )}
+        </p>
+      ) : (
+        <p className="mt-1.5 text-[11px] text-zinc-500">
+          {tr(
+            "Windows 上请以管理员身份运行 PowerShell。Windows Server 2008 R2 默认可能不支持 TLS 1.2；如果下载失败，先用 GPO / SCCM / 文件共享把安装器分发到目标主机，再在本机执行。",
+            "On Windows, run PowerShell as Administrator. Windows Server 2008 R2 may not support TLS 1.2 by default; if the download fails, distribute the installer via GPO / SCCM / a file share first, then run it on the host.",
+          )}
+        </p>
+      )}
     </div>
   );
 }
@@ -3008,6 +3078,7 @@ function BatchEnrollmentModal({
 function BatchInstallCommand({ token }: { token: string }) {
   const { tr } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [os, setOs] = useState<InstallOS>("linux");
   const host =
     typeof window !== "undefined" ? window.location.host : "ongrid.example.com";
   const hostname =
@@ -3015,55 +3086,79 @@ function BatchInstallCommand({ token }: { token: string }) {
       ? window.location.hostname
       : "ongrid.example.com";
   const tunnelAddr = `${hostname.includes(":") ? `[${hostname}]` : hostname}:40012`;
-  const command =
+  const linuxCommand =
     `curl -k -sSL https://${host}/install.sh | bash -s -- ` +
     `--enrollment-token=${token} ` +
     `--server-edge-addr=${tunnelAddr} ` +
     `--server-http-addr=${host} --tls-insecure`;
-  const display =
+  const linuxDisplay =
     `curl -k -sSL https://${host}/install.sh | bash -s -- \\\n` +
     `  --enrollment-token=${token} \\\n` +
     `  --server-edge-addr=${tunnelAddr} \\\n` +
     `  --server-http-addr=${host} \\\n` +
     `  --tls-insecure`;
+  // PowerShell 2.0 compatible: one statement per line, no fancy syntax.
+  const windowsDisplay =
+    `$u='https://${host}/edge/windows/ongrid-edge-installer.exe'\n` +
+    `$f="$env:TEMP\\ongrid-edge-installer.exe"\n` +
+    `(New-Object Net.WebClient).DownloadFile($u,$f)\n` +
+    `& $f --manager-url https://${host} --enrollment-token ${token} --server-edge-addr ${tunnelAddr} --tls-insecure`;
+  const command = os === "windows" ? windowsDisplay : linuxCommand;
+  const display = os === "windows" ? windowsDisplay : linuxDisplay;
   return (
     <div className="mt-4">
-      <div className="mb-1 flex items-center justify-between">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-[11px] uppercase tracking-wider text-zinc-500">
           {tr("在每台目标主机执行", "Run on every target host")}
         </span>
-        <Button variant="subtle" size="sm"
-          type="button"
-          aria-label={tr("复制批量安装命令", "Copy batch install command")}
-          onClick={() => {
-            navigator.clipboard
-              .writeText(command)
-              .then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              })
-              .catch(() => undefined);
-          }}
-          className={cn(
-            "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs",
-            copied
-              ? "bg-emerald-500/15 text-emerald-300"
-              : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
-          )}
-        >
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-          {copied ? tr("已复制", "Copied") : tr("复制单行", "Copy one-liner")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <InstallOsToggle
+            name="install-os-batch"
+            value={os}
+            onChange={setOs}
+          />
+          <Button variant="subtle" size="sm"
+            type="button"
+            aria-label={tr("复制批量安装命令", "Copy batch install command")}
+            onClick={() => {
+              navigator.clipboard
+                .writeText(command)
+                .then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                })
+                .catch(() => undefined);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs",
+              copied
+                ? "bg-emerald-500/15 text-emerald-300"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
+            )}
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            {copied ? tr("已复制", "Copied") : tr("复制单行", "Copy one-liner")}
+          </Button>
+        </div>
       </div>
       <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-200">
         {display}
       </pre>
-      <p className="mt-2 text-[11px] text-zinc-500">
-        {tr(
-          "当前命令兼容默认自签名证书，因此包含 -k / --tls-insecure。正式环境配置可信证书后应移除这两个选项。",
-          "This command supports the default self-signed certificate, so it includes -k / --tls-insecure. Remove both after configuring a trusted certificate in production.",
-        )}
-      </p>
+      {os === "linux" ? (
+        <p className="mt-2 text-[11px] text-zinc-500">
+          {tr(
+            "当前命令兼容默认自签名证书，因此包含 -k / --tls-insecure。正式环境配置可信证书后应移除这两个选项。",
+            "This command supports the default self-signed certificate, so it includes -k / --tls-insecure. Remove both after configuring a trusted certificate in production.",
+          )}
+        </p>
+      ) : (
+        <p className="mt-2 text-[11px] text-zinc-500">
+          {tr(
+            "Windows 上请以管理员身份运行 PowerShell。Windows Server 2008 R2 默认可能不支持 TLS 1.2；如果下载失败，先用 GPO / SCCM / 文件共享把安装器分发到目标主机，再在本机执行。",
+            "On Windows, run PowerShell as Administrator. Windows Server 2008 R2 may not support TLS 1.2 by default; if the download fails, distribute the installer via GPO / SCCM / a file share first, then run it on the host.",
+          )}
+        </p>
+      )}
     </div>
   );
 }
