@@ -732,6 +732,47 @@ git commit -m "feat(edge): support restart_service on windows"
 
 ---
 
+## Task 7b: Manager restart_service Windows allowlist
+
+**Files:**
+- Modify: `internal/manager/biz/aiops/tools/restart_service.go`
+- Modify: `internal/manager/biz/aiops/tools/restart_service_test.go`
+- Modify: `internal/skill/builtin/restart_service/restart_service.go`
+- Test: the existing manager tool tests
+
+**Interfaces:**
+- Produces: `host_restart_service` accepts `w3svc` (lowercase) in addition to the existing Linux service names.
+
+- [ ] **Step 1: Write a failing test**
+
+Add a case to `restart_service_test.go` that invokes the tool with `service: "W3SVC"` and asserts it reaches the tunnel caller (not rejected by the Manager allowlist). Add a case that an unknown service is still rejected.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `go test ./internal/manager/biz/aiops/tools -run RestartService -count=1`
+Expected: FAIL because `w3svc` is not in the allowlist.
+
+- [ ] **Step 3: Add the Windows service name**
+
+- Add `"w3svc"` to the schema `enum` and `AllowedRestartServices`.
+- Ensure the lookup set is built from lowercase entries (or lowercase it explicitly) so `W3SVC`, `w3svc`, and mixed case all match.
+- Keep the existing Linux names. Do not remove `prometheus/loki/tempo/grafana` even though the Windows Edge rejects them; the Edge is the second gate.
+- Update the tool description and the skill metadata to mention Windows service names.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `go test ./internal/manager/biz/aiops/tools -run RestartService -count=1`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/manager/biz/aiops/tools/restart_service.go internal/manager/biz/aiops/tools/restart_service_test.go internal/skill/builtin/restart_service/restart_service.go
+git commit -m "feat(manager): allow windows services in restart_service"
+```
+
+---
+
 ## Task 7.5: Windows host_files implementations
 
 **Files:**
