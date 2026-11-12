@@ -11,9 +11,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
+
+const testScPath = `C:\Windows\System32\sc.exe`
 
 // fakeClient is a tunnel.Client stub. The Linux test file is build-tagged
 // linux, so the Windows suite carries its own copy.
@@ -40,8 +43,6 @@ func (f *fakeClient) handler(method string) tunnel.Handler {
 	return f.handlers[method]
 }
 
-const testScPath = `C:\Windows\System32\sc.exe`
-
 // fakeExitError mimics *exec.ExitError for sc.exe exit-code handling.
 type fakeExitError struct{ code int }
 
@@ -53,33 +54,89 @@ type scCall struct {
 	args []string
 }
 
-// fakeRunner is the injectable sc.exe seam. It records every call so the
-// tests can assert the exact stop-then-start sequence and that disallowed
-// or mocked calls never reach the runner.
+// fakeRunner is the injectable sc.exe seam. It records every call and
+// returns scripted query/stop/start results. queryOuts / startErrs are
+// consumed in order; when they run out, the last entry repeats (queries)
+// or the call succeeds (starts).
 type fakeRunner struct {
-	calls    []scCall
-	stopOut  []byte
-	stopErr  error
-	startOut []byte
-	startErr error
+	calls     []scCall
+	queryOuts [][]byte
+	queryErrs []error
+	queryIdx  int
+	stopOut   []byte
+	stopErr   error
+	startOut  []byte
+	startErrs []error
+	startIdx  int
 }
 
 func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, scCall{name: name, args: append([]string(nil), args...)})
-	if len(args) > 0 {
-		switch args[0] {
-		case "stop":
-			return f.stopOut, f.stopErr
-		case "start":
-			return f.startOut, f.startErr
+	if len(args) == 0 {
+		return nil, nil
+	}
+	switch args[0] {
+	case "query":
+		i := f.queryIdx
+		f.queryIdx++
+		if i < len(f.queryErrs) && f.queryErrs[i] != nil {
+			return nil, f.queryErrs[i]
 		}
+		if i < len(f.queryOuts) && f.queryOuts[i] != nil {
+			return f.queryOuts[i], nil
+		}
+		if len(f.queryOuts) > 0 {
+			if last := f.queryOuts[len(f.queryOuts)-1]; last != nil {
+				return last, nil
+			}
+		}
+		return scQueryOutput(args[1], scStateRunning), nil
+	case "stop":
+		return f.stopOut, f.stopErr
+	case "start":
+		i := f.startIdx
+		f.startIdx++
+		if i < len(f.startErrs) && f.startErrs[i] != nil {
+			return f.startOut, f.startErrs[i]
+		}
+		return f.startOut, nil
 	}
 	return nil, nil
 }
 
-func invoke(t *testing.T, sb *SandboxConfig, r runner, body string) (tunnel.RestartServiceResponse, error) {
+// scQueryOutput builds the shape sc.exe query emits for one service. The
+// status word is deliberately not used by the parser; the numeric code is.
+func scQueryOutput(name string, state int) []byte {
+	return []byte(fmt.Sprintf(
+		"SERVICE_NAME: %s\r\n"+
+			"        TYPE               : 20  WIN32_SHARE_PROCESS\r\n"+
+			"        STATE              : %d  RUNNING\r\n"+
+			"                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\r\n"+
+			"        WIN32_EXIT_CODE    : 0  (0x0)\r\n"+
+			"        SERVICE_EXIT_CODE  : 0  (0x0)\r\n"+
+			"        CHECKPOINT         : 0x0\r\n"+
+			"        WAIT_HINT          : 0x0\r\n",
+		name, state))
+}
+
+// countingSleeper simulates the bounded poll clock: the first `limit`
+// sleeps succeed and any further sleep reports the context deadline.
+type countingSleeper struct {
+	calls int
+	limit int
+}
+
+func (s *countingSleeper) sleep(context.Context, time.Duration) error {
+	s.calls++
+	if s.calls > s.limit {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+func invoke(t *testing.T, sb *SandboxConfig, seq *scSequencer, body string) (tunnel.RestartServiceResponse, error) {
 	t.Helper()
-	h := makeRestartHandler(sb, r, testScPath, nil)
+	h := makeRestartHandlerWithSequencer(sb, seq, nil)
 	raw, err := h(context.Background(), tunnel.Session{}, tunnel.MethodRestartService, []byte(body))
 	if err != nil {
 		return tunnel.RestartServiceResponse{}, err
@@ -91,12 +148,24 @@ func invoke(t *testing.T, sb *SandboxConfig, r runner, body string) (tunnel.Rest
 	return resp, nil
 }
 
-func TestHandler_AllowedServiceRunsStopThenStart(t *testing.T) {
+func callNames(r *fakeRunner) []string {
+	out := make([]string, 0, len(r.calls))
+	for _, c := range r.calls {
+		out = append(out, strings.Join(c.args, " "))
+	}
+	return out
+}
+
+func TestHandler_AllowedServiceQueriesWaitsThenStarts(t *testing.T) {
 	sb := DefaultSandboxConfig()
 	sb.Mocked = false
-	r := &fakeRunner{}
+	r := &fakeRunner{queryOuts: [][]byte{
+		scQueryOutput("W3SVC", scStateRunning),
+		scQueryOutput("W3SVC", scStateStopped),
+	}}
+	seq := newSCSequencer(r, testScPath)
 
-	resp, err := invoke(t, sb, r, `{"service":"w3svc","reason":"502s"}`)
+	resp, err := invoke(t, sb, seq, `{"service":"w3svc","reason":"502s"}`)
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -112,20 +181,77 @@ func TestHandler_AllowedServiceRunsStopThenStart(t *testing.T) {
 	if resp.StartedAt.After(resp.EndedAt) {
 		t.Error("StartedAt should be <= EndedAt")
 	}
-	if len(r.calls) != 2 {
-		t.Fatalf("sc.exe calls = %d, want 2 (stop, start)", len(r.calls))
+	want := []string{"query W3SVC", "stop W3SVC", "query W3SVC", "start W3SVC"}
+	if got := callNames(r); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("sc.exe calls = %v, want %v", got, want)
 	}
-	if r.calls[0].name != testScPath {
-		t.Errorf("stop used %q, want absolute %q", r.calls[0].name, testScPath)
+	for _, c := range r.calls {
+		if c.name != testScPath {
+			t.Errorf("call %v used %q, want absolute %q", c.args, c.name, testScPath)
+		}
 	}
-	if got := strings.Join(r.calls[0].args, " "); got != "stop W3SVC" {
-		t.Errorf("first call args = %q, want %q", got, "stop W3SVC")
+}
+
+// TestHandler_WaitsForStopPendingBeforeStart is the regression test for the
+// asynchronous sc.exe stop race: the first poll still reports STOP_PENDING
+// and start must not run until a later poll reports STOPPED.
+func TestHandler_WaitsForStopPendingBeforeStart(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	sb.Mocked = false
+	r := &fakeRunner{queryOuts: [][]byte{
+		scQueryOutput("nginx", scStateRunning),
+		scQueryOutput("nginx", scStateStopPending),
+		scQueryOutput("nginx", scStateStopped),
+	}}
+	seq := newSCSequencer(r, testScPath)
+	seq.sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := invoke(t, sb, seq, `{"service":"nginx"}`); err != nil {
+		t.Fatalf("handler error: %v", err)
 	}
-	if r.calls[1].name != testScPath {
-		t.Errorf("start used %q, want absolute %q", r.calls[1].name, testScPath)
+	want := []string{"query nginx", "stop nginx", "query nginx", "query nginx", "start nginx"}
+	if got := callNames(r); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("sc.exe calls = %v, want %v", got, want)
 	}
-	if got := strings.Join(r.calls[1].args, " "); got != "start W3SVC" {
-		t.Errorf("second call args = %q, want %q", got, "start W3SVC")
+}
+
+func TestHandler_TimeoutWaitingForStopDoesNotStart(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	sb.Mocked = false
+	r := &fakeRunner{queryOuts: [][]byte{
+		scQueryOutput("nginx", scStateRunning),
+		scQueryOutput("nginx", scStateStopPending),
+	}}
+	seq := newSCSequencer(r, testScPath)
+	sleeper := &countingSleeper{limit: 2}
+	seq.sleep = sleeper.sleep
+
+	_, err := invoke(t, sb, seq, `{"service":"nginx"}`)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out waiting for state STOPPED") {
+		t.Errorf("error should mention stop timeout: %v", err)
+	}
+	for _, c := range r.calls {
+		if len(c.args) > 0 && c.args[0] == "start" {
+			t.Fatalf("start must not run after a stop timeout: %v", callNames(r))
+		}
+	}
+}
+
+func TestHandler_AlreadyStoppedJustStarts(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	sb.Mocked = false
+	r := &fakeRunner{queryOuts: [][]byte{scQueryOutput("nginx", scStateStopped)}}
+	seq := newSCSequencer(r, testScPath)
+
+	if _, err := invoke(t, sb, seq, `{"service":"nginx"}`); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	want := []string{"query nginx", "start nginx"}
+	if got := callNames(r); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("sc.exe calls = %v, want %v", got, want)
 	}
 }
 
@@ -134,7 +260,7 @@ func TestHandler_DisallowedServiceDoesNotRun(t *testing.T) {
 	sb.Mocked = false
 	r := &fakeRunner{}
 
-	_, err := invoke(t, sb, r, `{"service":"sshd"}`)
+	_, err := invoke(t, sb, newSCSequencer(r, testScPath), `{"service":"sshd"}`)
 	if err == nil {
 		t.Fatal("expected allow-list rejection")
 	}
@@ -151,7 +277,7 @@ func TestHandler_MockedDoesNotRun(t *testing.T) {
 	sb.Mocked = true
 	r := &fakeRunner{}
 
-	resp, err := invoke(t, sb, r, `{"service":"nginx"}`)
+	resp, err := invoke(t, sb, newSCSequencer(r, testScPath), `{"service":"nginx"}`)
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -168,7 +294,7 @@ func TestHandler_RejectsEmptyOrInvalidService(t *testing.T) {
 	sb.Mocked = false
 	for _, body := range []string{`{"service":""}`, `{"service":"   "}`, `{"service":"..\\evil"}`} {
 		r := &fakeRunner{}
-		if _, err := invoke(t, sb, r, body); err == nil {
+		if _, err := invoke(t, sb, newSCSequencer(r, testScPath), body); err == nil {
 			t.Errorf("body %s should be rejected", body)
 		}
 		if len(r.calls) != 0 {
@@ -177,45 +303,137 @@ func TestHandler_RejectsEmptyOrInvalidService(t *testing.T) {
 	}
 }
 
-// TestHandler_ToleratesBenignSCErrors keeps the stop-then-start sequence
-// robust when the service is already stopped or already running. sc.exe
-// query output is localised, so state is inferred from exit codes instead.
-func TestHandler_ToleratesBenignSCErrors(t *testing.T) {
-	cases := []struct {
-		name string
-		r    *fakeRunner
-	}{
-		{"stop not active", &fakeRunner{stopErr: fakeExitError{code: scErrServiceNotActive}}},
-		{"start already running", &fakeRunner{startErr: fakeExitError{code: scErrServiceAlreadyRunning}}},
+// TestHandler_StopNotActiveIsBenign covers a service that stopped between
+// the pre-stop query and the stop call.
+func TestHandler_StopNotActiveIsBenign(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	sb.Mocked = false
+	r := &fakeRunner{
+		queryOuts: [][]byte{
+			scQueryOutput("nginx", scStateRunning),
+			scQueryOutput("nginx", scStateStopped),
+		},
+		stopErr: fakeExitError{code: scErrServiceNotActive},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			sb := DefaultSandboxConfig()
-			sb.Mocked = false
-			resp, err := invoke(t, sb, tc.r, `{"service":"nginx"}`)
-			if err != nil {
-				t.Fatalf("benign sc.exe exit should not fail: %v", err)
-			}
-			if !resp.Restarted {
-				t.Error("Restarted should be true after benign exit codes")
-			}
-			if len(tc.r.calls) != 2 {
-				t.Errorf("both stop and start should run, got %d calls", len(tc.r.calls))
-			}
-		})
+
+	if _, err := invoke(t, sb, newSCSequencer(r, testScPath), `{"service":"nginx"}`); err != nil {
+		t.Fatalf("benign stop exit should not fail: %v", err)
+	}
+	want := []string{"query nginx", "stop nginx", "query nginx", "start nginx"}
+	if got := callNames(r); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("sc.exe calls = %v, want %v", got, want)
 	}
 }
 
-func TestHandler_StopUnknownServiceFailsBeforeStart(t *testing.T) {
+func TestHandler_StartAlreadyRunningBenignOnlyWhenWasRunning(t *testing.T) {
+	t.Run("was running", func(t *testing.T) {
+		sb := DefaultSandboxConfig()
+		sb.Mocked = false
+		r := &fakeRunner{
+			queryOuts: [][]byte{
+				scQueryOutput("nginx", scStateRunning),
+				scQueryOutput("nginx", scStateStopped),
+			},
+			startErrs: []error{fakeExitError{code: scErrServiceAlreadyRunning}},
+		}
+		if _, err := invoke(t, sb, newSCSequencer(r, testScPath), `{"service":"nginx"}`); err != nil {
+			t.Fatalf("1056 after a known-running stop race should be benign: %v", err)
+		}
+	})
+
+	t.Run("was stopped", func(t *testing.T) {
+		sb := DefaultSandboxConfig()
+		sb.Mocked = false
+		r := &fakeRunner{
+			queryOuts: [][]byte{scQueryOutput("nginx", scStateStopped)},
+			startErrs: []error{fakeExitError{code: scErrServiceAlreadyRunning}},
+		}
+		if _, err := invoke(t, sb, newSCSequencer(r, testScPath), `{"service":"nginx"}`); err == nil {
+			t.Fatal("1056 for a service that was not previously running must fail")
+		}
+	})
+}
+
+// TestHandler_StartCannotAcceptControlIsRetried covers the mid-stop 1061
+// race: the start is retried once the SCM reports STOPPED again.
+func TestHandler_StartCannotAcceptControlIsRetried(t *testing.T) {
 	sb := DefaultSandboxConfig()
 	sb.Mocked = false
-	r := &fakeRunner{stopErr: fakeExitError{code: scErrServiceDoesNotExist}}
+	r := &fakeRunner{
+		queryOuts: [][]byte{
+			scQueryOutput("nginx", scStateRunning),
+			scQueryOutput("nginx", scStateStopped),
+			scQueryOutput("nginx", scStateStopped),
+		},
+		startErrs: []error{fakeExitError{code: scErrServiceCannotAcceptCtrl}, nil},
+	}
+	seq := newSCSequencer(r, testScPath)
+	seq.sleep = func(context.Context, time.Duration) error { return nil }
 
-	if _, err := invoke(t, sb, r, `{"service":"nginx"}`); err == nil {
+	if _, err := invoke(t, sb, seq, `{"service":"nginx"}`); err != nil {
+		t.Fatalf("1061 should be retried, not fatal: %v", err)
+	}
+	want := []string{
+		"query nginx", "stop nginx", "query nginx",
+		"start nginx", "query nginx", "start nginx",
+	}
+	if got := callNames(r); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("sc.exe calls = %v, want %v", got, want)
+	}
+}
+
+func TestHandler_QueryUnknownServiceFails(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	sb.Mocked = false
+	r := &fakeRunner{queryErrs: []error{fakeExitError{code: scErrServiceDoesNotExist}}}
+
+	if _, err := invoke(t, sb, newSCSequencer(r, testScPath), `{"service":"nginx"}`); err == nil {
 		t.Fatal("service-not-found must fail the restart")
 	}
 	if len(r.calls) != 1 {
-		t.Errorf("unknown service must not reach start, got %d calls", len(r.calls))
+		t.Errorf("unknown service must fail at the first query, got %v", callNames(r))
+	}
+}
+
+func TestParseServiceState(t *testing.T) {
+	multi := []byte(
+		"SERVICE_NAME: W3SVC\r\n" +
+			"        STATE              : 4  RUNNING\r\n" +
+			"SERVICE_NAME: W3SVCX\r\n" +
+			"        STATE              : 1  STOPPED\r\n")
+
+	cases := []struct {
+		name    string
+		out     []byte
+		service string
+		want    int
+		ok      bool
+	}{
+		{"running", scQueryOutput("nginx", scStateRunning), "nginx", scStateRunning, true},
+		{"stopped", scQueryOutput("nginx", scStateStopped), "nginx", scStateStopped, true},
+		{"stop pending", scQueryOutput("nginx", scStateStopPending), "nginx", scStateStopPending, true},
+		{
+			name: "localised labels and status word",
+			out: []byte("NOM_SERVICE: Redis\r\n" +
+				"        TYPE               : 10  WIN32_OWN_PROCESS\r\n" +
+				"        ETAT               : 3  ARRET_EN_COURS\r\n" +
+				"        WIN32_EXIT_CODE    : 0  (0x0)\r\n"),
+			service: "Redis",
+			want:    scStateStopPending,
+			ok:      true,
+		},
+		{"first of multiple blocks", multi, "W3SVC", scStateRunning, true},
+		{"second of multiple blocks", multi, "W3SVCX", scStateStopped, true},
+		{"no matching block", multi, "other", 0, false},
+		{"no state line", []byte("SERVICE_NAME: nginx\r\n        TYPE : 20  WIN32_SHARE_PROCESS\r\n"), "nginx", 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseServiceState(tc.out, tc.service)
+			if ok != tc.ok || got != tc.want {
+				t.Errorf("parseServiceState() = (%d, %v), want (%d, %v)", got, ok, tc.want, tc.ok)
+			}
+		})
 	}
 }
 
@@ -249,7 +467,7 @@ func TestCanonicalServiceName_LengthLimit(t *testing.T) {
 	}
 	atLimit := strings.Repeat("a", maxServiceNameLen)
 	if got := canonicalServiceName(atLimit); got != atLimit {
-		t.Errorf("service name at limit should be accepted")
+		t.Error("service name at limit should be accepted")
 	}
 }
 
