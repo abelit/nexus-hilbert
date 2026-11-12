@@ -476,6 +476,16 @@ git commit -m "feat(installer): download artifacts and enroll edge credentials"
   - `func UninstallService() error`
   - `supervisor.exe --install --config-file <path>`（新增）
 
+**Integration requirements carried from Task 4 review:**
+- `SecureDir` must run on the download staging directory **before** any artifact is downloaded.
+- On SHA-256 mismatch, the downloaded artifact must be deleted; `VerifySHA256` itself is pure.
+- Use a fresh destination path per file (or remove a stale destination first), because Windows `os.Rename` does not overwrite.
+- Require `EdgeID != 0` from enrollment.
+- Validate/normalize the enrollment response `CloudAddr`; fall back to `--server-edge-addr` when empty or malformed.
+- Bound download size (e.g. 512 MiB) and set a download client timeout.
+- Validate the manager URL as loopback-only for plaintext `http://` at the `Enroll` call boundary, not solely in `ParseArgs`.
+- Document that `DownloadFile` requires a caller-supplied deadline when using the default client.
+
 - [ ] **Step 1: Write failing tests for command construction**
 
 Use an injectable `Runner` interface:
