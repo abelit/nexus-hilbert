@@ -16,6 +16,7 @@ import (
 func clearProbeEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ONGRID_MANAGER_URL", "")
+	t.Setenv("ONGRID_EDGE_FRONTIER_ADDR", "")
 	t.Setenv("ONGRID_FRONTIER_ADDR", "")
 }
 
@@ -90,7 +91,7 @@ func TestParseConfigFlags(t *testing.T) {
 
 	cfg, err := parseConfig([]string{
 		"-manager", "https://manager.example.com",
-		"-frontier", "frontier.example.com:2379",
+		"-frontier", "frontier.example.com:40012",
 		"-timeout", "3s",
 	}, io.Discard)
 	if err != nil {
@@ -99,7 +100,7 @@ func TestParseConfigFlags(t *testing.T) {
 	if cfg.managerURL != "https://manager.example.com/healthz" {
 		t.Fatalf("managerURL = %q", cfg.managerURL)
 	}
-	if cfg.frontierAddr != "frontier.example.com:2379" {
+	if cfg.frontierAddr != "frontier.example.com:40012" {
 		t.Fatalf("frontierAddr = %q", cfg.frontierAddr)
 	}
 	if cfg.timeout != 3*time.Second {
@@ -109,7 +110,10 @@ func TestParseConfigFlags(t *testing.T) {
 
 func TestParseConfigEnvFallback(t *testing.T) {
 	t.Setenv("ONGRID_MANAGER_URL", "https://env-manager.example.com")
-	t.Setenv("ONGRID_FRONTIER_ADDR", "env-frontier.example.com:8443")
+	// ONGRID_FRONTIER_ADDR is the manager's servicebound address (40011) in
+	// this repository; the spike must ignore it and use the edgebound endpoint.
+	t.Setenv("ONGRID_FRONTIER_ADDR", "manager-bound.example.com:40011")
+	t.Setenv("ONGRID_EDGE_FRONTIER_ADDR", "env-frontier.example.com:40012")
 
 	cfg, err := parseConfig(nil, io.Discard)
 	if err != nil {
@@ -118,7 +122,7 @@ func TestParseConfigEnvFallback(t *testing.T) {
 	if cfg.managerURL != "https://env-manager.example.com/healthz" {
 		t.Fatalf("managerURL = %q", cfg.managerURL)
 	}
-	if cfg.frontierAddr != "env-frontier.example.com:8443" {
+	if cfg.frontierAddr != "env-frontier.example.com:40012" {
 		t.Fatalf("frontierAddr = %q", cfg.frontierAddr)
 	}
 }

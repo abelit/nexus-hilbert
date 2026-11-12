@@ -57,10 +57,12 @@ GOTOOLCHAIN=go1.20.14 go version -m legacy-spike.exe
 前置条件：
 
 1. 系统为 Windows Server 2008 R2 **SP1 x64**（不覆盖 2008 非 R2 / x86）。
-2. Manager 与 Frontier 网络可达（出站 TCP 443 / Frontier 端口）。
+2. Manager 与 Frontier 网络可达（出站 TCP 443 / Frontier edgebound 40012）。
 3. 启用 TLS 1.2。2008 R2 默认未启用；需要 KB3140245 + 注册表 `SchUseStrongCrypto`，或等效 GPO。Go 的 `crypto/tls` 在用户态实现 TLS 1.2，但 Windows 证书存储和部分系统组件仍依赖该设置。
 4. 将 Manager 证书的签发 CA 导入 `Cert:\LocalMachine\Root`。若证书使用 SHA-256，安装 **KB3033929**（SHA-2 代码签名/证书支持），否则 Authenticode 校验可能失败；TLS 信任链本身仍取决于 CA 是否受信。
 5. 系统时间正确（TLS 证书有效期校验）。
+
+Frontier 必须使用 **edgebound 端口 40012**（见 `deploy/install/frontier.yaml`）。`40011` 是 manager 的 servicebound 端口，不属于 edge 连接路径。探针使用专用环境变量 `ONGRID_EDGE_FRONTIER_ADDR`；不要与仓库中表示 manager servicebound 地址的 `ONGRID_FRONTIER_ADDR` 混用。
 
 执行：
 
@@ -68,7 +70,7 @@ GOTOOLCHAIN=go1.20.14 go version -m legacy-spike.exe
 # 复制 legacy-spike.exe 到目标机后
 .\legacy-spike.exe `
   -manager https://manager.example.com `
-  -frontier frontier.example.com:2379 `
+  -frontier frontier.example.com:40012 `
   -timeout 10s
 ```
 
@@ -76,7 +78,7 @@ GOTOOLCHAIN=go1.20.14 go version -m legacy-spike.exe
 
 ```powershell
 $env:ONGRID_MANAGER_URL = "https://manager.example.com"
-$env:ONGRID_FRONTIER_ADDR = "frontier.example.com:2379"
+$env:ONGRID_EDGE_FRONTIER_ADDR = "frontier.example.com:40012"
 .\legacy-spike.exe
 ```
 
@@ -85,7 +87,7 @@ $env:ONGRID_FRONTIER_ADDR = "frontier.example.com:2379"
 ```text
 runtime: go1.20.14 (windows/amd64)
 manager: OK https://manager.example.com/healthz status=200 tls=TLS 1.2 cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-frontier: OK frontier.example.com:2379 geminio handshake completed in 12ms
+frontier: OK frontier.example.com:40012 geminio handshake completed in 12ms
 legacy-spike: finished; copy these lines into the plan Decision Log
 ```
 

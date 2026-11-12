@@ -90,7 +90,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if cfg.frontierAddr == "" {
-		fmt.Fprintln(stdout, "frontier: SKIP (set -frontier or ONGRID_FRONTIER_ADDR)")
+		fmt.Fprintln(stdout, "frontier: SKIP (set -frontier or ONGRID_EDGE_FRONTIER_ADDR)")
 	} else {
 		start := time.Now()
 		err := dialFrontier(cfg.frontierAddr, cfg.timeout)
@@ -110,7 +110,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	fs := flag.NewFlagSet("legacy-spike", flag.ContinueOnError)
 	fs.SetOutput(output)
 	manager := fs.String("manager", os.Getenv("ONGRID_MANAGER_URL"), "Manager base URL or full /healthz URL (env ONGRID_MANAGER_URL)")
-	frontier := fs.String("frontier", os.Getenv("ONGRID_FRONTIER_ADDR"), "Frontier host:port (env ONGRID_FRONTIER_ADDR)")
+	frontier := fs.String("frontier", os.Getenv("ONGRID_EDGE_FRONTIER_ADDR"), "Frontier edgebound host:port, e.g. host:40012 (env ONGRID_EDGE_FRONTIER_ADDR; not the manager servicebound 40011)")
 	timeout := fs.Duration("timeout", defaultTimeout, "timeout for each probe")
 
 	if err := fs.Parse(args); err != nil {
