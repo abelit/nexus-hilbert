@@ -167,6 +167,7 @@ sc.exe query ongrid-edge
 sc.exe qc ongrid-edge
 Get-Content C:\ProgramData\ongrid-edge\health.json | Select-Object -Last 1
 Get-Content C:\ProgramData\ongrid-edge\supervisor.log | Select-Object -Last 50
+Get-Content C:\ProgramData\ongrid-edge\worker-stderr.log | Select-Object -Last 50
 ```
 
 **预期**
@@ -175,9 +176,10 @@ Get-Content C:\ProgramData\ongrid-edge\supervisor.log | Select-Object -Last 50
 - `$LASTEXITCODE` 为 `0`；
 - 服务 `STATE` 为 `RUNNING`，`START_TYPE` 为 `AUTO_START`；
 - `health.json` 存在且 `last_heartbeat` 在最近 60 秒内；
-- `supervisor.log` 出现 `tunnel: connected` 或 `registered with cloud`。
+- `supervisor.log` 出现 `worker started`；
+- `worker-stderr.log` 出现 `tunnel: connected` 或 `registered with cloud`（worker 的 JSON 日志写入 stderr，不会出现在 supervisor.log）。
 
-**证据**：`install-admin.txt`（安装器 stdout/stderr）、`sc-qc.txt`、`health.json`、`supervisor-tail.txt`、`certutil.txt`。
+**证据**：`install-admin.txt`（安装器 stdout/stderr）、`sc-qc.txt`、`health.json`、`supervisor-tail.txt`、`worker-stderr-tail.txt`、`certutil.txt`。
 
 **结果**：`PENDING`
 
@@ -185,21 +187,35 @@ Get-Content C:\ProgramData\ongrid-edge\supervisor.log | Select-Object -Last 50
 
 **目标**：普通用户不能安装服务，且不会留下服务或半安装目录。
 
+**前置条件**
+
+- 必须在干净快照上执行，或在 W-01 之后先执行 W-17（卸载）并确认服务、目录和设备记录已清理。不要在 W-01 安装成功后按文档顺序直接执行本项，否则“服务不存在”和“二进制不存在”的预期会被前一步的已安装状态判成假 FAIL。
+- 使用一台尚未注册到 Manager 的主机（或新的硬件 fingerprint）；复用已注册主机会让“Manager 不新增设备”的判断失效。
+
 **步骤**
 
-1. 先把安装器复制到标准用户可读的位置（elevated PowerShell）：
+1. 在 elevated PowerShell 中确认前置状态为空：
+
+```powershell
+sc.exe query ongrid-edge
+Test-Path 'C:\Program Files\ongrid-edge\bin\ongrid-edge-supervisor.exe'
+```
+
+预期：`sc.exe query` 返回 `1060`，`Test-Path` 返回 `False`。不满足时先卸载或恢复快照，再继续。
+
+2. 先把安装器复制到标准用户可读的位置（elevated PowerShell）：
 
 ```powershell
 Copy-Item $Installer 'C:\Users\Public\ongrid-edge-installer.exe' -Force
 ```
 
-2. 使用标准用户（非 Administrators）打开一个未提升的 PowerShell：
+3. 使用标准用户（非 Administrators）打开一个未提升的 PowerShell：
 
 ```powershell
 runas /user:<standard-user> powershell.exe
 ```
 
-3. 在该窗口中设置同一组变量（使用 Public 路径）并执行安装：
+4. 在该窗口中设置同一组变量（使用 Public 路径）并执行安装：
 
 ```powershell
 $Mgr          = 'https://<manager-host>'
@@ -211,7 +227,7 @@ $Installer    = 'C:\Users\Public\ongrid-edge-installer.exe'
 $LASTEXITCODE
 ```
 
-4. 回到 elevated PowerShell 检查：
+5. 回到 elevated PowerShell 检查：
 
 ```powershell
 sc.exe query ongrid-edge
@@ -224,11 +240,11 @@ Test-Path 'C:\Program Files\ongrid-edge\bin\ongrid-edge-supervisor.exe'
 - 安装器以非零退出码失败，错误包含拒绝访问或管理员权限相关文字；
 - `sc.exe query ongrid-edge` 返回 `1060`（服务不存在）；
 - 不存在已安装的 supervisor 二进制；
-- Manager UI 不新增该主机的设备记录（如果新增，记录为 `FAIL`，说明失败发生在 enrollment 之后）。
+- 在干净主机上，Manager UI 不新增该主机的设备记录（如果新增，记录为 `FAIL`，说明失败发生在 enrollment 之后）。
 
 **说明**：当前安装器没有独立的“请以管理员运行”预检，失败可能表现为 `mkdir C:\ProgramData\ongrid-edge: Access is denied.` 或 `icacls/sc.exe` 的访问拒绝。把实际错误原文记入证据；如果提示不清晰，记为 `FAIL` 并注明“失败但提示不明确”，不要自行改代码。
 
-**证据**：`install-nonadmin.txt`、`nonadmin-whoami.txt`、`sc-query-after-nonadmin.txt`。
+**证据**：`nonadmin-precheck.txt`、`install-nonadmin.txt`、`nonadmin-whoami.txt`、`sc-query-after-nonadmin.txt`。
 
 **结果**：`PENDING`
 
@@ -304,7 +320,7 @@ Get-ChildItem 'C:\ProgramData\ongrid-edge' -Filter 'download-*' -ErrorAction Sil
 
 ```powershell
 $Sentinel = 'SENTINEL-TOKEN-DO-NOT-LOG'
-& $Installer --manager-url $Mgr --enrollment-token $Sentinel --dry-run > "$Evidence\dryrun.out" 2> "$Evidence\dryrun.err"
+& $Installer --manager-url $Mgr --enrollment-token $Sentinel --server-edge-addr $HostEdgeAddr --dry-run > "$Evidence\dryrun.out" 2> "$Evidence\dryrun.err"
 Select-String -Path "$Evidence\dryrun.out","$Evidence\dryrun.err" -Pattern ([regex]::Escape($Sentinel))
 ```
 
@@ -683,9 +699,11 @@ Get-WmiObject Win32_Process | Where-Object { $_.Name -eq 'windows_exporter.exe' 
 3. 人为制造一个可恢复的插件失败（例如临时停止 `windows_exporter.exe`），等待一个心跳周期，确认 UI 显示 `crashed` / 重启计数，而不是静默空白。
 
 ```powershell
-Get-WmiObject Win32_Process | Where-Object { $_.Name -eq 'windows_exporter.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Get-WmiObject Win32_Process | Where-Object { $_.Name -eq 'windows_exporter.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId }
 Start-Sleep -Seconds 90
 ```
+
+`Stop-Process -Force` 是 PowerShell 3.0+ 参数，2008 R2 的 PowerShell 2.0 会在参数绑定阶段失败；这里不使用它。请在真实主机确认当前管理员能终止该进程；如果必须使用 `-Force`，把该限制记录为 PowerShell 2.0 兼容性问题，不要静默改用不兼容命令。
 
 4. 再次采集 `plugins.json`，确认 supervisor 已重启插件或 UI 显示明确失败原因。
 
