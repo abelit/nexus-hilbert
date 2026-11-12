@@ -49,8 +49,9 @@ import (
 // via exec.LookPath at construction time.
 type SandboxConfig struct {
 	// DeniedReadPaths is the canonical absolute prefix denylist applied
-	// to every read operation. Empty allows everything (use only in
-	// dev / tests).
+	// to every read operation. Empty allows everything on Unix (use only
+	// in dev / tests); on Windows the validator always additionally
+	// applies WindowsDeniedReadPaths.
 	DeniedReadPaths []string
 
 	// AllowedReadPaths is an optional additional allowlist. When
@@ -84,7 +85,33 @@ var DefaultDeniedReadPaths = []string{
 	// uninteresting; not denied — operators may want to inspect.
 }
 
-// DefaultSandboxConfig allows reads except for DefaultDeniedReadPaths.
+// WindowsDeniedReadPaths is the Windows-specific deny list. It mirrors
+// the Unix baseline's intent — credential stores and key material an
+// LLM-driven diagnostic never needs — for the Windows filesystem layout.
+// The validator applies it whenever it runs with Windows path semantics
+// (runtime.GOOS == "windows"), in addition to any configured
+// DeniedReadPaths. Prefix matching on Windows is case-insensitive, so a
+// differently-cased path cannot slip past these entries.
+//
+// Per-user `C:\Users\<user>\.ssh` and `.gnupg` are matched dynamically
+// by matchesPerUserSensitiveWindows; the drive-letter entries below are
+// the machine-wide locations.
+var WindowsDeniedReadPaths = []string{
+	// SAM / SECURITY / SYSTEM hives plus the registry transaction logs.
+	`C:\Windows\System32\config`,
+	`C:\Windows\System32\SAM`,
+	`C:\Windows\System32\SECURITY`,
+	`C:\Windows\System32\SYSTEM`,
+	// Backup copies of the hives created by repair / recovery.
+	`C:\Windows\repair`,
+	// OpenSSH host keys and sshd configuration.
+	`C:\ProgramData\ssh`,
+	// Machine-wide CNG / CryptoAPI key containers.
+	`C:\ProgramData\Microsoft\Crypto`,
+}
+
+// DefaultSandboxConfig allows reads except for DefaultDeniedReadPaths
+// (plus WindowsDeniedReadPaths on Windows).
 // Binary discovery best-efforts each candidate; missing binaries simply
 // do not appear in AllowedBinaries (calls to ResolveBinary then error
 // cleanly with a message the LLM can render).
@@ -93,8 +120,14 @@ var DefaultDeniedReadPaths = []string{
 // binaries are required (and Windows' find.exe is a different tool that
 // must not be allow-listed).
 func DefaultSandboxConfig() *SandboxConfig {
+	denied := append([]string(nil), DefaultDeniedReadPaths...)
+	if runtime.GOOS == "windows" {
+		// Surface the platform baseline in the config; matchesDenied also
+		// applies it for operator-built configs on Windows.
+		denied = append(denied, WindowsDeniedReadPaths...)
+	}
 	cfg := &SandboxConfig{
-		DeniedReadPaths: append([]string(nil), DefaultDeniedReadPaths...),
+		DeniedReadPaths: denied,
 		// AllowedReadPaths intentionally empty — denylist alone.
 	}
 	if runtime.GOOS != "windows" {
@@ -143,6 +176,10 @@ func (s *SandboxConfig) Validate() error {
 // path to exist (find_large_files may scan a path the user just got
 // wrong; we let the find subprocess surface that, not the validator).
 //
+// The check runs with the host's path semantics (see
+// runtimePathSemantics): Unix matching is byte-exact, while Windows
+// matching is case-insensitive and applies WindowsDeniedReadPaths.
+//
 // Decision matrix:
 //   - Path exists + EvalSymlinks succeeds → the resolved form must be
 //     in the symlink-resolved allow-list. This is the strict path: it
@@ -154,41 +191,54 @@ func (s *SandboxConfig) Validate() error {
 //     path; it accepts not-yet-created paths under a whitelisted
 //     prefix without failing the call up front.
 func (s *SandboxConfig) ValidatePath(path string) error {
+	return s.validatePathWith(runtimePathSemantics(), path)
+}
+
+// validatePathWith is ValidatePath parameterised on path semantics so the
+// platform policy — including the Windows deny list and case-insensitive
+// matching — is testable on any host.
+func (s *SandboxConfig) validatePathWith(ps pathSemantics, path string) error {
 	if s == nil {
 		return errors.New("host_files sandbox: not configured")
 	}
 	if path == "" {
 		return errors.New("host_files sandbox: path is required")
 	}
-	if !filepath.IsAbs(path) {
+	if !ps.isAbs(path) {
 		return fmt.Errorf("host_files sandbox: path %q is not absolute", path)
 	}
-	clean := filepath.Clean(path)
+	clean := ps.clean(path)
 
 	// Resolve symlinks when possible so an adversarial /tmp/escape →
 	// /etc/shadow gets caught by the denylist on the resolved form.
+	// Only meaningful for the host's own semantics; a Windows path can't
+	// be resolved by a Unix host (and vice versa).
 	resolved := clean
-	if r, err := filepath.EvalSymlinks(clean); err == nil {
-		resolved = r
+	if ps.native() {
+		if r, err := filepath.EvalSymlinks(clean); err == nil {
+			resolved = r
+		}
 	}
 
 	// Step 1: denylist check (always applies). Reject when either the
 	// raw path or its resolved form is exactly or under a denied prefix.
-	if denied, hit := s.matchesDenied(clean, resolved); denied {
+	if denied, hit := s.matchesDenied(ps, clean, resolved); denied {
 		return fmt.Errorf("host_files sandbox: path %q is denied for read (matches deny prefix %q — virtual filesystem or sensitive material)",
 			path, hit)
 	}
 	// Step 2: per-user .ssh / .gnupg are denied as a glob — the static
-	// list catches /root, this catches /home/<user>/.
-	if hit, denied := matchesPerUserSensitive(resolved); denied {
+	// list catches the system-wide locations, this catches user profiles.
+	if hit, denied := matchesPerUserSensitive(ps, resolved); denied {
 		return fmt.Errorf("host_files sandbox: path %q (resolves to %q) is denied: %s — per-user secret material",
 			path, resolved, hit)
 	}
 
 	// Step 3: optional allowlist. When AllowedReadPaths is non-empty the
-	// path must additionally land under one of those prefixes.
+	// path must additionally land under one of those prefixes. The
+	// denylist above already ran, so an override cannot unlock a denied
+	// path.
 	if len(s.AllowedReadPaths) > 0 {
-		if !s.lexicalInAllowList(clean) && !s.resolvedInAllowList(resolved) {
+		if !s.lexicalInAllowList(ps, clean) && !s.resolvedInAllowList(ps, resolved) {
 			return fmt.Errorf("host_files sandbox: path %q is outside the operator-set allow-list (%s)",
 				path, strings.Join(s.AllowedReadPaths, " "))
 		}
@@ -196,16 +246,138 @@ func (s *SandboxConfig) ValidatePath(path string) error {
 	return nil
 }
 
-// matchesDenied returns (true, prefix) when clean OR resolved is exactly
-// equal to or under any DeniedReadPaths prefix.
-func (s *SandboxConfig) matchesDenied(clean, resolved string) (bool, string) {
-	for _, denied := range s.DeniedReadPaths {
-		d := filepath.Clean(denied)
-		for _, candidate := range []string{clean, resolved} {
-			if candidate == d {
-				return true, d
+// pathSemantics captures the platform rules that differ between Unix and
+// Windows path handling: separator, absolute-path syntax, cleaning, and
+// case sensitivity. Parameterising the validator keeps the Windows policy
+// testable on Linux, where runtime.GOOS != "windows".
+type pathSemantics struct {
+	separator       string
+	caseInsensitive bool
+	windows         bool
+}
+
+func unixPathSemantics() pathSemantics {
+	return pathSemantics{separator: "/"}
+}
+
+func windowsPathSemantics() pathSemantics {
+	return pathSemantics{separator: `\`, caseInsensitive: true, windows: true}
+}
+
+// native reports whether the semantics describe the host running this
+// process. Only native paths can be resolved through filepath.EvalSymlinks.
+func (ps pathSemantics) native() bool {
+	return ps.windows == (runtime.GOOS == "windows")
+}
+
+func (ps pathSemantics) isAbs(p string) bool {
+	if ps.windows {
+		return isAbsWindows(p)
+	}
+	return filepath.IsAbs(p)
+}
+
+func (ps pathSemantics) clean(p string) string {
+	if ps.windows {
+		return cleanWindowsPath(p)
+	}
+	return filepath.Clean(p)
+}
+
+// equal compares two paths under the platform's case rule: byte-exact on
+// Unix, case-insensitive on Windows.
+func (ps pathSemantics) equal(a, b string) bool {
+	if ps.caseInsensitive {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func (ps pathSemantics) hasPrefix(p, prefix string) bool {
+	if ps.caseInsensitive {
+		return len(p) >= len(prefix) && strings.EqualFold(p[:len(prefix)], prefix)
+	}
+	return strings.HasPrefix(p, prefix)
+}
+
+// isAbsWindows accepts drive-letter absolute paths (C:\ or C:/) and UNC
+// paths. Drive-relative forms such as C:foo are rejected.
+func isAbsWindows(p string) bool {
+	if len(p) >= 3 && isASCIILetter(p[0]) && p[1] == ':' && (p[2] == '\\' || p[2] == '/') {
+		return true
+	}
+	return strings.HasPrefix(p, `\\`) || strings.HasPrefix(p, `//`)
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// cleanWindowsPath lexically cleans a Windows path independently of the
+// host OS. Forward slashes are normalised to backslashes; "." segments are
+// dropped and ".." segments are collapsed without escaping a rooted,
+// drive-qualified, or UNC path.
+func cleanWindowsPath(p string) string {
+	p = strings.ReplaceAll(p, "/", `\`)
+	unc := strings.HasPrefix(p, `\\`)
+	var drive string
+	rest := p
+	switch {
+	case unc:
+		rest = p[2:]
+	case len(p) >= 2 && isASCIILetter(p[0]) && p[1] == ':':
+		drive = p[:2]
+		rest = p[2:]
+	}
+	rooted := unc || strings.HasPrefix(rest, `\`)
+	stack := make([]string, 0, 8)
+	for _, part := range strings.Split(rest, `\`) {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			} else if !rooted && drive == "" {
+				stack = append(stack, part)
 			}
-			if strings.HasPrefix(candidate, d+string(filepath.Separator)) {
+		default:
+			stack = append(stack, part)
+		}
+	}
+	var b strings.Builder
+	b.WriteString(drive)
+	if unc {
+		b.WriteString(`\\`)
+	} else if rooted {
+		b.WriteString(`\`)
+	}
+	b.WriteString(strings.Join(stack, `\`))
+	out := b.String()
+	if out == "" {
+		return `\`
+	}
+	if drive != "" && len(stack) == 0 && !strings.HasSuffix(out, `\`) {
+		out += `\`
+	}
+	return out
+}
+
+// matchesDenied returns (true, prefix) when clean OR resolved is exactly
+// equal to or under any DeniedReadPaths prefix. On Windows semantics the
+// WindowsDeniedReadPaths baseline is included automatically and all
+// comparisons are case-insensitive; Unix comparisons stay byte-exact.
+func (s *SandboxConfig) matchesDenied(ps pathSemantics, candidates ...string) (bool, string) {
+	denied := s.DeniedReadPaths
+	if ps.windows {
+		// Copy so appending the platform baseline never mutates the
+		// caller's slice.
+		denied = append(append([]string(nil), denied...), WindowsDeniedReadPaths...)
+	}
+	for _, prefix := range denied {
+		d := ps.clean(prefix)
+		for _, candidate := range candidates {
+			if ps.equal(candidate, d) || ps.hasPrefix(candidate, d+ps.separator) {
 				return true, d
 			}
 		}
@@ -213,13 +385,18 @@ func (s *SandboxConfig) matchesDenied(clean, resolved string) (bool, string) {
 	return false, ""
 }
 
-// matchesPerUserSensitive catches /home/<user>/.ssh and /home/<user>/.gnupg
-// (covers any user; /root is handled by the static DeniedReadPaths list).
-func matchesPerUserSensitive(p string) (string, bool) {
+// matchesPerUserSensitive catches the per-user secret directories:
+// /home/<user>/.ssh and /home/<user>/.gnupg on Unix (with /root handled
+// by the static DeniedReadPaths list), and C:\Users\<user>\.ssh /
+// .gnupg on Windows.
+func matchesPerUserSensitive(ps pathSemantics, p string) (string, bool) {
+	if ps.windows {
+		return matchesPerUserSensitiveWindows(p)
+	}
 	if !strings.HasPrefix(p, "/home/") {
 		return "", false
 	}
-	parts := strings.Split(p, string(filepath.Separator))
+	parts := strings.Split(p, ps.separator)
 	// /home/<user>/.ssh → ["", "home", "<user>", ".ssh", ...]
 	if len(parts) < 4 {
 		return "", false
@@ -231,16 +408,34 @@ func matchesPerUserSensitive(p string) (string, bool) {
 	return "", false
 }
 
+// matchesPerUserSensitiveWindows recognises <drive>:\Users\<user>\.ssh
+// and .gnupg regardless of letter case. Any drive letter is accepted so
+// a relocated user profile is still covered.
+func matchesPerUserSensitiveWindows(p string) (string, bool) {
+	parts := strings.Split(strings.ReplaceAll(p, "/", `\`), `\`)
+	// C:\Users\<user>\.ssh → ["C:", "Users", "<user>", ".ssh", ...]
+	if len(parts) < 4 {
+		return "", false
+	}
+	if len(parts[0]) != 2 || parts[0][1] != ':' || !isASCIILetter(parts[0][0]) {
+		return "", false
+	}
+	if !strings.EqualFold(parts[1], "Users") {
+		return "", false
+	}
+	if !strings.EqualFold(parts[3], ".ssh") && !strings.EqualFold(parts[3], ".gnupg") {
+		return "", false
+	}
+	return parts[0] + `\` + parts[1] + `\` + parts[2] + `\` + parts[3], true
+}
+
 // lexicalInAllowList performs the cheap prefix-match against the raw
 // (unresolved) allow-list. Trailing separator on the prefix prevents
 // /var-evil from matching /var.
-func (s *SandboxConfig) lexicalInAllowList(p string) bool {
+func (s *SandboxConfig) lexicalInAllowList(ps pathSemantics, p string) bool {
 	for _, allowed := range s.AllowedReadPaths {
-		a := filepath.Clean(allowed)
-		if p == a {
-			return true
-		}
-		if strings.HasPrefix(p, a+string(filepath.Separator)) {
+		a := ps.clean(allowed)
+		if ps.equal(p, a) || ps.hasPrefix(p, a+ps.separator) {
 			return true
 		}
 	}
@@ -251,16 +446,15 @@ func (s *SandboxConfig) lexicalInAllowList(p string) bool {
 // symlink-resolved allow-list — i.e. each entry passed through
 // EvalSymlinks. Used as a second pass when the requested path's
 // resolved form differs from its cleaned form.
-func (s *SandboxConfig) resolvedInAllowList(p string) bool {
+func (s *SandboxConfig) resolvedInAllowList(ps pathSemantics, p string) bool {
 	for _, allowed := range s.AllowedReadPaths {
-		a, err := filepath.EvalSymlinks(filepath.Clean(allowed))
-		if err != nil {
-			a = filepath.Clean(allowed)
+		a := ps.clean(allowed)
+		if ps.native() {
+			if r, err := filepath.EvalSymlinks(a); err == nil {
+				a = r
+			}
 		}
-		if p == a {
-			return true
-		}
-		if strings.HasPrefix(p, a+string(filepath.Separator)) {
+		if ps.equal(p, a) || ps.hasPrefix(p, a+ps.separator) {
 			return true
 		}
 	}

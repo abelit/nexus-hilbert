@@ -203,6 +203,93 @@ func TestValidate_OK(t *testing.T) {
 	}
 }
 
+// TestValidatePath_WindowsDeniedPaths pins the Windows deny list. The
+// cases run on Linux through the explicit Windows path semantics so the
+// policy is covered on every CI host, not only on Windows runners.
+func TestValidatePath_WindowsDeniedPaths(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	ps := windowsPathSemantics()
+	mustReject := []string{
+		`C:\Users\alice\.ssh\id_rsa`,
+		`C:\Users\alice\.gnupg\private-keys-v1.d`,
+		`C:\Windows\System32\config\SAM`,
+		`C:\Windows\System32\SAM`,
+		`C:\Windows\System32\SECURITY`,
+		`C:\Windows\System32\SYSTEM`,
+		`C:\Windows\repair\SAM`,
+		`C:\ProgramData\ssh\sshd_config`,
+		`C:\ProgramData\Microsoft\Crypto\RSA\machinekeys`,
+	}
+	for _, bad := range mustReject {
+		if err := sb.validatePathWith(ps, bad); err == nil {
+			t.Errorf("ValidatePath(%q) = nil, want rejection", bad)
+		}
+	}
+}
+
+// TestValidatePath_WindowsCaseInsensitive pins that Windows prefix
+// matching ignores case: differing letter case must not bypass a deny
+// prefix (C:\Windows vs c:\windows, USERS vs users, ALICE vs alice).
+func TestValidatePath_WindowsCaseInsensitive(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	ps := windowsPathSemantics()
+	mustReject := []string{
+		`c:\users\ALICE\.ssh\id_rsa`,
+		`c:\windows\system32\CONFIG\SAM`,
+		`C:\PROGRAMDATA\SSH\sshd_config`,
+		`c:\users\Alice\.GNUPG\secring.gpg`,
+	}
+	for _, bad := range mustReject {
+		if err := sb.validatePathWith(ps, bad); err == nil {
+			t.Errorf("ValidatePath(%q) = nil, want case-insensitive rejection", bad)
+		}
+	}
+}
+
+// TestValidatePath_WindowsAllowsBenignPaths pins that ordinary user
+// documents still pass — the deny list must not over-block.
+func TestValidatePath_WindowsAllowsBenignPaths(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	ps := windowsPathSemantics()
+	mustAccept := []string{
+		`C:\Users\alice\Documents\notes.txt`,
+		`C:\Users\alice\AppData\Local\Temp\log.txt`,
+		`D:\data\exports\report.csv`,
+		`C:\Windows\System32\drivers\etc\hosts`,
+	}
+	for _, ok := range mustAccept {
+		if err := sb.validatePathWith(ps, ok); err != nil {
+			t.Errorf("ValidatePath(%q) = %v, want nil", ok, err)
+		}
+	}
+}
+
+// TestValidatePath_WindowsAllowedReadPathsOverride verifies that an
+// operator AllowedReadPaths entry does not weaken the denylist: a path
+// under both lists is still denied.
+func TestValidatePath_WindowsAllowedReadPathsOverride(t *testing.T) {
+	sb := &SandboxConfig{
+		DeniedReadPaths:  append([]string(nil), DefaultDeniedReadPaths...),
+		AllowedReadPaths: []string{`C:\Users\alice`},
+	}
+	ps := windowsPathSemantics()
+	if err := sb.validatePathWith(ps, `C:\Users\alice\Documents\notes.txt`); err != nil {
+		t.Errorf("ValidatePath benign under allow-list = %v, want nil", err)
+	}
+	if err := sb.validatePathWith(ps, `C:\Users\alice\.ssh\id_rsa`); err == nil {
+		t.Errorf("ValidatePath secret under allow-list = nil, want rejection (denylist must win)")
+	}
+}
+
+// TestValidatePath_UnixCaseSensitive pins that Unix matching stays
+// byte-exact: /etc/SHADOW is not covered by the /etc/shadow prefix.
+func TestValidatePath_UnixCaseSensitive(t *testing.T) {
+	sb := DefaultSandboxConfig()
+	if err := sb.ValidatePath("/etc/SHADOW"); err != nil {
+		t.Errorf("ValidatePath(/etc/SHADOW) = %v, want nil (Unix matching is case-sensitive)", err)
+	}
+}
+
 func TestDiscoverBinaries(t *testing.T) {
 	// `ls` is universal — every Linux/Darwin host has it. discoverBinaries
 	// must find it via either LookPath or the fallback table.
