@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -124,14 +126,14 @@ func TestRestartServiceTool_CanonicalizesService(t *testing.T) {
 
 func TestRestartServiceTool_AcceptsWindowsServiceNames(t *testing.T) {
 	// Windows service names are case-insensitive (W3SVC is the canonical
-	// spelling). Every casing must canonicalize to the lowercase allow-list
-	// entry and reach the tunnel caller instead of being rejected by the
-	// manager gate.
+	// spelling). Every casing must pass the production validation boundary
+	// (basetool.WithValidation) and reach the tunnel caller instead of
+	// being rejected by the schema or the runtime allow-list.
 	for _, service := range []string{"W3SVC", "w3svc", "W3Svc"} {
 		t.Run(service, func(t *testing.T) {
 			fc := &fakeCaller{respBody: mustMarshal(tunnel.RestartServiceResponse{Service: "w3svc", Restarted: true})}
 			resolver := &fakeHostFilesResolver{mapping: map[uint64]uint64{1: 7}}
-			tool := newRestartServiceToolFor(t, resolver, fc)
+			tool := basetool.WithValidation(newRestartServiceToolFor(t, resolver, fc))
 
 			if _, err := tool.InvokableRun(context.Background(), fmt.Sprintf(`{"device_id":1,"service":%q}`, service)); err != nil {
 				t.Fatalf("InvokableRun(service=%q): %v", service, err)
@@ -153,41 +155,76 @@ func TestRestartServiceTool_AcceptsWindowsServiceNames(t *testing.T) {
 	}
 }
 
-func TestRestartServiceTool_WindowsServiceInSchemaAndAllowList(t *testing.T) {
-	// The schema enum is the structured allow-list the LLM sees; the
-	// runtime set is derived from AllowedRestartServices. Keep both in sync
-	// and keep the slice lowercase so the case-insensitive lookup matches.
+func TestRestartServiceTool_ValidatedAcceptsMixedCaseLinuxService(t *testing.T) {
+	// Companion to TestRestartServiceTool_CanonicalizesService: the
+	// mixed-case form must also survive the production validation boundary,
+	// not only the naked tool.
+	fc := &fakeCaller{respBody: mustMarshal(tunnel.RestartServiceResponse{Service: "nginx", Restarted: true})}
+	resolver := &fakeHostFilesResolver{mapping: map[uint64]uint64{1: 7}}
+	tool := basetool.WithValidation(newRestartServiceToolFor(t, resolver, fc))
+
+	if _, err := tool.InvokableRun(context.Background(), `{"device_id":1,"service":"NGINX"}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var sentReq tunnel.RestartServiceRequest
+	if err := json.Unmarshal(fc.lastBody, &sentReq); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if sentReq.Service != "nginx" {
+		t.Errorf("canonicalised service = %q, want nginx", sentReq.Service)
+	}
+}
+
+func TestRestartServiceTool_SchemaPatternMatchesAllowList(t *testing.T) {
+	// The schema pattern is the structured allow-list the LLM sees; the
+	// runtime set is derived from AllowedRestartServices. Assert the
+	// pattern is built from the slice and accepts every entry in any case
+	// while rejecting an unknown service.
 	var schema struct {
 		Properties struct {
 			Service struct {
-				Enum []string `json:"enum"`
+				Enum    []string `json:"enum"`
+				Pattern string   `json:"pattern"`
 			} `json:"service"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(RestartServiceSchema, &schema); err != nil {
 		t.Fatalf("RestartServiceSchema not valid JSON: %v", err)
 	}
-	hasInEnum := false
-	for _, s := range schema.Properties.Service.Enum {
-		if s == "w3svc" {
-			hasInEnum = true
-		}
+	if schema.Properties.Service.Pattern == "" {
+		t.Fatalf("schema service has no pattern: %s", RestartServiceSchema)
 	}
-	if !hasInEnum {
-		t.Errorf("schema enum %v missing w3svc", schema.Properties.Service.Enum)
+	if len(schema.Properties.Service.Enum) != 0 {
+		t.Errorf("schema must not use a case-sensitive enum, got %v", schema.Properties.Service.Enum)
 	}
-
-	hasInList := false
+	if want := buildRestartServicePattern(AllowedRestartServices); schema.Properties.Service.Pattern != want {
+		t.Errorf("schema pattern = %q, want %q (must be derived from AllowedRestartServices)",
+			schema.Properties.Service.Pattern, want)
+	}
+	re, err := regexp.Compile(schema.Properties.Service.Pattern)
+	if err != nil {
+		t.Fatalf("schema pattern does not compile: %v", err)
+	}
+	hasW3SVC := false
 	for _, s := range AllowedRestartServices {
 		if s == "w3svc" {
-			hasInList = true
+			hasW3SVC = true
 		}
 		if strings.ToLower(s) != s {
 			t.Errorf("AllowedRestartServices entry %q must be lowercase for case-insensitive lookup", s)
 		}
+		if !re.MatchString(s) {
+			t.Errorf("schema pattern %q rejects allow-listed service %q", schema.Properties.Service.Pattern, s)
+		}
+		if !re.MatchString(strings.ToUpper(s)) {
+			t.Errorf("schema pattern %q rejects uppercase form of %q", schema.Properties.Service.Pattern, s)
+		}
 	}
-	if !hasInList {
+	if !hasW3SVC {
 		t.Errorf("AllowedRestartServices %v missing w3svc", AllowedRestartServices)
+	}
+	if re.MatchString("spooler") {
+		t.Errorf("schema pattern %q must reject unknown service spooler", schema.Properties.Service.Pattern)
 	}
 }
 

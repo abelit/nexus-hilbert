@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -62,7 +63,7 @@ const ToolNameRestartService = "host_restart_service"
 
 // RestartServiceDescription is the one-line "what does this tool do"
 // blurb the LLM reads when picking tools.
-const RestartServiceDescription = "Restart an allow-listed systemd or Windows service on a device. " +
+const RestartServiceDescription = "Restart an allow-listed systemd service or the Windows service w3svc on a device. " +
 	"MUTATING — calls trigger a reviewer worker for SOP gating before execution."
 
 // restartServiceWhenToUse is the routing hint shown in the system
@@ -76,28 +77,45 @@ const RestartServiceDescription = "Restart an allow-listed systemd or Windows se
 // guidance here is the first.
 const restartServiceWhenToUse = "Use ONLY when the user explicitly asks to restart one of the allow-listed " +
 	"services (nginx / redis / prometheus / loki / tempo / grafana / mysql / ongrid, " +
-	"or a Windows service name such as W3SVC). " +
+	"or the Windows service w3svc / W3SVC). " +
 	"DO NOT proactively suggest restart — diagnose first with query_logql / get_host_summary. " +
 	"This tool is MUTATING: the call spawns a reviewer worker (SOP gating); " +
 	"on reject, do NOT retry — convey the reviewer's reason to the user verbatim and let them decide."
 
+// buildRestartServicePattern renders AllowedRestartServices as a
+// case-insensitive anchored regexp for the JSON Schema. `enum` cannot be
+// used here: JSON Schema enum matching is exact/case-sensitive, and the
+// production chain runs basetool.WithValidation before InvokableRun, so
+// an uppercase "W3SVC" would be rejected before canonicalization.
+func buildRestartServicePattern(services []string) string {
+	parts := make([]string, len(services))
+	for i, s := range services {
+		parts[i] = regexp.QuoteMeta(strings.ToLower(s))
+	}
+	return "^(?i:" + strings.Join(parts, "|") + ")$"
+}
+
+// restartServicePattern is derived from AllowedRestartServices so the
+// schema constraint and the runtime allow-list cannot drift.
+var restartServicePattern = buildRestartServicePattern(AllowedRestartServices)
+
 // RestartServiceSchema is the JSON Schema of the tool's argument
-// object. The allow-list is enforced both by the schema's `enum` (so
-// the LLM gets a structured constraint) AND by an explicit check in
-// InvokableRun (so a hijacked tool_call still bounces).
-var RestartServiceSchema = json.RawMessage(`{
+// object. The allow-list is enforced both by the schema's `pattern` (so
+// the LLM gets a structured, case-insensitive constraint) AND by an
+// explicit check in InvokableRun (so a hijacked tool_call still bounces).
+var RestartServiceSchema = json.RawMessage(fmt.Sprintf(`{
   "type": "object",
   "properties": {
     "device_id": {"type": "integer", "description": "Device id to restart on (same id as the @-mention chip and the Prom device_id label)."},
     "service": {
       "type": "string",
-      "enum": ["nginx", "redis", "prometheus", "loki", "tempo", "grafana", "mysql", "ongrid", "w3svc"],
-      "description": "Service short name (case-insensitive): a systemd unit without the .service suffix (e.g. nginx), or a Windows service name (e.g. W3SVC)."
+      "pattern": %q,
+      "description": "Service short name (case-insensitive): a systemd unit without the .service suffix (e.g. nginx), or the Windows service w3svc (W3SVC)."
     },
     "reason": {"type": "string", "description": "Why the restart is being requested. Written verbatim to the audit row; encouraged for post-mortem trail."}
   },
   "required": ["device_id", "service"]
-}`)
+}`, restartServicePattern))
 
 // AllowedRestartServices is the manager allow-list, matching the edge
 // sandbox. Exported so the reviewer / SPA approval UI can render the
