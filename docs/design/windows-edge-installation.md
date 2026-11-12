@@ -415,3 +415,19 @@ Windows 插件二进制随 `VERSION` 作为版本化 Release 附件发布，不�
 | 插件 Windows 兼容性 | 只注册验证过的插件；其余显示不可用 |
 | restart_service 服务名差异 | 可配置 allowlist；默认保守 |
 | 双构建线维护 | CI 强制 legacy 构建；限制新特性使用 |
+
+## 13. Decision Log
+
+- **Phase 0 result: PENDING VM。** 本地已完成 Go 1.20.14 交叉编译、兼容包测试、`go vet`、`go test -race` 和 geminio 依赖闭包构建；Windows Server 2008 R2 SP1 x64 上的真实运行（TLS 1.2、geminio dial、服务加载）仍需在目标 VM 验证，未完成前不得宣称 Legacy 已验收。
+- **最终变体策略：compat build。** 继续用 Go 1.20 兼容构建复用主 Agent 源码，而不是独立最小 Agent；回退方案仅在 Phase 0 VM 验证失败时启用。
+- **Legacy 独有依赖差异。** `tools/build-legacy-windows.sh` 只在临时 module 中覆盖版本，主模块依赖不变：
+  - `github.com/singchia/geminio` 使用 `third_party/geminio` 的 `go 1.20` 补丁副本；
+  - `go.opentelemetry.io/otel` 系列固定 `v1.24.0`；
+  - `github.com/gosnmp/gosnmp` 固定 `v1.38.0`；
+  - `go.opentelemetry.io/otel/semconv` 从 `v1.27.0` 重写到 `v1.24.0`（只使用稳定的 `ServiceName`/`ServiceNamespace` helper）；
+  - `golang.org/x/crypto v0.31.0`、`golang.org/x/sys v0.28.0`、`golang.org/x/net v0.26.0` 等固定为 Go 1.20 可编译版本。
+- **windows_exporter 固定 0.29.2。** 这是 0.30 配置重写前 0.29 分支的最后一个 patch release，保留 `--collectors.enabled` 与复数 `--collector.textfile.directories`；0.29.x 不提供 `--collectors.disabled`，Windows `hostmetrics` 在配置阶段直接拒绝该选项。
+- **mongodb 不进入 Windows 插件集。** 上游 `percona/mongodb_exporter` 0.51.0 只发布 darwin/linux 资产；Windows 的 `databasemetrics` 仅包含 mysql/postgresql/redis，Manager 不得向 Windows Edge 下发 mongodb source。
+- **Windows 安装器引导位置。** 安装器作为版本化附件 `ongrid-edge-windows-amd64-<version>-installer.exe`（配 `.sha256`）发布，并固定暂存为 Manager 的 `windows/ongrid-edge-installer.exe`，UI 从 `https://<host>/edge/windows/ongrid-edge-installer.exe` 下载；manifest 不引用安装器自身。
+- **Windows 发布附件集合。** 每个 `VERSION` Release 同时包含 modern `supervisor`/`worker`/`installer`/5 个插件、legacy `supervisor`/`worker`，以及每个文件的 `.sha256`；`Makefile` 的发布与校验共用 `EDGE_VERSION_ATTACHMENT_NAMES`，避免不可变 Release 的部分发布。
+- **Windows manifest 生成。** `dist/build-windows-manifest.sh` 在制品暂存后遍历 `modern-amd64/` 和 `legacy-amd64/`，为每个文件写入 SHA-256 和 `bin`/`plugins` 目标；变体顺序和文件顺序固定，缺任一必需文件即失败。

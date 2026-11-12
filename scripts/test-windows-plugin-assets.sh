@@ -52,6 +52,7 @@ mkdir -p "$bin_root/windows-amd64"
 plugins=(windows_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter)
 printf 'supervisor payload\n' > "$bin_root/windows-amd64/ongrid-edge-supervisor.exe"
 printf 'worker payload\n' > "$bin_root/windows-amd64/ongrid-edge-worker.exe"
+printf 'installer payload\n' > "$bin_root/windows-amd64/ongrid-edge-installer.exe"
 for plugin in "${plugins[@]}"; do
     printf '%s fixture\n' "$plugin" > "$bin_root/windows-amd64/$plugin.exe"
 done
@@ -60,7 +61,7 @@ out="$tmp_dir/out"
 EDGE_BIN_ROOT="$bin_root" \
     bash "$build_script" edge "$version" "$out" windows-amd64 >/dev/null
 
-for artifact in supervisor worker "${plugins[@]}"; do
+for artifact in supervisor worker installer "${plugins[@]}"; do
     file="$out/ongrid-edge-windows-amd64-$version-$artifact.exe"
     [[ -s "$file" ]] || fail "missing attachment $(basename "$file")"
     [[ -s "$file.sha256" ]] || fail "missing sidecar $(basename "$file").sha256"

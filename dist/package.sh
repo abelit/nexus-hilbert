@@ -346,6 +346,8 @@ copy_opt "${REPO_ROOT}/deploy/install/edge/build-edge-bundle.sh" \
          "${STAGE_DIR}/edge/build-edge-bundle.sh" 755
 copy_opt "${REPO_ROOT}/deploy/install/edge/fetch-edge-assets.sh" \
          "${STAGE_DIR}/edge/fetch-edge-assets.sh" 755
+copy_opt "${REPO_ROOT}/dist/build-windows-manifest.sh" \
+         "${STAGE_DIR}/edge/build-windows-manifest.sh" 755
 copy_opt "${REPO_ROOT}/deploy/install/edge/verify-edge-deps-archive.sh" \
          "${STAGE_DIR}/edge/verify-edge-deps-archive.sh" 755
 copy_opt "${REPO_ROOT}/deploy/install/edge/edge-assets-lib.sh" \

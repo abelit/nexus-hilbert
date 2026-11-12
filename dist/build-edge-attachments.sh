@@ -41,7 +41,7 @@ write_sidecar() {
 
 for target in "$@"; do
     case "$target" in
-        linux-amd64|linux-arm64|windows-amd64) ;;
+        linux-amd64|linux-arm64|windows-amd64|legacy-windows-amd64) ;;
         *) echo "build-edge-attachments: unsupported target $target" >&2; exit 2 ;;
     esac
 
@@ -101,15 +101,20 @@ EOF
                 windows-amd64)
                     supervisor_src="$BIN_ROOT/$target/ongrid-edge-supervisor.exe"
                     worker_src="$BIN_ROOT/$target/ongrid-edge-worker.exe"
+                    installer_src="$BIN_ROOT/$target/ongrid-edge-installer.exe"
                     [[ -s "$supervisor_src" ]] || { echo "build-edge-attachments: missing $supervisor_src" >&2; exit 1; }
                     [[ -s "$worker_src" ]] || { echo "build-edge-attachments: missing $worker_src" >&2; exit 1; }
+                    [[ -s "$installer_src" ]] || { echo "build-edge-attachments: missing $installer_src" >&2; exit 1; }
                     supervisor_output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}-supervisor.exe"
                     worker_output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}-worker.exe"
+                    installer_output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}-installer.exe"
                     install -m 0755 "$supervisor_src" "$supervisor_output"
                     install -m 0755 "$worker_src" "$worker_output"
+                    install -m 0755 "$installer_src" "$installer_output"
                     write_sidecar "$supervisor_output"
                     write_sidecar "$worker_output"
-                    outputs=("$supervisor_output" "$worker_output")
+                    write_sidecar "$installer_output"
+                    outputs=("$supervisor_output" "$worker_output" "$installer_output")
                     # Every Windows plugin is mandatory: a release that omits
                     # one would register a plugin on the agent whose binary is
                     # never staged, leaving it permanently unhealthy.
@@ -123,6 +128,23 @@ EOF
                         outputs+=("$plugin_output")
                     done
                     output="${outputs[*]}"
+                    ;;
+                legacy-windows-amd64)
+                    # Legacy 2008 R2 builds are produced by
+                    # tools/build-legacy-windows.sh with Go 1.20. The plugin
+                    # payload is shared with the modern variant, so only the
+                    # supervisor/worker differ.
+                    supervisor_src="$BIN_ROOT/$target/ongrid-edge-supervisor.exe"
+                    worker_src="$BIN_ROOT/$target/ongrid-edge-worker.exe"
+                    [[ -s "$supervisor_src" ]] || { echo "build-edge-attachments: missing $supervisor_src" >&2; exit 1; }
+                    [[ -s "$worker_src" ]] || { echo "build-edge-attachments: missing $worker_src" >&2; exit 1; }
+                    supervisor_output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}-supervisor.exe"
+                    worker_output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}-worker.exe"
+                    install -m 0755 "$supervisor_src" "$supervisor_output"
+                    install -m 0755 "$worker_src" "$worker_output"
+                    write_sidecar "$supervisor_output"
+                    write_sidecar "$worker_output"
+                    output="$supervisor_output $worker_output"
                     ;;
                 *)
                     src="$BIN_ROOT/$target/ongrid-edge"

@@ -100,7 +100,7 @@ sudo ./upgrade.sh
 
 完全离线的自定义安装包可在构建时执行 `ONGRID_BUNDLE_EDGE_ASSETS=1 make package ...`，恢复旧版内嵌二进制方式；该命令会先构建自研 Edge、获取所选架构的全部公共组件，任何文件缺失都会终止打包，避免生成不可安装的离线包。标准 Release 不启用该选项。
 
-Windows Edge 制品暂存到 `/opt/ongrid/edge/windows/`（可执行文件位于 `modern-amd64/` 等变体目录），由 nginx 以 `/edge/windows/` 只读路由提供下载。Windows 的安装前置条件和命令不在本手册展开。
+Windows Edge 制品暂存到 `/opt/ongrid/edge/windows/`：安装器位于 `ongrid-edge-installer.exe`，`modern-amd64/` 与 `legacy-amd64/` 分别存放现代与 2008 R2 变体，插件在各自的 `plugins/` 下，`manifest.json` 由暂存脚本生成并由安装器读取；nginx 以 `/edge/windows/` 只读路由提供下载。Windows 的支持矩阵、2008 R2 前置条件（TLS 1.2、SHA-2/KB3033929）、GPO/SCCM/共享分发、安装命令、服务验证、`restart_service` 策略、插件可用性以及升级/回滚/卸载步骤见 [Windows Edge 安装指南](../../docs/install/windows.md)。
 
 仅当数据目录被人工改乱、从不保留属主的备份恢复，或升级说明明确指出容器 UID 发生变化时，才执行显式权限修复。该操作会遍历历史数据，大目录可能耗时较长：
 

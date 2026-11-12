@@ -35,17 +35,21 @@ MONGODB_EXPORTER_VERSION=8 \
 EDGE_BIN_ROOT="$bin_root" \
     bash "$build_script" edge vtest "$attachments" linux-amd64
 
-# Windows ships two executables plus sidecars; the linux dependency archive
-# stays linux-only.
-mkdir -p "$bin_root/windows-amd64"
+# Windows ships a modern supervisor/worker/installer, a legacy supervisor and
+# worker, and the shared plugin payload. The linux dependency archive stays
+# linux-only.
+mkdir -p "$bin_root/windows-amd64" "$bin_root/legacy-windows-amd64"
 printf 'supervisor payload\n' > "$bin_root/windows-amd64/ongrid-edge-supervisor.exe"
 printf 'worker payload\n' > "$bin_root/windows-amd64/ongrid-edge-worker.exe"
+printf 'installer payload\n' > "$bin_root/windows-amd64/ongrid-edge-installer.exe"
+printf 'legacy supervisor payload\n' > "$bin_root/legacy-windows-amd64/ongrid-edge-supervisor.exe"
+printf 'legacy worker payload\n' > "$bin_root/legacy-windows-amd64/ongrid-edge-worker.exe"
 windows_plugins=(windows_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter)
 for plugin in "${windows_plugins[@]}"; do
     printf '%s payload\n' "$plugin" > "$bin_root/windows-amd64/$plugin.exe"
 done
 EDGE_BIN_ROOT="$bin_root" \
-    bash "$build_script" edge vtest "$attachments" windows-amd64
+    bash "$build_script" edge vtest "$attachments" windows-amd64 legacy-windows-amd64
 
 # Immutable dependency archives must be byte-reproducible. Otherwise a rerun
 # rebuilds a different sidecar and cannot reuse an already complete Release.
@@ -89,6 +93,7 @@ mkdir -p "$fixture_root/$deps_tag" "$fixture_root/vtest"
 cp "$attachments/edge-deps-linux-amd64.tar.xz"* "$fixture_root/$deps_tag/"
 cp "$attachments/ongrid-edge-linux-amd64-vtest"* "$fixture_root/vtest/"
 cp "$attachments/ongrid-edge-windows-amd64-vtest-"* "$fixture_root/vtest/"
+cp "$attachments/ongrid-edge-legacy-windows-amd64-vtest-"* "$fixture_root/vtest/"
 
 fake_bin="$tmp_dir/fake-bin"
 mkdir -p "$fake_bin"
@@ -201,6 +206,38 @@ cmp -s "$bin_root/windows-amd64/ongrid-edge-supervisor.exe" \
 cmp -s "$bin_root/windows-amd64/ongrid-edge-worker.exe" \
     "$windows_dest/windows/modern-amd64/ongrid-edge-worker.exe" \
     || fail "staged windows worker does not match the verified attachment"
+# The legacy variant has its own Go 1.20 supervisor/worker; the installer
+# bootstrap is staged once at the fixed UI URL.
+grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-legacy-windows-amd64-vtest-supervisor.exe' \
+    "$tmp_dir/windows-curl.log" \
+    || fail "legacy windows supervisor attachment was not downloaded directly"
+grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-legacy-windows-amd64-vtest-worker.exe' \
+    "$tmp_dir/windows-curl.log" \
+    || fail "legacy windows worker attachment was not downloaded directly"
+grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-installer.exe' \
+    "$tmp_dir/windows-curl.log" \
+    || fail "windows installer attachment was not downloaded directly"
+[[ -f "$windows_dest/windows/legacy-amd64/ongrid-edge-supervisor.exe" ]] \
+    || fail "legacy supervisor was not staged under windows/legacy-amd64"
+[[ -f "$windows_dest/windows/legacy-amd64/ongrid-edge-worker.exe" ]] \
+    || fail "legacy worker was not staged under windows/legacy-amd64"
+cmp -s "$bin_root/legacy-windows-amd64/ongrid-edge-supervisor.exe" \
+    "$windows_dest/windows/legacy-amd64/ongrid-edge-supervisor.exe" \
+    || fail "staged legacy supervisor does not match the verified attachment"
+cmp -s "$bin_root/legacy-windows-amd64/ongrid-edge-worker.exe" \
+    "$windows_dest/windows/legacy-amd64/ongrid-edge-worker.exe" \
+    || fail "staged legacy worker does not match the verified attachment"
+[[ -f "$windows_dest/windows/ongrid-edge-installer.exe" ]] \
+    || fail "windows installer was not staged at the fixed UI URL"
+cmp -s "$bin_root/windows-amd64/ongrid-edge-installer.exe" \
+    "$windows_dest/windows/ongrid-edge-installer.exe" \
+    || fail "staged windows installer does not match the verified attachment"
+[[ -s "$windows_dest/windows/manifest.json" ]] \
+    || fail "windows manifest.json was not generated after staging"
+for variant in modern-amd64 legacy-amd64; do
+    grep -Fq "\"id\": \"$variant\"" "$windows_dest/windows/manifest.json" \
+        || fail "windows manifest does not list $variant"
+done
 for plugin in "${windows_plugins[@]}"; do
     grep -Fqx "https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-${plugin}.exe" \
         "$tmp_dir/windows-curl.log" \
