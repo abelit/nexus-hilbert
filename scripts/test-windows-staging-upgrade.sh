@@ -108,6 +108,10 @@ run_prepare() {
         NEW_VERSION=vtest
         CALL_LOG="$log"
         export CALL_LOG
+        # Do not let an ambient selection from the developer/CI shell change
+        # what the extracted installer resolves; this test owns its inputs.
+        unset ONGRID_EDGE_TARGETS
+        unset ONGRID_WINDOWS_EDGE_TARGETS
         case "$mode" in
             unset) unset ONGRID_WINDOWS_EDGE_TARGETS ;;
             explicit) export ONGRID_WINDOWS_EDGE_TARGETS="$value" ;;
