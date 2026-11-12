@@ -235,7 +235,7 @@ Add `ongrid_normalize_edge_targets` support for `windows-amd64`; keep existing L
 
 - [ ] **Step 3: Extend `fetch-edge-assets.sh`**
 
-Download `ongrid-edge-windows-amd64-<version>` attachments, verify SHA-256, and lay out the Windows directory.
+Download `ongrid-edge-windows-amd64-<version>-supervisor.exe` and `ongrid-edge-windows-amd64-<version>-worker.exe` plus their `.sha256` sidecars, verify SHA-256, and lay them out as `windows/modern-amd64/ongrid-edge-supervisor.exe` and `.../ongrid-edge-worker.exe`.
 
 - [ ] **Step 4: Add nginx route**
 
@@ -908,6 +908,7 @@ git commit -m "build(edge): add go 1.20 legacy windows build harness"
 **Files:**
 - Modify: `dist/build-edge-attachments.sh`
 - Modify: `dist/build-windows-manifest.sh`
+- Modify: `Makefile`
 - Create: `docs/install/windows.md`
 - Modify: `deploy/install/README.md`
 - Modify: `docs/design/windows-edge-installation.md`（决策记录）
@@ -921,7 +922,20 @@ git commit -m "build(edge): add go 1.20 legacy windows build harness"
 
 - [ ] **Step 2: Add legacy artifacts**
 
-`build-edge-attachments.sh windows` accepts `legacy-amd64` and emits `ongrid-edge-legacy-windows-amd64-<version>.zip` plus `.sha256`.
+`build-edge-attachments.sh windows` accepts `legacy-amd64` and emits two files plus sidecars, matching the modern layout:
+
+```text
+ongrid-edge-legacy-windows-amd64-<version>-supervisor.exe
+ongrid-edge-legacy-windows-amd64-<version>-supervisor.exe.sha256
+ongrid-edge-legacy-windows-amd64-<version>-worker.exe
+ongrid-edge-legacy-windows-amd64-<version>-worker.exe.sha256
+```
+
+Do not use a zip; the manifest and installer verify each file individually.
+
+- [ ] **Step 2b: Extend release publish/verify to Windows**
+
+Update `verify-edge-version-release` and both file lists in `publish-edge-version-attachments` (in `Makefile`) to include the four Windows files for each variant. Decide the ordering relative to already-published tags: `scripts/publish-cnb-release-attachments.sh` refuses to add files to a partially populated immutable release, so Windows must be included before the first tagged publish that is meant to carry it.
 
 - [ ] **Step 3: Write `docs/install/windows.md`**
 
