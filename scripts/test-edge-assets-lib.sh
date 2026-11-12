@@ -45,6 +45,12 @@ if ongrid_normalize_edge_targets 'linux-amd64 linux-ppc64le' >/dev/null; then
     fail "an unsupported Edge target was accepted"
 fi
 
+[[ "$(ongrid_normalize_edge_targets windows-amd64)" == windows-amd64 ]] \
+    || fail "windows-amd64 was not accepted as a versioned Edge target"
+[[ "$(ongrid_normalize_edge_targets 'linux-amd64 windows-amd64 linux-amd64')" \
+    == 'linux-amd64 windows-amd64' ]] \
+    || fail "windows targets were not normalized alongside linux targets"
+
 [[ "$(ongrid_detect_host_edge_target x86_64)" == linux-amd64 ]] \
     || fail "x86_64 host architecture was not mapped to linux-amd64"
 [[ "$(ongrid_detect_host_edge_target aarch64)" == linux-arm64 ]] \

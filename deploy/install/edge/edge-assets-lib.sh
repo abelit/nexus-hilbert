@@ -27,7 +27,7 @@ ongrid_normalize_edge_targets() {
     (( ${#targets[@]} > 0 )) || targets=(linux-amd64)
     for target in "${targets[@]}"; do
         case "$target" in
-            linux-amd64|linux-arm64) ;;
+            linux-amd64|linux-arm64|windows-amd64) ;;
             *) return 1 ;;
         esac
         case " $normalized " in

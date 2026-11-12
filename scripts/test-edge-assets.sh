@@ -35,6 +35,14 @@ MONGODB_EXPORTER_VERSION=8 \
 EDGE_BIN_ROOT="$bin_root" \
     bash "$build_script" edge vtest "$attachments" linux-amd64
 
+# Windows ships two executables plus sidecars; the linux dependency archive
+# stays linux-only.
+mkdir -p "$bin_root/windows-amd64"
+printf 'supervisor payload\n' > "$bin_root/windows-amd64/ongrid-edge-supervisor.exe"
+printf 'worker payload\n' > "$bin_root/windows-amd64/ongrid-edge-worker.exe"
+EDGE_BIN_ROOT="$bin_root" \
+    bash "$build_script" edge vtest "$attachments" windows-amd64
+
 # Immutable dependency archives must be byte-reproducible. Otherwise a rerun
 # rebuilds a different sidecar and cannot reuse an already complete Release.
 rebuilt_attachments="$tmp_dir/attachments-rebuilt"
@@ -52,6 +60,10 @@ cmp -s \
 
 (cd "$attachments" && sha256sum -c edge-deps-linux-amd64.tar.xz.sha256)
 (cd "$attachments" && sha256sum -c ongrid-edge-linux-amd64-vtest.sha256)
+(cd "$attachments" \
+    && sha256sum -c ongrid-edge-windows-amd64-vtest-supervisor.exe.sha256)
+(cd "$attachments" \
+    && sha256sum -c ongrid-edge-windows-amd64-vtest-worker.exe.sha256)
 bash "$repo_root/deploy/install/edge/verify-edge-deps-archive.sh" \
     "$attachments/edge-deps-linux-amd64.tar.xz" linux-amd64 "$deps_tag" >/dev/null
 
@@ -72,6 +84,7 @@ fixture_root="$tmp_dir/releases"
 mkdir -p "$fixture_root/$deps_tag" "$fixture_root/vtest"
 cp "$attachments/edge-deps-linux-amd64.tar.xz"* "$fixture_root/$deps_tag/"
 cp "$attachments/ongrid-edge-linux-amd64-vtest"* "$fixture_root/vtest/"
+cp "$attachments/ongrid-edge-windows-amd64-vtest-"* "$fixture_root/vtest/"
 
 fake_bin="$tmp_dir/fake-bin"
 mkdir -p "$fake_bin"
@@ -150,6 +163,62 @@ ONGRID_EDGE_ARTIFACT_BASE_URL=https://cnb.test/repo/-/releases/download \
 grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-linux-amd64-vtest' \
     "$tmp_dir/auto-curl.log" \
     || fail "host architecture auto-detection requested the wrong Edge attachment"
+
+# Windows versioned attachments are staged for the installer manifest under
+# windows/modern-amd64. Windows has no dependency archive, so a windows-only
+# invocation must not require ONGRID_EDGE_DEPS_TAG or download edge-deps-*.
+windows_dest="$tmp_dir/windows-dest"
+: > "$tmp_dir/windows-curl.log"
+FAKE_CURL_LOG="$tmp_dir/windows-curl.log" \
+FAKE_RELEASE_ROOT="$fixture_root" \
+PATH="$fake_bin:$PATH" \
+ONGRID_EDGE_ARTIFACT_CACHE_DIR="$tmp_dir/windows-cache" \
+ONGRID_EDGE_ARTIFACT_BASE_URL=https://cnb.test/repo/-/releases/download \
+    bash "$fetch_script" "$windows_dest" vtest windows-amd64
+grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-supervisor.exe' \
+    "$tmp_dir/windows-curl.log" \
+    || fail "windows supervisor attachment was not downloaded directly"
+grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-worker.exe' \
+    "$tmp_dir/windows-curl.log" \
+    || fail "windows worker attachment was not downloaded directly"
+grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-supervisor.exe.sha256' \
+    "$tmp_dir/windows-curl.log" \
+    || fail "windows supervisor checksum sidecar was not downloaded"
+grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-worker.exe.sha256' \
+    "$tmp_dir/windows-curl.log" \
+    || fail "windows worker checksum sidecar was not downloaded"
+[[ -f "$windows_dest/windows/modern-amd64/ongrid-edge-supervisor.exe" ]] \
+    || fail "windows supervisor was not staged under windows/modern-amd64"
+[[ -f "$windows_dest/windows/modern-amd64/ongrid-edge-worker.exe" ]] \
+    || fail "windows worker was not staged under windows/modern-amd64"
+cmp -s "$bin_root/windows-amd64/ongrid-edge-supervisor.exe" \
+    "$windows_dest/windows/modern-amd64/ongrid-edge-supervisor.exe" \
+    || fail "staged windows supervisor does not match the verified attachment"
+cmp -s "$bin_root/windows-amd64/ongrid-edge-worker.exe" \
+    "$windows_dest/windows/modern-amd64/ongrid-edge-worker.exe" \
+    || fail "staged windows worker does not match the verified attachment"
+if grep -Fq 'edge-deps-' "$tmp_dir/windows-curl.log"; then
+    fail "windows staging downloaded a linux dependency archive"
+fi
+
+# A tampered Windows attachment must fail checksum verification before the
+# binary is staged.
+windows_bad_root="$tmp_dir/windows-bad-releases"
+mkdir -p "$windows_bad_root/vtest"
+cp "$attachments/ongrid-edge-windows-amd64-vtest-supervisor.exe"* "$windows_bad_root/vtest/"
+cp "$attachments/ongrid-edge-windows-amd64-vtest-worker.exe"* "$windows_bad_root/vtest/"
+printf 'tampered\n' >> "$windows_bad_root/vtest/ongrid-edge-windows-amd64-vtest-supervisor.exe"
+if FAKE_CURL_LOG="$tmp_dir/windows-bad-curl.log" \
+    FAKE_RELEASE_ROOT="$windows_bad_root" \
+    PATH="$fake_bin:$PATH" \
+    ONGRID_EDGE_ARTIFACT_CACHE_DIR="$tmp_dir/windows-bad-cache" \
+    ONGRID_EDGE_ARTIFACT_BASE_URL=https://cnb.test/repo/-/releases/download \
+    bash "$fetch_script" "$tmp_dir/windows-bad-dest" vtest windows-amd64 \
+        >/dev/null 2>&1; then
+    fail "tampered windows attachment passed checksum verification"
+fi
+[[ ! -e "$tmp_dir/windows-bad-dest/windows/modern-amd64/ongrid-edge-supervisor.exe" ]] \
+    || fail "tampered windows supervisor was staged after checksum failure"
 
 # Dependency archives keep stable filenames across release tags. Reusing one
 # cache directory after a dependency version bump must fetch and stage the new

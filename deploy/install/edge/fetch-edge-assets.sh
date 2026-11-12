@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-DEST_DIR=${1:?usage: fetch-edge-assets.sh <destination> <version> [linux-amd64|linux-arm64 ...]}
+DEST_DIR=${1:?usage: fetch-edge-assets.sh <destination> <version> [linux-amd64|linux-arm64|windows-amd64 ...]}
 VERSION=${2:?version}
 shift 2
 
@@ -20,7 +20,6 @@ EDGE_ASSETS_LIB="$SCRIPT_DIR/edge-assets-lib.sh"
 
 BASE_URL=${ONGRID_EDGE_ARTIFACT_BASE_URL:-https://cnb.cool/ongridio/ongrid-edge/-/releases/download}
 DEPS_TAG=${ONGRID_EDGE_DEPS_TAG:-$CONFIG_DEPS_TAG}
-[[ -n "$DEPS_TAG" ]] || { echo "ONGRID_EDGE_DEPS_TAG is required (normally provided by edge-artifacts.env)" >&2; exit 1; }
 CACHE_DIR=${ONGRID_EDGE_ARTIFACT_CACHE_DIR:-/var/cache/ongrid/edge-artifacts}
 CURL_FLAGS=(
     --fail --location --show-error
@@ -57,7 +56,22 @@ log() { printf '[edge-assets] %s\n' "$*" >&2; }
 die() { printf '[edge-assets] error: %s\n' "$*" >&2; exit 1; }
 
 [[ "$VERSION" =~ ^v?[0-9A-Za-z][0-9A-Za-z._-]*$ ]] || die "invalid Edge version: $VERSION"
-[[ "$DEPS_TAG" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]] || die "invalid dependency release tag: $DEPS_TAG"
+[[ -z "$DEPS_TAG" || "$DEPS_TAG" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]] \
+    || die "invalid dependency release tag: $DEPS_TAG"
+
+# Dependency archives are a Linux payload; a windows-only invocation stages the
+# versioned executables and must not require a dependency release tag.
+needs_deps=0
+for target in "${TARGETS[@]}"; do
+    case "$target" in
+        linux-amd64|linux-arm64) needs_deps=1 ;;
+        windows-amd64) ;;
+        *) die "unsupported Edge target: $target" ;;
+    esac
+done
+if (( needs_deps == 1 )); then
+    [[ -n "$DEPS_TAG" ]] || die "ONGRID_EDGE_DEPS_TAG is required (normally provided by edge-artifacts.env)"
+fi
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
@@ -118,32 +132,42 @@ deps=(
 
 for target in "${TARGETS[@]}"; do
     case "$target" in
-        linux-amd64|linux-arm64) ;;
-        *) die "unsupported Edge target: $target" ;;
+        linux-amd64|linux-arm64)
+            deps_name="edge-deps-${target}.tar.xz"
+            edge_name="ongrid-edge-${target}-${VERSION}"
+            deps_archive=$(download_verified "$DEPS_TAG" "$deps_name")
+            edge_binary=$(download_verified "$VERSION" "$edge_name")
+
+            extract_dir="$work/extract-$target"
+            "$VERIFY_DEPS_SCRIPT" "$deps_archive" "$target" "$DEPS_TAG" "$extract_dir" \
+                >/dev/null || die "dependency archive validation failed for $target"
+
+            for component in "${deps[@]}"; do
+                install -m 0755 "$extract_dir/$component" "$DEST_DIR/${component}-${target}"
+            done
+            install -m 0755 "$edge_binary" "$DEST_DIR/ongrid-edge-${target}"
+
+            deps_sha=$(sha256sum "$deps_archive" | awk 'NR == 1 {print $1}')
+            edge_sha=$(sha256sum "$edge_binary" | awk 'NR == 1 {print $1}')
+            printf 'deps=%s/%s/%s sha256:%s\nedge=%s/%s/%s sha256:%s\n' \
+                "$BASE_URL" "$DEPS_TAG" "$deps_name" "$deps_sha" \
+                "$BASE_URL" "$VERSION" "$edge_name" "$edge_sha" \
+                > "$DEST_DIR/edge-assets-${target}.ref"
+            # Redirection applies the caller's umask, unlike the `install -m 0755` above.
+            # The Manager container reads this file as non-root, so pin it explicitly.
+            chmod 0644 "$DEST_DIR/edge-assets-${target}.ref"
+            ;;
+        windows-amd64)
+            # Each Windows variant ships a supervisor and worker executable. The
+            # installer reads them from windows/modern-amd64 via /edge/windows/.
+            windows_dir="$DEST_DIR/windows/modern-amd64"
+            mkdir -p "$windows_dir"
+            for component in supervisor worker; do
+                windows_name="ongrid-edge-windows-amd64-${VERSION}-${component}.exe"
+                windows_binary=$(download_verified "$VERSION" "$windows_name")
+                install -m 0755 "$windows_binary" "$windows_dir/ongrid-edge-${component}.exe"
+            done
+            ;;
     esac
-
-    deps_name="edge-deps-${target}.tar.xz"
-    edge_name="ongrid-edge-${target}-${VERSION}"
-    deps_archive=$(download_verified "$DEPS_TAG" "$deps_name")
-    edge_binary=$(download_verified "$VERSION" "$edge_name")
-
-    extract_dir="$work/extract-$target"
-    "$VERIFY_DEPS_SCRIPT" "$deps_archive" "$target" "$DEPS_TAG" "$extract_dir" \
-        >/dev/null || die "dependency archive validation failed for $target"
-
-    for component in "${deps[@]}"; do
-        install -m 0755 "$extract_dir/$component" "$DEST_DIR/${component}-${target}"
-    done
-    install -m 0755 "$edge_binary" "$DEST_DIR/ongrid-edge-${target}"
-
-    deps_sha=$(sha256sum "$deps_archive" | awk 'NR == 1 {print $1}')
-    edge_sha=$(sha256sum "$edge_binary" | awk 'NR == 1 {print $1}')
-    printf 'deps=%s/%s/%s sha256:%s\nedge=%s/%s/%s sha256:%s\n' \
-        "$BASE_URL" "$DEPS_TAG" "$deps_name" "$deps_sha" \
-        "$BASE_URL" "$VERSION" "$edge_name" "$edge_sha" \
-        > "$DEST_DIR/edge-assets-${target}.ref"
-    # Redirection applies the caller's umask, unlike the `install -m 0755` above.
-    # The Manager container reads this file as non-root, so pin it explicitly.
-    chmod 0644 "$DEST_DIR/edge-assets-${target}.ref"
     log "verified and staged $target"
 done

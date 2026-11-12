@@ -476,6 +476,9 @@ services:
       # Public edge artifact dir: install.sh + cross-arch binaries served
       # at https://<host>/install.sh and /edge/<file>.
       - ./edge:/usr/share/nginx/html/edge:ro
+      # Windows installer artifacts (manifest + modern/legacy executables)
+      # served at https://<host>/edge/windows/.
+      - ./edge/windows:/usr/share/nginx/html/edge/windows:ro
     ports:
       - "${ONGRID_HTTP_PORT:-443}:443"
       - "${ONGRID_HTTP_REDIRECT_PORT:-80}:80"
