@@ -1,0 +1,827 @@
+package multiplexer
+
+import (
+	"context"
+	"io"
+	"time"
+
+	"github.com/jumboframes/armorigo/log"
+	"github.com/jumboframes/armorigo/synchub"
+	"github.com/singchia/geminio"
+	"github.com/singchia/geminio/conn"
+	"github.com/singchia/geminio/packet"
+	"github.com/singchia/geminio/pkg/id"
+	"github.com/singchia/geminio/pkg/iodefine"
+	gsync "github.com/singchia/geminio/pkg/sync"
+	"github.com/singchia/yafsm"
+)
+
+const (
+	INIT         = "init"
+	SESSION_SENT = "session_sent"
+	SESSION_RECV = "session_recv"
+	SESSIONED    = "sessioned"
+	DISMISS_SENT = "dismiss_sent"
+	DISMISS_RECV = "dismiss_recv"
+	DISMISS_HALF = "dismiss_half"
+	DISMISSED    = "dismissed"
+	FINI         = "fini"
+
+	ET_SESSIONSENT = "sessionsent"
+	ET_SESSIONRECV = "sessionrecv"
+	ET_SESSIONACK  = "sessionrecv"
+	ET_ERROR       = "error"
+	ET_DISMISSSENT = "dismisssent"
+	ET_DISMISSRECV = "dismissrecv"
+	ET_DISMISSACK  = "dismissack"
+	ET_FINI        = "fini"
+)
+
+type dialogue struct {
+	// options for timer, packet factory, log, delegate and meta
+	*opts
+	// log and pf are independent from opts to avoid data races when updated via options
+	log log.Logger
+	pf  packet.PacketFactory
+	// delegate
+	dlgt Delegate
+	// meta
+	meta []byte
+	peer string
+
+	// under layer
+	cn conn.Conn
+
+	onlined   bool
+	closewait synchub.Sync
+
+	// dialogue id
+	negotiatingID       uint64
+	peerNegotiatingID   uint64
+	dialogueIDPeersCall bool
+	dialogueID          uint64
+	// synchub
+	shub *synchub.SyncHub
+
+	fsm *yafsm.FSM
+
+	// ctx/cancel controls dialogue lifetime; replaces dialogueOK bool.
+	// All senders select on ctx.Done() before writing to writeInCh.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// io
+	readInCh, writeOutCh     chan packet.Packet
+	readOutCh, writeInCh     chan packet.Packet
+	readInSize, writeOutSize int
+	readOutSize, writeInSize int
+	failedCh                 chan packet.Packet
+
+
+	closeOnce   *gsync.Once
+	closeIOOnce *gsync.Once
+	finiOnce    *gsync.Once
+	monitorStop chan struct{} // closed by fini() to stop the channel-monitor goroutine
+}
+
+type DialogueOption func(*dialogue)
+
+func OptionDialogueLogger(log log.Logger) DialogueOption {
+	return func(dg *dialogue) {
+		dg.log = log
+	}
+}
+
+func OptionDialoguePacketFactory(pf packet.PacketFactory) DialogueOption {
+	return func(dg *dialogue) {
+		dg.pf = pf
+	}
+}
+
+// For the default dialogue which is ready for rolling
+func OptionDialogueState(state string) DialogueOption {
+	return func(dg *dialogue) {
+		dg.fsm.SetState(state)
+	}
+}
+
+func OptionDialogueDelegate(dlgt Delegate) DialogueOption {
+	return func(dg *dialogue) {
+		dg.dlgt = dlgt
+	}
+}
+
+// OptionDialogueMeta set the meta info for the dialogue
+func OptionDialogueMeta(meta []byte) DialogueOption {
+	return func(dg *dialogue) {
+		dg.meta = meta
+	}
+}
+
+func OptionDialoguePeer(peer string) DialogueOption {
+	return func(dg *dialogue) {
+		dg.peer = peer
+	}
+}
+
+func OptionDialogueNegotiatingID(negotiatingID uint64, dialogueIDPeersCall bool) DialogueOption {
+	return func(dg *dialogue) {
+		dg.negotiatingID = negotiatingID
+		dg.dialogueIDPeersCall = dialogueIDPeersCall
+	}
+}
+
+func OptionDialogueBufferSize(read, write int) DialogueOption {
+	return func(dg *dialogue) {
+		if read > 0 {
+			dg.readOutSize = read
+		}
+		if write > 0 {
+			dg.writeInSize = write
+		}
+	}
+}
+
+func NewDialogue(cn conn.Conn, baseOpts *opts, opts ...DialogueOption) (*dialogue, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dg := &dialogue{
+		opts:         baseOpts,
+		meta:         cn.Meta(),
+		dialogueID:   packet.SessionIDNull,
+		cn:           cn,
+		fsm:          yafsm.NewFSM(yafsm.WithInSeq()),
+		closeOnce:    new(gsync.Once),
+		closeIOOnce:  new(gsync.Once),
+		finiOnce:     new(gsync.Once),
+		ctx:          ctx,
+		cancel:       cancel,
+		monitorStop:  make(chan struct{}),
+		readInSize:   32,
+		writeOutSize: 32,
+		readOutSize:  32,
+		writeInSize:  32,
+	}
+	// states
+	dg.initFSM()
+	// options
+	for _, opt := range opts {
+		opt(dg)
+	}
+// io size
+	dg.readInCh = make(chan packet.Packet, dg.readInSize)
+	dg.writeOutCh = make(chan packet.Packet, dg.writeOutSize)
+	dg.readOutCh = make(chan packet.Packet, dg.readOutSize)
+	dg.writeInCh = make(chan packet.Packet, dg.writeInSize)
+
+	dg.shub = synchub.NewSyncHub(synchub.OptionTimer(dg.tmr))
+
+	// Use independent log and pf to avoid data race with shared opts
+	if dg.log == nil {
+		dg.log = dg.opts.log
+	}
+	if dg.log == nil {
+		dg.log = log.DefaultLog
+	}
+
+	if dg.pf == nil {
+		dg.pf = dg.opts.pf
+	}
+	if dg.pf == nil {
+		dg.pf = packet.NewPacketFactory(id.NewIDCounter(id.Even))
+	}
+
+	// rolling up
+	go dg.handlePkt()
+	go dg.writePkt()
+	// Start channel monitoring for debugging memory issues
+	dg.startChannelMonitor(false, 30*time.Second)
+	return dg, nil
+}
+
+func (dg *dialogue) Done() <-chan struct{} {
+	return dg.ctx.Done()
+}
+
+func (dg *dialogue) Meta() []byte {
+	return dg.meta
+}
+
+func (dg *dialogue) ClientID() uint64 {
+	return dg.cn.ClientID()
+}
+
+func (dg *dialogue) NegotiatingID() uint64 {
+	return dg.negotiatingID
+}
+
+func (dg *dialogue) DialogueID() uint64 {
+	return dg.dialogueID
+}
+
+// TODO
+func (dg *dialogue) Side() geminio.Side {
+	return geminio.RecipientSide
+}
+
+func (dg *dialogue) Peer() string {
+	return dg.peer
+}
+
+func (dg *dialogue) Write(pkt packet.Packet) error {
+	pkt.(packet.SessionAbove).SetSessionID(dg.dialogueID)
+	return dg.sendToWriteIn(pkt)
+}
+
+func (dg *dialogue) WriteWait(pkt packet.Packet) error {
+	pkt.(packet.SessionAbove).SetSessionID(dg.dialogueID)
+	return dg.sendToWriteIn(pkt)
+}
+
+// sendToWriteIn is the single entry point for all writes to writeInCh.
+// It selects on ctx.Done() so it never sends after fini() drains the channel.
+func (dg *dialogue) sendToWriteIn(pkt packet.Packet) error {
+	select {
+	case <-dg.ctx.Done():
+		return io.EOF
+	case dg.writeInCh <- pkt:
+		return nil
+	}
+}
+
+// sendToWriteOut is the single entry point for all writes to writeOutCh.
+// It selects on ctx.Done() so it never blocks after writePkt() exits.
+func (dg *dialogue) sendToWriteOut(pkt packet.Packet) error {
+	select {
+	case <-dg.ctx.Done():
+		return io.EOF
+	case dg.writeOutCh <- pkt:
+		return nil
+	}
+}
+
+func (dg *dialogue) Read() (packet.Packet, error) {
+	pkt, ok := <-dg.readOutCh
+	if !ok {
+		return nil, io.EOF
+	}
+	return pkt, nil
+}
+
+func (dg *dialogue) ReadC() <-chan packet.Packet {
+	return dg.readOutCh
+}
+
+func (dg *dialogue) initFSM() {
+	init := dg.fsm.AddState(INIT)
+	sessionsent := dg.fsm.AddState(SESSION_SENT)
+	sessionrecv := dg.fsm.AddState(SESSION_RECV)
+	sessioned := dg.fsm.AddState(SESSIONED)
+	dismisssent := dg.fsm.AddState(DISMISS_SENT)
+	dismissrecv := dg.fsm.AddState(DISMISS_RECV)
+	dismisshalf := dg.fsm.AddState(DISMISS_HALF)
+	dismissed := dg.fsm.AddState(DISMISSED)
+	fini := dg.fsm.AddState(FINI)
+	dg.fsm.SetState(INIT)
+
+	// sender
+	dg.fsm.AddEvent(ET_SESSIONSENT, init, sessionsent)
+	dg.fsm.AddEvent(ET_SESSIONACK, sessionsent, sessioned)
+
+	// receiver
+	dg.fsm.AddEvent(ET_SESSIONRECV, init, sessionrecv)
+	dg.fsm.AddEvent(ET_SESSIONACK, sessionrecv, sessioned)
+	dg.fsm.AddEvent(ET_ERROR, sessionrecv, sessionrecv, dg.closeWrapper)
+
+	// both
+	dg.fsm.AddEvent(ET_DISMISSSENT, sessionrecv, dismisssent)
+	dg.fsm.AddEvent(ET_DISMISSSENT, sessioned, dismisssent)
+	dg.fsm.AddEvent(ET_DISMISSSENT, dismissrecv, dismisssent)
+	dg.fsm.AddEvent(ET_DISMISSSENT, dismisshalf, dismisshalf)
+
+	dg.fsm.AddEvent(ET_DISMISSRECV, sessionsent, dismissrecv)
+	dg.fsm.AddEvent(ET_DISMISSRECV, sessioned, dismissrecv)
+	dg.fsm.AddEvent(ET_DISMISSRECV, dismisssent, dismissrecv)
+	dg.fsm.AddEvent(ET_DISMISSRECV, dismisshalf, dismisshalf)
+
+	// the 4-way handshake
+	dg.fsm.AddEvent(ET_DISMISSACK, dismisssent, dismisshalf)
+	dg.fsm.AddEvent(ET_DISMISSACK, dismissrecv, dismisshalf)
+	dg.fsm.AddEvent(ET_DISMISSACK, dismisshalf, dismissed)
+
+	// fini
+	dg.fsm.AddEvent(ET_FINI, init, fini)
+	dg.fsm.AddEvent(ET_FINI, sessionsent, fini)
+	dg.fsm.AddEvent(ET_FINI, sessionrecv, fini)
+	dg.fsm.AddEvent(ET_FINI, sessioned, fini)
+	dg.fsm.AddEvent(ET_FINI, dismisssent, fini)
+	dg.fsm.AddEvent(ET_FINI, dismissrecv, fini)
+	dg.fsm.AddEvent(ET_FINI, dismisshalf, fini)
+	dg.fsm.AddEvent(ET_FINI, dismissed, fini)
+}
+
+func (dg *dialogue) open() error {
+	dg.log.Debugf("dialogue is opening, clientID: %d, dialogueID: %d",
+		dg.cn.ClientID(), dg.dialogueID)
+
+	pkt := dg.pf.NewSessionPacket(dg.negotiatingID, dg.dialogueIDPeersCall, dg.meta, dg.peer)
+	// sync must set before the packet send down, in case of the ack coming first
+	sync := dg.shub.Add(pkt.PacketID, synchub.WithTimeout(30*time.Second))
+
+	if err := dg.sendToWriteIn(pkt); err != nil {
+		return err
+	}
+
+	event := <-sync.C()
+	if event.Error != nil {
+		dg.log.Debugf("dialogue open err: %s, clientID: %d, dialogueID: %d",
+			event.Error, dg.cn.ClientID(), dg.dialogueID)
+		// ctx.Done() will stop handlePkt; readInCh will be garbage collected.
+	}
+	return event.Error
+}
+
+// we may or not separate the goroutine because the underlay is still a channel
+func (dg *dialogue) writePkt() {
+	// Capture the channel locally so fini() writing dg.writeOutCh = nil
+	// concurrently does not race with our range expression.
+	writeOutCh := dg.writeOutCh
+	for pkt := range writeOutCh {
+		dg.log.Tracef("dialogue write down, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+			dg.cn.ClientID(), dg.dialogueID, pkt.ID(), pkt.Type().String())
+		// dowritePkt already logs the error at the appropriate level.
+		if err := dg.dowritePkt(pkt, true); err != nil {
+			dg.closeIO()
+			return
+		}
+	}
+	dg.log.Debugf("dialogue write done, clientID: %d, dialogueID: %d",
+		dg.cn.ClientID(), dg.dialogueID)
+}
+
+func (dg *dialogue) dowritePkt(pkt packet.Packet, record bool) error {
+	err := dg.cn.Write(pkt)
+	if err != nil {
+		// A write failure after the dialogue context has been canceled —
+		// or a plain "conn gone" error from the layer below (EOF, closed
+		// pipe, use of closed network connection) — is part of normal
+		// teardown, typically flushing the final DismissAck right as the
+		// peer hangs up. Log at Debug so ordinary close does not produce
+		// ERROR-level noise.
+		if dg.ctx.Err() != nil || iodefine.IsConnGone(err) {
+			dg.log.Debugf("dialogue write down err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+				err, dg.cn.ClientID(), dg.dialogueID, pkt.ID(), pkt.Type().String())
+		} else {
+			dg.log.Errorf("dialogue write down err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+				err, dg.cn.ClientID(), dg.dialogueID, pkt.ID(), pkt.Type().String())
+		}
+		if record && dg.failedCh != nil {
+			// only upper layer packet need to be notified
+			dg.failedCh <- pkt
+		}
+	}
+	return err
+}
+
+func (dg *dialogue) handlePkt() {
+	readInCh := dg.readInCh
+	writeInCh := dg.writeInCh
+
+	for {
+		select {
+		case <-dg.ctx.Done():
+			// fini() cancelled us; drain writeInCh before exiting
+			for {
+				select {
+				case pkt, ok := <-writeInCh:
+					if !ok {
+						goto FINI
+					}
+					if dg.failedCh != nil && !packet.SessionLayer(pkt) {
+						dg.failedCh <- pkt
+					}
+				default:
+					goto FINI
+				}
+			}
+		case pkt, ok := <-readInCh:
+			if !ok {
+				goto FINI
+			}
+			dg.log.Tracef("dialogue read in packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+				dg.cn.ClientID(), dg.dialogueID, pkt.ID(), pkt.Type().String())
+			ret := dg.handleIn(pkt)
+			switch ret {
+			case iodefine.IONewActive, iodefine.IOSuccess:
+				continue
+			case iodefine.IOClosed:
+				goto FINI
+			case iodefine.IOErr:
+				goto FINI
+			}
+		case pkt := <-writeInCh:
+			dg.log.Tracef("dialogue write in packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+				dg.cn.ClientID(), dg.dialogueID, pkt.ID(), pkt.Type().String())
+			ret := dg.handleOut(pkt)
+			switch ret {
+			case iodefine.IONewPassive, iodefine.IOSuccess:
+				continue
+			case iodefine.IOClosed:
+				goto FINI
+			case iodefine.IOErr:
+				goto FINI
+			}
+		}
+	}
+FINI:
+	dg.log.Debugf("dialogue handle pkt done, clientID: %d, dialogueID: %d",
+		dg.cn.ClientID(), dg.dialogueID)
+
+	// only onlined Dialogue need to be notified
+	if dg.dlgt != nil && dg.onlined {
+		dg.dlgt.DialogueOffline(dg)
+	}
+	// only handlePkt leads to this fini, and reclaims all channels and other resources
+	dg.fini()
+}
+
+func (dg *dialogue) handleIn(pkt packet.Packet) iodefine.IORet {
+	switch realPkt := pkt.(type) {
+	case *packet.SessionPacket:
+		return dg.handleInSessionPacket(realPkt)
+	case *packet.SessionAckPacket:
+		return dg.handleInSessionAckPacket(realPkt)
+	case *packet.DismissPacket:
+		return dg.handleInDismissPacket(realPkt)
+	case *packet.DismissAckPacket:
+		return dg.handleInDimssAckPacket(realPkt)
+	default:
+		return dg.handleInDataPacket(pkt)
+	}
+}
+
+func (dg *dialogue) handleOut(pkt packet.Packet) iodefine.IORet {
+	switch realPkt := pkt.(type) {
+	case *packet.SessionPacket:
+		return dg.handleOutSessionPacket(realPkt)
+	case *packet.SessionAckPacket:
+		return dg.handleOutSessionAckPacket(realPkt)
+	case *packet.DismissPacket:
+		return dg.handleOutDismissPacket(realPkt)
+	case *packet.DismissAckPacket:
+		return dg.handleOutDismissAckPacket(realPkt)
+	default:
+		return dg.handleOutDataPacket(pkt)
+	}
+}
+
+// input packet
+func (dg *dialogue) handleInSessionPacket(pkt *packet.SessionPacket) iodefine.IORet {
+	dg.peerNegotiatingID = pkt.NegotiateID()
+	dg.log.Debugf("read dialogue packet, clientID: %d, negotiateID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), pkt.NegotiateID(), dg.negotiatingID, pkt.ID())
+	err := dg.fsm.EmitEvent(ET_SESSIONRECV)
+	if err != nil {
+		dg.log.Debugf("emit ET_SESSIONRECV err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+			err, dg.cn.ClientID(), dg.negotiatingID, pkt.ID())
+		return iodefine.IOErr
+	}
+	// negotiate sessionID
+	// if under conn is client, asking for a sessionID
+	// if under conn is server, return prepared negotiatingID
+	dialogueID := pkt.NegotiateID()
+	if pkt.SessionIDAcquire() {
+		dialogueID = dg.negotiatingID
+	}
+	dg.dialogueID = dialogueID
+	dg.meta = pkt.SessionData.Meta
+
+	retPkt := dg.pf.NewSessionAckPacket(pkt.PacketID, pkt.NegotiateID(), dialogueID, nil)
+	// Send from a goroutine because handlePkt() is the only consumer of writeInCh;
+	// blocking here would deadlock. sendToWriteIn selects on ctx.Done() for safety.
+	go func() { dg.sendToWriteIn(retPkt) }() //nolint:errcheck
+	return iodefine.IOSuccess
+}
+
+func (dg *dialogue) handleInSessionAckPacket(pkt *packet.SessionAckPacket) iodefine.IORet {
+	dg.log.Debugf("read dialogue ack packet, clientID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), pkt.SessionID(), pkt.ID())
+	err := dg.fsm.EmitEvent(ET_SESSIONACK)
+	if err != nil {
+		dg.log.Debugf("emit ET_SESSIONACK err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+			err, dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+		dg.shub.Error(pkt.ID(), err)
+		return iodefine.IOErr
+	}
+	dg.dialogueID = pkt.SessionID()
+	dg.meta = pkt.SessionData.Meta
+
+	// the packetID is assigned by SessionPacket, originally from function open,
+	// and open is waiting for the completion.
+	ok := dg.shub.Done(pkt.ID())
+	if !ok {
+		dg.log.Infof("read dialogue ack packet and no waiting sync, clientID: %d, dialogueID: %d, packetID: %d",
+			dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+	}
+	dg.onlined = true
+	return iodefine.IONewActive
+}
+
+func (dg *dialogue) handleInDismissPacket(pkt *packet.DismissPacket) iodefine.IORet {
+	dg.log.Debugf("read dismiss packet, clientID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+	prevState := dg.fsm.State()
+	err := dg.fsm.EmitEvent(ET_DISMISSRECV)
+	if err != nil {
+		dg.log.Debugf("emit ET_DISMISSRECV err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+			err, dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+		return iodefine.IOErr
+	}
+	retPkt := dg.pf.NewDismissAckPacket(pkt.ID(),
+		pkt.SessionID(), nil)
+
+	// If we were already in DISMISS_HALF (i.e. we had already sent our own DismissPacket
+	// and received the peer's DismissAck), receiving the peer's DismissPacket now
+	// completes the simultaneous-close handshake. handlePkt is about to return
+	// IOClosed → FINI → fini() → ctx.cancel(), so writeInCh will no longer be
+	// drained. Sending the final DismissAck through writeInCh here races against
+	// that cancel and the packet is lost, leaving the peer's closewait to time
+	// out at 30s. Bypass writeInCh and flush the DismissAck directly to
+	// writeOutCh (owned by writePkt, a separate goroutine); any still-buffered
+	// writes drain before fini() closes the channel, so the peer sees the ack
+	// and exits closewait immediately.
+	if prevState == DISMISS_HALF {
+		dg.log.Debugf("simultaneous dismiss complete, clientID: %d, dialogueID: %d",
+			dg.cn.ClientID(), dg.dialogueID)
+		if err := dg.sendToWriteOut(retPkt); err != nil {
+			dg.log.Debugf("send final dismiss ack failed (ctx likely canceled): %s, clientID: %d, dialogueID: %d",
+				err, dg.cn.ClientID(), dg.dialogueID)
+		}
+		if dg.closewait != nil {
+			dg.closewait.Done()
+		}
+		return iodefine.IOClosed
+	}
+
+	// First-received dismiss (Case A): route the ack through writeInCh so
+	// handleOutDismissAckPacket runs the FSM transition (DISMISS_RECV →
+	// DISMISS_HALF) synchronously with the write; handlePkt keeps looping and
+	// will process our own DismissPacket when go dg.Close() below queues it.
+	//
+	// Send from a goroutine because handlePkt() is the only consumer of
+	// writeInCh; a blocking send from inside the handler deadlocks.
+	// sendToWriteIn selects on ctx.Done() for safety.
+	go func() { dg.sendToWriteIn(retPkt) }() //nolint:errcheck
+	go dg.Close()
+	return iodefine.IOSuccess
+}
+
+func (dg *dialogue) handleInDimssAckPacket(pkt *packet.DismissAckPacket) iodefine.IORet {
+	dg.log.Debugf("read dismiss ack packet, clientID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+	err := dg.fsm.EmitEvent(ET_DISMISSACK)
+	if err != nil {
+		dg.log.Debugf("emit ET_DISMISSACK err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+			err, dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+		return iodefine.IOErr
+	}
+	if dg.fsm.State() == DISMISS_HALF {
+		return iodefine.IOSuccess
+	}
+	if dg.closewait != nil {
+		// and CloseWait is waiting for the completion.
+		dg.closewait.Done()
+	}
+	return iodefine.IOClosed
+}
+
+func (dg *dialogue) handleInDataPacket(pkt packet.Packet) iodefine.IORet {
+	// we regard statuses which include sessioned, dismiss_half, dismiss_sent as normal statuses
+	// and status dismiss_recv should be optimized from client side.
+	ok := dg.fsm.InStates(SESSIONED, DISMISS_HALF, DISMISS_SENT, DISMISS_RECV)
+	if !ok {
+		dg.log.Debugf("data at non normal status, clientID: %d, dialogueID: %d, packetID: %d, status: %s",
+			dg.cn.ClientID(), dg.dialogueID, pkt.ID(), dg.fsm.State())
+		if dg.failedCh != nil {
+			dg.failedCh <- pkt
+		}
+		return iodefine.IODiscard
+	}
+	select {
+	case dg.readOutCh <- pkt:
+	case <-dg.ctx.Done():
+		return iodefine.IODiscard
+	}
+	return iodefine.IOSuccess
+}
+
+// output packet
+func (dg *dialogue) handleOutSessionPacket(pkt *packet.SessionPacket) iodefine.IORet {
+	err := dg.fsm.EmitEvent(ET_SESSIONSENT)
+	if err != nil {
+		dg.log.Errorf("emit ET_SESSIONSENT err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+			err, dg.cn.ClientID(), pkt.NegotiateID(), pkt.ID())
+		return iodefine.IOErr
+	}
+	if err := dg.sendToWriteOut(pkt); err != nil {
+		return iodefine.IOClosed
+	}
+	dg.log.Debugf("send dialogue down succeed, clientID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), pkt.NegotiateID(), pkt.ID())
+	return iodefine.IOSuccess
+}
+
+func (dg *dialogue) handleOutSessionAckPacket(pkt *packet.SessionAckPacket) iodefine.IORet {
+	err := error(nil)
+	if dg.dlgt != nil {
+		// open dialogue passive
+		// notify delegation the online event
+		err = dg.dlgt.DialogueOnline(dg)
+		if err != nil {
+			pkt.SetError(err)
+			err = dg.fsm.EmitEvent(ET_ERROR)
+			if err != nil {
+				dg.log.Errorf("emit ET_ERROR err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+					err, dg.cn.ClientID(), pkt.NegotiateID(), pkt.ID())
+				return iodefine.IOErr
+			}
+			if err := dg.sendToWriteOut(pkt); err != nil {
+				return iodefine.IOClosed
+			}
+			// to tell peer the dialogue handshake is error, and peer should dismiss the dialogue.
+			// this situation shouldn't be seen as connected, so don't set onlined.
+			return iodefine.IOSuccess
+		}
+	}
+	err = dg.fsm.EmitEvent(ET_SESSIONACK)
+	if err != nil {
+		dg.log.Debugf("emit ET_SESSIONACK err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+			err, dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+		return iodefine.IOErr
+	}
+	if err := dg.sendToWriteOut(pkt); err != nil {
+		return iodefine.IOClosed
+	}
+	dg.log.Debugf("dialogue write session ack down succeed, clientID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+
+	dg.onlined = true
+	return iodefine.IONewPassive
+}
+
+func (dg *dialogue) handleOutDismissPacket(pkt *packet.DismissPacket) iodefine.IORet {
+	err := dg.fsm.EmitEvent(ET_DISMISSSENT)
+	if err != nil {
+		dg.log.Errorf("emit ET_SESSIONSENT err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+			err, dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+		return iodefine.IOErr
+	}
+	if err := dg.sendToWriteOut(pkt); err != nil {
+		return iodefine.IOClosed
+	}
+	dg.log.Debugf("dialogue write dismiss down succeed, clientID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+	return iodefine.IOSuccess
+}
+
+func (dg *dialogue) handleOutDismissAckPacket(pkt *packet.DismissAckPacket) iodefine.IORet {
+	err := dg.fsm.EmitEvent(ET_DISMISSACK)
+	if err != nil {
+		dg.log.Errorf("emit ET_DISMISSACK err: %s, clientID: %d, dialogueID: %d, packetID: %d, state: %s",
+			err, dg.cn.ClientID(), dg.dialogueID, pkt.ID(), dg.fsm.State())
+		return iodefine.IOErr
+	}
+	// make sure this packet is flushed before writeOutCh closed
+	// dg.dowritePkt(pkt, false) changes to dg.writeOutCh <- pkt
+	// because this packet should be after all upper layer packets
+	// at last the close(dg.writeOutCh) makes sure the flush
+	if err := dg.sendToWriteOut(pkt); err != nil {
+		return iodefine.IOClosed
+	}
+	dg.log.Debugf("dialogue write dismiss ack down succeed, clientID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+	if dg.fsm.State() == DISMISS_HALF {
+		return iodefine.IOSuccess
+	}
+	if dg.closewait != nil {
+		// and CloseWait is waiting for the completion.
+		dg.closewait.Done()
+	}
+	return iodefine.IOClosed
+}
+
+func (dg *dialogue) handleOutDataPacket(pkt packet.Packet) iodefine.IORet {
+	if err := dg.sendToWriteOut(pkt); err != nil {
+		return iodefine.IOClosed
+	}
+	dg.log.Tracef("dialogue write data down succeed, clientID: %d, dialogueID: %d, packetID: %d",
+		dg.cn.ClientID(), dg.dialogueID, pkt.ID())
+	return iodefine.IOSuccess
+}
+
+func (dg *dialogue) Close() {
+	dg.closeOnce.Do(func() {
+		pkt := dg.pf.NewDismissPacket(dg.dialogueID)
+		// we need a tick in case of never receiving the dismiss ack packet
+		dg.closewait = dg.shub.New(pkt.PacketID, synchub.WithTimeout(30*time.Second))
+
+		dg.log.Debugf("dialogue async close, clientID: %d, dialogueID: %d",
+			dg.cn.ClientID(), dg.dialogueID)
+
+		// Send from a goroutine: Close() may be called from handlePkt() goroutine
+		// (e.g. handleInDismissPacket -> Close()), so a blocking send here would deadlock.
+		// sendToWriteIn selects on ctx.Done() — no recover() needed.
+		go func() { dg.sendToWriteIn(pkt) }() //nolint:errcheck
+
+		go func() {
+			// we don't use shub WithCallback because the force close may arrive first
+			event := <-dg.closewait.C()
+			if event.Error != nil {
+				dg.log.Debugf("dialogue close wait err: %s, clientID: %d, peerDialogueID: %d, dialogueID: %d",
+					event.Error, dg.cn.ClientID(), dg.peerNegotiatingID, dg.dialogueID)
+				if event.Error == synchub.ErrSyncTimeout {
+					// timeout and exit the dialogue
+					dg.closeIO()
+				}
+			}
+		}()
+	})
+}
+
+func (dg *dialogue) CloseWait() {
+	// send close packet and wait for the end
+	dg.closeOnce.Do(func() {
+		pkt := dg.pf.NewDismissPacket(dg.dialogueID)
+		dg.closewait = dg.shub.New(pkt.PacketID, synchub.WithTimeout(30*time.Second))
+		dg.log.Debugf("dialogue is closing, clientID: %d, dialogueID: %d",
+			dg.cn.ClientID(), dg.dialogueID)
+
+		// Send from a goroutine: CloseWait() may be called from handlePkt() goroutine,
+		// so a blocking send here would deadlock. sendToWriteIn selects on ctx.Done().
+		go func() { dg.sendToWriteIn(pkt) }() //nolint:errcheck
+
+		// the sync shouldn't be locked
+		event := <-dg.closewait.C()
+		if event.Error != nil {
+			dg.log.Debugf("dialogue close wait err: %s, clientID: %d, peerDialogueID: %d, dialogueID: %d",
+				event.Error, dg.cn.ClientID(), dg.peerNegotiatingID, dg.dialogueID)
+			if event.Error == synchub.ErrSyncTimeout {
+				// timeout and exit the dialogue
+				dg.closeIO()
+			}
+			return
+		}
+		dg.log.Debugf("dialogue closed, clientID: %d, dialogueID: %d",
+			dg.cn.ClientID(), dg.dialogueID)
+	})
+}
+
+func (dg *dialogue) closeIO() {
+	dg.closeIOOnce.Do(func() {
+		// Cancel the context to signal all senders (e.g. dialogueMgr) to stop
+		// and to make handlePkt exit via its ctx.Done() case.
+		// Do NOT close readInCh: if dialogueMgr is mid-select on readInCh,
+		// closing the channel races with ctx.Done() and can panic.
+		// readInCh will be garbage-collected with the dialogue.
+		dg.cancel()
+	})
+}
+
+func (dg *dialogue) closeWrapper(_ *yafsm.Event) {
+	dg.log.Infof("dialogue triggered close wrapper, clientID: %d, dialogueID: %d",
+		dg.cn.ClientID(), dg.dialogueID)
+	dg.Close()
+}
+
+// finish and reclaim resources
+func (dg *dialogue) fini() {
+	dg.finiOnce.Do(func() {
+		dg.log.Debugf("dialogue finishing, clientID: %d, dialogueID: %d",
+			dg.cn.ClientID(), dg.dialogueID)
+
+		// Signal all senders to stop; handlePkt will drain writeInCh then exit.
+		dg.cancel()
+		close(dg.monitorStop)
+
+		// collect shub
+		dg.shub.Close()
+		// Do NOT set dg.shub = nil: concurrent goroutines may still call shub methods.
+
+		// the outside should care about channel status
+		close(dg.readOutCh)
+		// writeOutCh must be cared since writePkt might quit first
+		close(dg.writeOutCh)
+		// Do NOT set dg.writeOutCh = nil: writePkt captures the channel
+		// locally before ranging, so a concurrent nil assignment just
+		// races the read with no benefit (senders already bail out via
+		// sendToWriteOut's ctx.Done case).
+		// TODO we left the readInCh buffer at some edge cases which may cause peer msg timeout
+
+		// collect fsm
+		dg.fsm.EmitEvent(ET_FINI)
+		dg.fsm.Close()
+		dg.fsm = nil
+
+		dg.log.Debugf("dialogue finished, clientID: %d, dialogueID: %d",
+			dg.cn.ClientID(), dg.dialogueID)
+	})
+}

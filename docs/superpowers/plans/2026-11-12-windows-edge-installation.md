@@ -1018,8 +1018,25 @@ git commit -m "test(edge): add windows installation acceptance checklist"
 
 ## Decision Log
 
-- Phase 0 result: pending
-- Chosen legacy strategy: pending (compat build vs minimal fallback)
-- Go 1.20 runtime on 2008 R2: pending
-- Manager TLS 1.2 from 2008 R2: pending
-- geminio version used: pending
+- Phase 0 result: **PENDING VM**（本地构建/测试通过：Go 1.20.14 交叉编译、`go test`、`go vet`、`go test -race`、geminio 全包 `go build ./...`；真实 2008 R2 运行待验证）
+- Chosen legacy strategy: compat build（Go 1.20 兼容构建；geminio client 已用 Go 1.20.14 本地编译通过，待 VM 运行时确认）
+- Go 1.20 runtime on 2008 R2: PENDING VM。本地产物 `PE32+ executable for MS Windows 6.01 (console), x86-64`，`go version -m` 报告 `go1.20.14`。
+- Manager TLS 1.2 from 2008 R2: PENDING VM。
+- geminio version used: `v1.3.0-rc.2` 本地补丁副本（`tools/legacy-spike/third_party/geminio`，`go 1.20`）。
+- Fallback needed: no（本地未发现 Go 1.21+ 特性；VM 运行确认后再定论）。
+
+Linux 构建命令：
+
+```bash
+cd tools/legacy-spike
+GOTOOLCHAIN=go1.20.14 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+  go build -trimpath -o legacy-spike.exe .
+```
+
+Windows Server 2008 R2 SP1 x64 验证命令（详见 `tools/legacy-spike/README.md`）：
+
+```powershell
+.\legacy-spike.exe -manager https://<manager-host> -frontier <frontier-host>:<port> -timeout 10s
+```
+
+将输出中的 `runtime`、`manager`、`frontier` 三行回填到上面对应条目，并把 Phase 0 result 改为 `PASS` 或 `FAIL`。

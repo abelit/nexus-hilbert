@@ -1,0 +1,692 @@
+package application
+
+import (
+	"container/list"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"regexp"
+	"sync"
+	"time"
+
+	"github.com/jumboframes/armorigo/synchub"
+	"github.com/singchia/geminio"
+	"github.com/singchia/geminio/conn"
+	"github.com/singchia/geminio/multiplexer"
+	"github.com/singchia/geminio/packet"
+	"github.com/singchia/geminio/pkg/iodefine"
+	gnet "github.com/singchia/geminio/pkg/net"
+	gsync "github.com/singchia/geminio/pkg/sync"
+)
+
+var (
+	ErrMismatchStreamID      = errors.New("mismatch streamID")
+	ErrMismatchClientID      = errors.New("mismatch clientID")
+	ErrRemoteRPCUnregistered = errors.New("remote rpc unregistered")
+	ErrPacketTooLarge        = errors.New("packet payload too large")
+)
+
+const (
+	registrationFormat = "%d-%d-registration"
+	// DefaultMaxPacketSize is the default maximum packet payload size (10MB)
+	// This prevents OOM attacks and memory exhaustion from oversized packets
+	DefaultMaxPacketSize = 10 * 1024 * 1024 // 10MB
+)
+
+type patternRPC struct {
+	match   bool
+	pattern *regexp.Regexp
+	rpc     geminio.HijackRPC
+}
+
+type methodRPC geminio.HijackRPC
+
+type stream struct {
+	*gnet.UnimplementedConn
+	// options for End and stream, remember stream dones't own opts
+	*opts
+	end *End
+
+	// sync hubor for negotiations and registrations
+	shub *synchub.SyncHub
+
+	// under layer connection and dialogue
+	cn conn.Conn
+	dg multiplexer.Dialogue
+
+	// registered rpcs
+	rpcMtx sync.RWMutex
+	// inflight rpc's cancel
+	rpcCancels map[uint64]context.CancelFunc
+	// key: method value: RPC
+	localRPCs map[string]geminio.RPC
+	// key: method value: placeholder
+	remoteRPCs map[string]struct{}
+	// hijack
+	hijackRPC *patternRPC
+
+	// mtx protects follows
+	mtx          sync.RWMutex
+	streamOK     bool
+	closeOnce    *gsync.Once
+	finiOnce     *gsync.Once
+	monitorStop  chan struct{} // closed by fini() to stop the channel-monitor goroutine
+	closeWriteCh chan struct{} // closed by Close() to signal handlePkt to drain then call dg.Close()
+
+	// app layer messages
+	// raw cache
+	cache    []byte
+	cacheMtx sync.Mutex
+
+	messageCh     chan *packet.MessagePacket
+	messageChSize int
+	streamCh      chan *packet.StreamPacket
+	streamChSize  int
+	failedCh      chan packet.Packet
+	failedChSize  int
+
+	// deadline mtx protects SetDeadline, SetReadDeadline, SetWriteDeadline and all Read Write
+	dlMtx                       sync.RWMutex
+	dlReadSync, dlWriteSync     synchub.Sync
+	dlReadChList, dlWriteChList *list.List
+	dlRead, dlWrite             time.Time
+
+	// io
+	writeInCh   chan packet.Packet // for multiple message types
+	writeInSize int
+}
+
+func newStream(end *End, cn conn.Conn, dg multiplexer.Dialogue, opts *opts) *stream {
+	shub := synchub.NewSyncHub(synchub.OptionTimer(opts.tmr))
+	sm := &stream{
+		UnimplementedConn: &gnet.UnimplementedConn{},
+		opts:              opts,
+		end:               end,
+		shub:              shub,
+		cn:                cn,
+		dg:                dg,
+		rpcCancels:        make(map[uint64]context.CancelFunc),
+		localRPCs:         make(map[string]geminio.RPC),
+		remoteRPCs:        make(map[string]struct{}),
+		streamOK:          true,
+		closeOnce:         new(gsync.Once),
+		finiOnce:          new(gsync.Once),
+		monitorStop:       make(chan struct{}),
+		closeWriteCh:      make(chan struct{}),
+		dlReadChList:      list.New(),
+		dlWriteChList:     list.New(),
+		messageChSize:     32,
+		streamChSize:      32,
+		failedChSize:      32,
+		writeInSize:       32,
+	}
+	if opts.readBufferSize > 0 {
+		sm.messageChSize = opts.readBufferSize
+		sm.streamChSize = opts.readBufferSize
+		sm.failedChSize = opts.readBufferSize
+	}
+	if opts.writeBufferSize > 0 {
+		sm.writeInSize = opts.writeBufferSize
+	}
+	sm.messageCh = make(chan *packet.MessagePacket, sm.messageChSize)
+	sm.streamCh = make(chan *packet.StreamPacket, sm.streamChSize)
+	sm.failedCh = make(chan packet.Packet, sm.failedChSize)
+	sm.writeInCh = make(chan packet.Packet, sm.writeInSize)
+
+	go sm.handlePkt()
+	go sm.readPkt()
+	// Start channel monitoring for debugging memory issues
+	sm.startChannelMonitor(false, 30*time.Second)
+	return sm
+}
+
+func (sm *stream) hasRemoteRPC(method string) bool {
+	sm.rpcMtx.RLock()
+	defer sm.rpcMtx.RUnlock()
+
+	_, ok := sm.remoteRPCs[method]
+	return ok
+}
+
+func (sm *stream) StreamID() uint64 {
+	return sm.dg.DialogueID()
+}
+
+func (sm *stream) ClientID() uint64 {
+	return sm.cn.ClientID()
+}
+
+func (sm *stream) Meta() []byte {
+	return sm.dg.Meta()
+}
+
+func (sm *stream) Peer() string {
+	return sm.dg.Peer()
+}
+
+func (sm *stream) Side() geminio.Side {
+	return geminio.Side(sm.dg.Side())
+}
+
+// main handle logic
+func (sm *stream) handlePkt() {
+	writeInCh := sm.writeInCh
+	closeWriteCh := sm.closeWriteCh
+
+	for { //nolint:all // need select to handle channel close and IOErr
+		select {
+		case pkt, ok := <-writeInCh:
+			if !ok {
+				// BUG! shoud never be here.
+				goto FINI
+			}
+			sm.log.Tracef("stream write in packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+				sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+			ret := sm.handleOut(pkt)
+			switch ret {
+			case iodefine.IOSuccess:
+				continue
+			case iodefine.IODiscard:
+				sm.shub.Error(pkt.ID(), io.ErrShortBuffer)
+			case iodefine.IOErr:
+				goto FINI
+			}
+		case <-closeWriteCh:
+			// Close() was called: drain any remaining data packets already enqueued
+			// in writeInCh before forwarding the dismiss to the dialogue layer.
+			// This guarantees that all StreamPackets reach the peer before DismissPacket.
+			closeWriteCh = nil // disable this case; don't select on a nil channel
+		DRAIN:
+			for {
+				select {
+				case pkt, ok := <-writeInCh:
+					if !ok {
+						goto FINI
+					}
+					sm.log.Tracef("stream drain write in packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+						sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+					ret := sm.handleOut(pkt)
+					switch ret {
+					case iodefine.IOSuccess:
+						continue DRAIN
+					case iodefine.IODiscard:
+						sm.shub.Error(pkt.ID(), io.ErrShortBuffer)
+					case iodefine.IOErr:
+						goto FINI
+					}
+				default:
+					// No more data packets buffered; now safe to send the dismiss.
+					// dg.Close() is asynchronous; we do NOT goto FINI here because
+					// fini() will be triggered by readPkt() when the peer completes
+					// the 4-way dismiss handshake and readOutCh is closed.
+					sm.dg.Close()
+					break DRAIN
+				}
+			}
+		}
+	}
+FINI:
+	sm.finiOnce.Do(sm.fini)
+}
+
+func (sm *stream) readPkt() {
+loop:
+	for pkt := range sm.dg.ReadC() {
+		sm.log.Tracef("stream read in packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+			sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+		switch sm.handleIn(pkt) {
+		case iodefine.IOSuccess:
+			continue
+		case iodefine.IODiscard:
+			sm.log.Infof("stream read in packet but buffer full and discard, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+				sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+		case iodefine.IOErr:
+			break loop
+		}
+	}
+	sm.finiOnce.Do(sm.fini)
+}
+
+func (sm *stream) handleIn(pkt packet.Packet) iodefine.IORet {
+	switch realPkt := pkt.(type) {
+	case *packet.MessagePacket:
+		return sm.handleInMessagePacket(realPkt)
+	case *packet.MessageAckPacket:
+		return sm.handleInMessageAckPacket(realPkt)
+	case *packet.RequestPacket:
+		return sm.handleInRequestPacket(realPkt)
+	case *packet.RequestCancelPacket:
+		return sm.handleInRequestCancelPacket(realPkt)
+	case *packet.ResponsePacket:
+		return sm.handleInResponsePacket(realPkt)
+	case *packet.RegisterPacket:
+		return sm.handleInRegisterPacket(realPkt)
+	case *packet.RegisterAckPacket:
+		return sm.handleInRegisterAckPacket(realPkt)
+	case *packet.StreamPacket:
+		return sm.handleInStreamPacket(realPkt)
+	}
+	// unknown packet
+	return iodefine.IOErr
+}
+
+func (sm *stream) handleOut(pkt packet.Packet) iodefine.IORet {
+	switch realPkt := pkt.(type) {
+	case *packet.MessagePacket:
+		return sm.handleOutMessagePacket(realPkt)
+	case *packet.MessageAckPacket:
+		return sm.handleOutMessageAckPacket(realPkt)
+	case *packet.RequestPacket:
+		return sm.handleOutRequestPacket(realPkt)
+	case *packet.RequestCancelPacket:
+		return sm.handleOutRequestCancelPacket(realPkt)
+	case *packet.StreamPacket:
+		return sm.handleOutStreamPacket(realPkt)
+	case *packet.RegisterPacket:
+		return sm.handleOutRegisterPacket(realPkt)
+	}
+	// unknown packet
+	return iodefine.IOSuccess
+}
+
+// handleOutRequestCancelPacket forwards a RequestCancelPacket to the
+// dialogue layer. Without this, cancel packets put onto writeInCh were
+// silently discarded by the default case above, which meant server-side
+// handlers never observed the client's cancel and blocked forever.
+func (sm *stream) handleOutRequestCancelPacket(pkt *packet.RequestCancelPacket) iodefine.IORet {
+	if err := sm.dg.Write(pkt); err != nil {
+		if err == io.ErrShortBuffer {
+			return iodefine.IODiscard
+		}
+		sm.log.Debugf("write request cancel packet err: %s, clientID: %d, dialogueID: %d, packetID: %d",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID())
+		return iodefine.IOErr
+	}
+	return iodefine.IOSuccess
+}
+
+// input packet
+func (sm *stream) handleInMessagePacket(pkt *packet.MessagePacket) iodefine.IORet {
+	sm.log.Tracef("read message packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+		sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+	// we don't want to block here, and we don't want to discard immediately.
+	// TODO optimize: add a default branch that emits a MessageAckPacket with
+	// ErrIOBufferFull and returns IODiscard when messageCh is full.
+	sm.messageCh <- pkt
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleInMessageAckPacket(pkt *packet.MessageAckPacket) iodefine.IORet {
+	if pkt.Data.Error != "" {
+		err := errors.New(pkt.Data.Error)
+		errored := sm.shub.Error(pkt.ID(), err)
+		sm.log.Tracef("read message ack packet with err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s, errord: %t",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String(), errored)
+		return iodefine.IOSuccess
+	}
+	sm.log.Tracef("read message ack packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+		sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+	acked := sm.shub.Ack(pkt.ID(), nil)
+	sm.log.Tracef("message ack packet acked: %t, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+		acked, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleInRequestPacket(pkt *packet.RequestPacket) iodefine.IORet {
+	method := string(pkt.Data.Key)
+	sm.log.Tracef("read request packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s, method: %s",
+		sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String(), method)
+	// we use Data.Key as method
+	req, rsp :=
+		&request{
+			// we use Data.Value as data
+			data:     pkt.Data.Value,
+			id:       pkt.PacketID,
+			method:   method,
+			custom:   pkt.Data.Custom,
+			clientID: sm.cn.ClientID(),
+			streamID: sm.dg.DialogueID(),
+		},
+		&response{
+			method:    method,
+			requestID: pkt.ID(),
+			clientID:  sm.cn.ClientID(),
+			streamID:  sm.dg.DialogueID(),
+		}
+	// setup context. Always make the handler ctx cancelable so that a peer
+	// RequestCancelPacket can actually interrupt it — previously ctx was
+	// left as context.Background when no deadline was set, which meant
+	// cancel packets were silently dropped and the handler hung forever.
+	ctx := context.Background()
+	var cancel context.CancelFunc
+	if !pkt.Data.Deadline.IsZero() || !pkt.Data.Context.Deadline.IsZero() {
+		deadline := pkt.Data.Deadline
+		if deadline.IsZero() || (!deadline.IsZero() &&
+			!pkt.Data.Context.Deadline.IsZero() &&
+			pkt.Data.Context.Deadline.Before(deadline)) {
+			deadline = pkt.Data.Context.Deadline
+		}
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	sm.rpcMtx.Lock()
+	sm.rpcCancels[pkt.ID()] = cancel
+	sm.rpcMtx.Unlock()
+	// hijack exist
+	if sm.hijackRPC != nil {
+		if sm.hijackRPC.pattern == nil {
+			sm.doRPC(pkt, methodRPC(sm.hijackRPC.rpc), method, ctx, req, rsp, true)
+			return iodefine.IOSuccess
+		}
+		matched := sm.hijackRPC.pattern.Match([]byte(method))
+		if (sm.hijackRPC.match && matched) || (!sm.hijackRPC.match && !matched) {
+			// do RPC and cancel the context
+			sm.doRPC(pkt, methodRPC(sm.hijackRPC.rpc), method, ctx, req, rsp, true)
+			return iodefine.IOSuccess
+		}
+	}
+	// registered RPC lookup and call
+	sm.rpcMtx.RLock()
+	rpc, ok := sm.localRPCs[method]
+	sm.rpcMtx.RUnlock()
+	if ok {
+		wrapperRPC := func(ctx context.Context, _ string, req geminio.Request, rsp geminio.Response) {
+			rpc(ctx, req, rsp)
+		}
+		// do RPC and cancel the context
+		sm.doRPC(pkt, wrapperRPC, method, ctx, req, rsp, true)
+		return iodefine.IOSuccess
+	}
+
+	// release the context
+	if cancel != nil {
+		sm.rpcMtx.Lock()
+		delete(sm.rpcCancels, pkt.ID())
+		cancel()
+		sm.rpcMtx.Unlock()
+	}
+
+	// no rpc found, return to call error, note that this error is not set to response error
+	err := fmt.Errorf("no such rpc: %s", method)
+	rspPkt := sm.pf.NewResponsePacket(pkt.ID(), []byte(method), nil, err)
+	err = sm.dg.WriteWait(rspPkt)
+	if err != nil {
+		sm.log.Debugf("write no such rpc response packet err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s, method: %s",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String(), method)
+		return iodefine.IOErr
+	}
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleInRequestCancelPacket(pkt *packet.RequestCancelPacket) iodefine.IORet {
+	sm.rpcMtx.Lock()
+	cancel, ok := sm.rpcCancels[pkt.ID()]
+	if ok {
+		delete(sm.rpcCancels, pkt.ID())
+		cancel()
+	}
+	sm.rpcMtx.Unlock()
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleInResponsePacket(pkt *packet.ResponsePacket) iodefine.IORet {
+	if pkt.Data.Error != "" {
+		err := errors.New(pkt.Data.Error)
+		errored := sm.shub.Error(pkt.ID(), err)
+		sm.log.Tracef("read response packet with err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s, errored: %t",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String(), errored)
+		return iodefine.IOSuccess
+	}
+	sm.log.Tracef("read response packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+		sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+	rsp := &response{
+		data:      pkt.Data.Value,
+		requestID: pkt.ID(),
+		clientID:  sm.cn.ClientID(),
+		streamID:  sm.dg.DialogueID(),
+	}
+	// the return is ignored for now
+	// TODO consistency optimize
+	_ = sm.shub.Ack(pkt.ID(), rsp)
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleInRegisterPacket(pkt *packet.RegisterPacket) iodefine.IORet {
+	method := pkt.Method()
+	sm.log.Tracef("read register packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s, method: %s",
+		sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String(), method)
+
+	retPkt := sm.pf.NewRegisterAckPacket(pkt.ID(), nil)
+	err := sm.dg.Write(retPkt)
+	if err != nil {
+		sm.log.Debugf("write register ack packet err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s, method: %s",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String(), method)
+		return iodefine.IOErr
+	}
+
+	// TODO delegate for remote registration
+
+	sm.rpcMtx.Lock()
+	sm.remoteRPCs[method] = struct{}{}
+	sm.rpcMtx.Unlock()
+
+	// to notify the method is registing, in case of we're waiting for the method ready
+	syncID := fmt.Sprintf(registrationFormat, sm.cn.ClientID(), sm.dg.DialogueID())
+	sm.shub.DoneSub(syncID, method)
+
+	if sm.opts.dlgt != nil {
+		sm.opts.dlgt.RemoteRegistration(method, sm.cn.ClientID(), sm.dg.DialogueID())
+	}
+
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleInRegisterAckPacket(pkt *packet.RegisterAckPacket) iodefine.IORet {
+	sm.log.Tracef("read register ack packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+		sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+	sm.shub.Done(pkt.ID())
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleInStreamPacket(pkt *packet.StreamPacket) iodefine.IORet {
+	sm.log.Tracef("read stream packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+		sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+	// Try a non-blocking send first. Once the dialogue's ctx is canceled (fini
+	// running after dismiss handshake) BOTH cases of the blocking select below
+	// are ready and Go picks one at random — which silently drops the packet
+	// half the time even though streamCh has room. The non-blocking attempt
+	// guarantees delivery whenever room exists, regardless of ctx state.
+	select {
+	case sm.streamCh <- pkt:
+		return iodefine.IOSuccess
+	default:
+	}
+	select {
+	case sm.streamCh <- pkt:
+		return iodefine.IOSuccess
+	case <-sm.dg.Done():
+		return iodefine.IODiscard
+	}
+}
+
+// output packet
+func (sm *stream) handleOutMessagePacket(pkt *packet.MessagePacket) iodefine.IORet {
+	err := sm.dg.Write(pkt)
+	if err != nil {
+		if err == io.ErrShortBuffer {
+			return iodefine.IODiscard
+		}
+		sm.log.Debugf("write message packet err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+		// notify the publish side the err; guard against shub being nil if fini() raced ahead
+		if sm.shub != nil {
+			sm.shub.Error(pkt.ID(), err)
+		}
+		return iodefine.IOErr
+	}
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleOutMessageAckPacket(pkt *packet.MessageAckPacket) iodefine.IORet {
+	err := sm.dg.WriteWait(pkt)
+	if err != nil {
+		sm.log.Debugf("write message ack packet err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+		return iodefine.IOErr
+	}
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleOutRequestPacket(pkt *packet.RequestPacket) iodefine.IORet {
+	err := sm.dg.Write(pkt)
+	if err != nil {
+		if err == io.ErrShortBuffer {
+			return iodefine.IODiscard
+		}
+		sm.log.Debugf("write request packet err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+		sm.shub.Error(pkt.ID(), err)
+		return iodefine.IOErr
+	}
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleOutRegisterPacket(pkt *packet.RegisterPacket) iodefine.IORet {
+	err := sm.dg.Write(pkt)
+	if err != nil {
+		if err == io.ErrShortBuffer {
+			return iodefine.IODiscard
+		}
+		sm.log.Debugf("write register packet err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+		return iodefine.IOErr
+	}
+	return iodefine.IOSuccess
+}
+
+func (sm *stream) handleOutStreamPacket(pkt *packet.StreamPacket) iodefine.IORet {
+	sm.log.Tracef("write stream packet, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+		sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+	err := sm.dg.Write(pkt)
+	if err != nil {
+		if err == io.ErrShortBuffer {
+			return iodefine.IODiscard
+		}
+		sm.log.Debugf("write stream packet err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s",
+			err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String())
+		return iodefine.IOErr
+	}
+	return iodefine.IOSuccess
+}
+
+// doRPC provide generic rpc call
+func (sm *stream) doRPC(pkt *packet.RequestPacket, rpc methodRPC, method string, ctx context.Context, req *request, rsp *response, async bool) {
+	prog := func() {
+		// Recover from handler panics so the caller End is never taken down
+		// by a single buggy RPC. Convert the panic to an error response so
+		// the peer observes a real Call error instead of a hung sync.
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					sm.log.Errorf("rpc handler panic: method=%s, panic=%v, clientID=%d, dialogueID=%d, packetID=%d",
+						method, r, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID())
+					rsp.err = fmt.Errorf("rpc handler panic: %v", r)
+				}
+			}()
+			rpc(ctx, method, req, rsp)
+		}()
+		// once the rpc complete, we should cancel the context
+		sm.rpcMtx.Lock()
+		cancel, ok := sm.rpcCancels[pkt.ID()]
+		if ok {
+			delete(sm.rpcCancels, pkt.ID())
+			cancel()
+		}
+		sm.rpcMtx.Unlock()
+
+		rspPkt := sm.pf.NewResponsePacket(pkt.ID(), []byte(req.method), rsp.data, rsp.err)
+		err := sm.dg.WriteWait(rspPkt)
+		if err != nil {
+			// Write error, the response cannot be delivered, so should be debuged
+			sm.log.Debugf("write response packet err: %s, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s, method: %s",
+				err, sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String(), method)
+			// TOD do we need finish the stream while write err
+			// sm.fini()
+			return
+		}
+		sm.log.Tracef("write response succeed, clientID: %d, dialogueID: %d, packetID: %d, packetType: %s, method: %s",
+			sm.cn.ClientID(), sm.dg.DialogueID(), pkt.ID(), pkt.Type().String(), method)
+	}
+	if async {
+		go prog()
+	} else {
+		prog()
+	}
+}
+
+func (sm *stream) Close() error {
+	sm.closeOnce.Do(func() {
+		sm.mtx.RLock()
+		defer sm.mtx.RUnlock()
+		if !sm.streamOK {
+			return
+		}
+
+		sm.log.Debugf("stream async close, clientID: %d, dialogueID: %d",
+			sm.cn.ClientID(), sm.dg.DialogueID())
+		// Signal handlePkt to drain writeInCh then call dg.Close().
+		// This ensures all enqueued StreamPackets are forwarded before the
+		// DismissPacket is injected into the dialogue layer, preventing the
+		// Write-then-Close race where data arrives after dismiss on the peer side.
+		close(sm.closeWriteCh)
+	})
+	return nil
+}
+
+// finish and reclaim resources
+func (sm *stream) fini() {
+	sm.log.Debugf("stream finishing, clientID: %d, dialogueID: %d",
+		sm.cn.ClientID(), sm.dg.DialogueID())
+
+	// Close monitorStop BEFORE taking the exclusive lock. Write holds
+	// mtx.RLock across its blocking select, so if we tried to grab Lock
+	// first we would deadlock any Writer stalled on a full writeInCh.
+	// Closing monitorStop now lets those Writers escape their select,
+	// release RLock, and let us proceed to the rest of teardown.
+	close(sm.monitorStop)
+
+	sm.mtx.Lock()
+	defer sm.mtx.Unlock()
+	// collect shub, and all syncs will be close notified
+
+	sm.streamOK = false
+	close(sm.writeInCh)
+
+	for pkt := range sm.writeInCh {
+		sm.shub.Error(pkt.ID(), io.ErrClosedPipe)
+	}
+	sm.shub.Close()
+	// Do NOT set sm.writeInCh or sm.shub to nil: handlePkt goroutines may still be
+	// running; after close/Close() those are safe no-ops.
+
+	// the outside should care about message and stream channel status
+	close(sm.messageCh)
+	close(sm.streamCh)
+
+	// Timer lifecycle is owned exclusively by End, not by individual streams.
+	// All streams share the same *opts pointer, so writing sm.tmr = nil here
+	// would race with other concurrent stream.fini() calls and with end.fini().
+	// End.fini() handles timer cleanup; streams must not touch opts.tmr.
+
+	if sm.dg.DialogueID() == 1 {
+		// the master stream
+		sm.end.fini()
+	}
+	// reclaim stream from end
+	sm.end.delStream(sm.dg.DialogueID())
+
+	sm.log.Debugf("stream finished, clientID: %d, dialogueID: %d",
+		sm.cn.ClientID(), sm.dg.DialogueID())
+}
