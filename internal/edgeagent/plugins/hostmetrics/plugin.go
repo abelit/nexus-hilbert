@@ -1,16 +1,16 @@
 // Package hostmetrics is the edge-side `hostmetrics` plugin —
-// subprocess `node_exporter` that exposes node_* metrics on a
-// configurable listen address (default :9102). Manager-side Prometheus
-// scrapes the host:port through the docker bridge (see
-// deploy/install/prometheus.yml).
+// subprocess `node_exporter` on Linux/Darwin and `windows_exporter` on
+// Windows, exposing host metrics on a configurable listen address (default
+// :9102). Manager-side Prometheus scrapes the host:port through the docker
+// bridge (see deploy/install/prometheus.yml).
 //
-// node_exporter is CLI-flag-driven (no config file), so this plugin
+// The exporter is CLI-flag-driven (no config file), so this plugin
 // leaves ConfigRender nil and packs all spec into Args.
 //
 // In addition to the subprocess, this plugin runs a tiny in-process
 // supplementary-metrics producer that writes `<workDir>/textfile/*.prom`
-// files. node_exporter's textfile collector is automatically enabled
-// and pointed at that directory so the supplementary lines flow back
+// files. On Linux/Darwin node_exporter's textfile collector is automatically
+// enabled and pointed at that directory so the supplementary lines flow back
 // out through the same /metrics endpoint Prometheus already scrapes.
 // First customer: nf_conntrack on modern kernels — node_exporter 1.8.2
 // hardcodes /proc/sys/net/nf_conntrack_count, but the file only exists
@@ -22,8 +22,8 @@
 // Spec keys (manager UI Edge → Plugins → hostmetrics → Spec):
 //
 //	listen_address : string         (default ":9102")
-//	collectors_enabled: []string   (optional — passes `--collector.<name>` per entry)
-//	collectors_disabled: []string  (optional — passes `--no-collector.<name>` per entry)
+//	collectors_enabled: []string   (optional — Linux: `--collector.<name>` per entry; Windows: `--collectors.enabled=a,b`)
+//	collectors_disabled: []string  (optional — Linux: `--no-collector.<name>` per entry; Windows: `--collectors.disabled=a,b`)
 //	extra_args     : []string       (optional — appended verbatim)
 package hostmetrics
 
@@ -33,6 +33,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -74,14 +75,8 @@ func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
 		// nil → no file written.
 		ConfigFile:   filepath.Join(pluginWorkDir, "spec.snapshot"),
 		ConfigRender: nil,
-		Args: func(cfg plugins.PluginConfig, path string) []string {
-			args := buildArgs(cfg, path)
-			// Always pin the textfile collector at our managed dir so
-			// the supplementary producer's .prom files flow back into
-			// /metrics. Stays at the end so user-supplied extra_args
-			// can override (rare; provided as an escape hatch).
-			args = append(args, "--collector.textfile.directory="+textfileDir)
-			return args
+		Args: func(cfg plugins.PluginConfig, _ string) []string {
+			return buildArgsFor(runtime.GOOS, cfg, textfileDir)
 		},
 		Log: log,
 	})
@@ -230,8 +225,23 @@ node_nf_conntrack_entries_limit %s
 	}
 }
 
-func buildArgs(cfg plugins.PluginConfig, _ string) []string {
+// buildArgsFor returns the exporter argv for goos.
+//
+// Linux/Darwin keep the node_exporter argv unchanged: per-collector
+// --collector.<name> / --no-collector.<name> selection plus the always-on
+// --collector.textfile.directory pointing at the supplementary producer
+// directory (appended last so extra_args can override it).
+//
+// Windows bundles windows_exporter instead. Its CLI differs: collector
+// selection is a comma-separated --collectors.enabled/--collectors.disabled,
+// the textfile collector is disabled by default, and its directory flag is
+// the plural --collector.textfile.directories. The Windows bundle must pin a
+// windows_exporter release whose flags match this list.
+func buildArgsFor(goos string, cfg plugins.PluginConfig, textfileDir string) []string {
 	listen := stringSpec(cfg, "listen_address", DefaultListenAddress)
+	if goos == "windows" {
+		return windowsExporterArgs(cfg, listen, textfileDir)
+	}
 	args := []string{
 		fmt.Sprintf("--web.listen-address=%s", listen),
 	}
@@ -240,6 +250,34 @@ func buildArgs(cfg plugins.PluginConfig, _ string) []string {
 	}
 	for _, c := range stringSliceSpec(cfg, "collectors_disabled") {
 		args = append(args, "--no-collector."+c)
+	}
+	args = append(args, stringSliceSpec(cfg, "extra_args")...)
+	// Always pin the textfile collector at our managed dir so the
+	// supplementary producer's .prom files flow back into /metrics. Stays at
+	// the end so user-supplied extra_args can override (rare; provided as an
+	// escape hatch).
+	args = append(args, "--collector.textfile.directory="+textfileDir)
+	return args
+}
+
+func windowsExporterArgs(cfg plugins.PluginConfig, listen, textfileDir string) []string {
+	args := []string{
+		fmt.Sprintf("--web.listen-address=%s", listen),
+	}
+	enabled := stringSliceSpec(cfg, "collectors_enabled")
+	if len(enabled) > 0 {
+		args = append(args, "--collectors.enabled="+strings.Join(enabled, ","))
+	}
+	if disabled := stringSliceSpec(cfg, "collectors_disabled"); len(disabled) > 0 {
+		args = append(args, "--collectors.disabled="+strings.Join(disabled, ","))
+	}
+	// windows_exporter's textfile collector is disabled by default. Only point
+	// it at our managed directory when the operator explicitly enables it.
+	for _, c := range enabled {
+		if c == "textfile" {
+			args = append(args, "--collector.textfile.directories="+textfileDir)
+			break
+		}
 	}
 	args = append(args, stringSliceSpec(cfg, "extra_args")...)
 	return args
