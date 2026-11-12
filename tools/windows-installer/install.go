@@ -40,6 +40,29 @@ const (
 // helpers when the installer is built for a non-Windows host.
 var ErrUnsupportedPlatform = errors.New("windows installer: unsupported platform (Windows only)")
 
+// systemToolFn resolves privileged Windows executables. The installer is
+// normally launched elevated from %TEMP%, so a bare "icacls" or "sc.exe" could
+// be satisfied by a planted file in the working directory. Resolving under
+// %SystemRoot%\System32 prevents that PATH/current-directory hijack. It is a
+// package variable so tests can inject deterministic paths.
+var systemToolFn = resolveSystemTool
+
+// resolveSystemTool returns the absolute path of a system executable.
+func resolveSystemTool(name string) (string, error) {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = os.Getenv("windir")
+	}
+	if root == "" {
+		return "", fmt.Errorf("resolve %s: SystemRoot is not set", name)
+	}
+	path := filepath.Join(root, "System32", name)
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("resolve %s: %w", name, err)
+	}
+	return path, nil
+}
+
 // Runner executes one external command. Installer tests substitute a fake so
 // no real ACL or Windows service change happens on the test host.
 type Runner interface {
@@ -168,7 +191,11 @@ func runSecureDir(runner Runner, path string) error {
 	if strings.TrimSpace(path) == "" {
 		return errors.New("secure dir: path is empty")
 	}
-	if err := runner.Run("icacls", secureDirArgs(path)...); err != nil {
+	icacls, err := systemToolFn("icacls.exe")
+	if err != nil {
+		return fmt.Errorf("secure %s: %w", path, err)
+	}
+	if err := runner.Run(icacls, secureDirArgs(path)...); err != nil {
 		return fmt.Errorf("secure %s: %w", path, err)
 	}
 	return nil
@@ -198,11 +225,37 @@ func uninstallService(runner Runner, supervisorPath string) error {
 	if strings.TrimSpace(supervisorPath) == "" {
 		return errors.New("uninstall service: supervisor path is empty")
 	}
+	// A host where the installer never ran has no supervisor binary. That is
+	// already the desired end state, so let the caller continue with secret
+	// removal (and purge) instead of failing.
+	if _, err := os.Stat(supervisorPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("uninstall service: stat supervisor: %w", err)
+	}
 	if err := runner.Run(supervisorPath, "--uninstall"); err != nil {
-		if isServiceNotInstalled(err) {
+		if isServiceNotInstalled(err) || errors.Is(err, exec.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("uninstall service: %w", err)
+	}
+	return nil
+}
+
+// stopExistingService stops a running service before binaries are replaced.
+// A missing service or an already-stopped service is success: both mean no
+// process holds the binary locks we are about to replace.
+func stopExistingService(runner Runner) error {
+	sc, err := systemToolFn("sc.exe")
+	if err != nil {
+		return err
+	}
+	if err := runner.Run(sc, "stop", serviceName); err != nil {
+		if isServiceNotInstalled(err) || isServiceNotRunning(err) {
+			return nil
+		}
+		return fmt.Errorf("stop existing %s service: %w", serviceName, err)
 	}
 	return nil
 }
@@ -215,6 +268,16 @@ func isServiceNotInstalled(err error) bool {
 	return strings.Contains(text, "1060") ||
 		strings.Contains(text, "does not exist as an installed service") ||
 		strings.Contains(text, "service does not exist")
+}
+
+func isServiceNotRunning(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "1062") ||
+		strings.Contains(text, "not active") ||
+		strings.Contains(text, "has not been started")
 }
 
 // downloadArtifact downloads one manifest file, verifies its SHA-256, and
@@ -499,6 +562,10 @@ func waitForReady(ctx context.Context, runner Runner, healthFile string, opts po
 	if opts.timeout <= 0 {
 		opts.timeout = defaultReadyTimeout
 	}
+	sc, err := systemToolFn("sc.exe")
+	if err != nil {
+		return err
+	}
 	deadline := opts.now().Add(opts.timeout)
 
 	var lastErr error
@@ -506,7 +573,7 @@ func waitForReady(ctx context.Context, runner Runner, healthFile string, opts po
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if queryErr := runner.Run("sc.exe", "query", serviceName); queryErr == nil {
+		if queryErr := runner.Run(sc, "query", serviceName); queryErr == nil {
 			if info, statErr := os.Stat(healthFile); statErr == nil && !info.IsDir() {
 				return nil
 			} else if statErr != nil {
@@ -720,6 +787,13 @@ func Install(ctx context.Context, opts Options, deps installDeps) error {
 
 	credential, err := resolveCredentials(ctx, deps.client, opts, deps.hostInfo, deps.agentVersion)
 	if err != nil {
+		return err
+	}
+
+	// Reinstalls must not fail on locked binaries and must not destroy an
+	// existing credential: stop the current service before replacing files,
+	// and let the supervisor's Create treat "already exists" as success.
+	if err := stopExistingService(deps.runner); err != nil {
 		return err
 	}
 

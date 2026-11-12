@@ -9,12 +9,52 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+// testSystem32 is the deterministic System32 path the test resolver returns,
+// so command assertions do not depend on the host environment.
+const testSystem32 = `C:\Windows\System32`
+
+func TestMain(m *testing.M) {
+	systemToolFn = func(name string) (string, error) {
+		return testSystem32 + `\` + name, nil
+	}
+	os.Exit(m.Run())
+}
+
+func TestResolveSystemToolUsesSystemRoot(t *testing.T) {
+	root := t.TempDir()
+	system32 := filepath.Join(root, "System32")
+	if err := os.MkdirAll(system32, 0755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(system32, "icacls.exe")
+	if err := os.WriteFile(want, []byte("fake"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SystemRoot", root)
+	got, err := resolveSystemTool("icacls.exe")
+	if err != nil {
+		t.Fatalf("resolveSystemTool() error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("resolveSystemTool() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveSystemToolRequiresSystemRoot(t *testing.T) {
+	t.Setenv("SystemRoot", "")
+	t.Setenv("windir", "")
+	if _, err := resolveSystemTool("sc.exe"); err == nil {
+		t.Fatal("resolveSystemTool() error = nil, want missing SystemRoot error")
+	}
+}
 
 // recordedCommand is one command captured by fakeRunner.
 type recordedCommand struct {
@@ -76,8 +116,8 @@ func TestRunSecureDirBuildsIcaclsCommand(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("commands = %d, want 1: %+v", len(calls), calls)
 	}
-	if calls[0].name != "icacls" {
-		t.Fatalf("command = %q, want icacls", calls[0].name)
+	if calls[0].name != testSystem32+`\icacls.exe` {
+		t.Fatalf("command = %q, want absolute System32 icacls", calls[0].name)
 	}
 	want := []string{
 		dir,
@@ -139,6 +179,15 @@ func TestInstallServicePropagatesExitAndStderr(t *testing.T) {
 	}
 }
 
+func existingSupervisor(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ongrid-edge-supervisor.exe")
+	if err := os.WriteFile(path, []byte("supervisor"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestUninstallServiceToleratesMissingService(t *testing.T) {
 	runner := &fakeRunner{run: func(name string, args []string) error {
 		return &commandError{
@@ -148,8 +197,33 @@ func TestUninstallServiceToleratesMissingService(t *testing.T) {
 			err:    errors.New("exit status 1"),
 		}
 	}}
-	if err := uninstallService(runner, "supervisor.exe"); err != nil {
+	if err := uninstallService(runner, existingSupervisor(t)); err != nil {
 		t.Fatalf("uninstallService() error = %v, want nil for missing service", err)
+	}
+}
+
+// TestUninstallServiceMissingSupervisorIsSuccess covers a host where the
+// installer never ran: there is no binary to delegate to, and that is already
+// the desired end state.
+func TestUninstallServiceMissingSupervisorIsSuccess(t *testing.T) {
+	runner := &fakeRunner{}
+	missing := filepath.Join(t.TempDir(), "ongrid-edge-supervisor.exe")
+	if err := uninstallService(runner, missing); err != nil {
+		t.Fatalf("uninstallService() error = %v, want nil for missing supervisor", err)
+	}
+	if calls := runner.snapshot(); len(calls) != 0 {
+		t.Fatalf("runner should not be called when the supervisor is absent: %+v", calls)
+	}
+}
+
+// TestUninstallServiceFilesNotFoundIsSuccess covers a supervisor path that
+// disappears between the stat and the exec.
+func TestUninstallServiceFilesNotFoundIsSuccess(t *testing.T) {
+	runner := &fakeRunner{run: func(string, []string) error {
+		return &commandError{err: exec.ErrNotFound}
+	}}
+	if err := uninstallService(runner, existingSupervisor(t)); err != nil {
+		t.Fatalf("uninstallService() error = %v, want nil for exec.ErrNotFound", err)
 	}
 }
 
@@ -157,7 +231,7 @@ func TestUninstallServicePropagatesOtherFailures(t *testing.T) {
 	runner := &fakeRunner{run: func(string, []string) error {
 		return &commandError{stderr: "access denied", err: errors.New("exit status 5")}
 	}}
-	if err := uninstallService(runner, "supervisor.exe"); err == nil {
+	if err := uninstallService(runner, existingSupervisor(t)); err == nil {
 		t.Fatal("uninstallService() error = nil, want non-nil")
 	}
 }
@@ -499,6 +573,98 @@ func TestInstallSecuresStagingBeforeAgentDownload(t *testing.T) {
 	}
 	if lastSecure > firstDownload {
 		t.Fatalf("download happened before staging was secured: %v", events)
+	}
+}
+
+// TestInstallStopsExistingServiceBeforePlacement verifies a reinstall stops
+// the running service (releasing binary locks) before files are replaced.
+func TestInstallStopsExistingServiceBeforePlacement(t *testing.T) {
+	files := map[string][]byte{
+		"ongrid-edge-supervisor.exe": []byte("supervisor-binary"),
+		"ongrid-edge-worker.exe":     []byte("worker-binary"),
+	}
+	dests := map[string]string{
+		"ongrid-edge-supervisor.exe": "bin",
+		"ongrid-edge-worker.exe":     "bin",
+	}
+	fixture := newInstallFixture(t, files, dests)
+	paths := testDeployPaths(t)
+
+	var (
+		stopCommands     []recordedCommand
+		placedAtStop     bool
+		supervisorPlaced = filepath.Join(paths.BinDir, "ongrid-edge-supervisor.exe")
+	)
+	runner := &fakeRunner{run: func(name string, args []string) error {
+		if name == testSystem32+`\sc.exe` && len(args) > 0 && args[0] == "stop" {
+			stopCommands = append(stopCommands, recordedCommand{name: name, args: append([]string(nil), args...)})
+			if _, err := os.Stat(supervisorPlaced); err == nil {
+				placedAtStop = true
+			}
+		}
+		return nil
+	}}
+	deps := installDeps{
+		paths:     paths,
+		runner:    runner,
+		secureDir: func(string) error { return nil },
+		installService: func(string, string) error {
+			if err := os.WriteFile(paths.HealthFile, []byte(`{}`), 0600); err != nil {
+				return err
+			}
+			return nil
+		},
+		client:        fixture.server.Client(),
+		hostInfo:      func() (HostInfo, error) { return fixedHostInfo(), nil },
+		osVersion:     func() (OSVersion, error) { return OSVersion{Major: 10, Build: 17763}, nil },
+		fetchManifest: fetchManifest,
+		now:           time.Now,
+		sleep:         func(time.Duration) {},
+		readyTimeout:  time.Second,
+		pollInterval:  time.Millisecond,
+	}
+	opts := Options{
+		ManagerURL:     fixture.server.URL,
+		AccessKey:      "ak",
+		SecretKey:      "sk",
+		ServerEdgeAddr: "edge.example.com:40012",
+		Variant:        "auto",
+	}
+	if err := Install(context.Background(), opts, deps); err != nil {
+		t.Fatalf("Install() error: %v", err)
+	}
+	if len(stopCommands) != 1 {
+		t.Fatalf("stop commands = %+v, want exactly one", stopCommands)
+	}
+	if strings.Join(stopCommands[0].args, " ") != "stop ongrid-edge" {
+		t.Fatalf("stop args = %v, want [stop ongrid-edge]", stopCommands[0].args)
+	}
+	if placedAtStop {
+		t.Fatal("supervisor binary was placed before the existing service was stopped")
+	}
+	if _, err := os.Stat(supervisorPlaced); err != nil {
+		t.Fatalf("supervisor binary missing after install: %v", err)
+	}
+}
+
+func TestStopExistingServiceToleratesNotInstalled(t *testing.T) {
+	runner := &fakeRunner{run: func(name string, args []string) error {
+		if name == testSystem32+`\sc.exe` && len(args) > 0 && args[0] == "stop" {
+			return &commandError{stderr: "[SC] OpenService FAILED 1060: The specified service does not exist as an installed service.", err: errors.New("exit status 1")}
+		}
+		return nil
+	}}
+	if err := stopExistingService(runner); err != nil {
+		t.Fatalf("stopExistingService() error = %v, want nil for missing service", err)
+	}
+}
+
+func TestStopExistingServiceToleratesNotRunning(t *testing.T) {
+	runner := &fakeRunner{run: func(string, []string) error {
+		return &commandError{stderr: "[SC] ControlService FAILED 1062: The service has not been started.", err: errors.New("exit status 1")}
+	}}
+	if err := stopExistingService(runner); err != nil {
+		t.Fatalf("stopExistingService() error = %v, want nil for stopped service", err)
 	}
 }
 

@@ -3,9 +3,69 @@
 package install
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+// fakeExitError implements the exitCoder interface used by
+// isServiceAlreadyExists without spawning a real process.
+type fakeExitError struct {
+	code int
+}
+
+func (e *fakeExitError) Error() string { return "fake exit error" }
+func (e *fakeExitError) ExitCode() int { return e.code }
+
+// TestIsServiceAlreadyExists_ExitCode1073 verifies reinstall over an existing
+// service is treated as success (plan Review Focus: idempotent install must
+// not roll back the existing credential).
+func TestIsServiceAlreadyExists_ExitCode1073(t *testing.T) {
+	if !isServiceAlreadyExists(&fakeExitError{code: 1073}, nil) {
+		t.Error("exit code 1073 should be treated as already exists")
+	}
+	for _, code := range []int{1, 5, 1060, 1062} {
+		if isServiceAlreadyExists(&fakeExitError{code: code}, nil) {
+			t.Errorf("exit code %d must not be treated as already exists", code)
+		}
+	}
+}
+
+// TestIsServiceAlreadyExists_OutputText covers adapters that expose text only.
+func TestIsServiceAlreadyExists_OutputText(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		output string
+		want   bool
+	}{
+		{
+			name:   "sc 1073 text",
+			err:    errors.New("exit status 1"),
+			output: "[SC] CreateService FAILED 1073: The specified service already exists.",
+			want:   true,
+		},
+		{
+			name:   "already exists text",
+			err:    errors.New("exit status 1"),
+			output: "The service already exists.",
+			want:   true,
+		},
+		{
+			name:   "access denied",
+			err:    errors.New("exit status 5"),
+			output: "[SC] CreateService FAILED 5: Access is denied.",
+			want:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isServiceAlreadyExists(tc.err, []byte(tc.output)); got != tc.want {
+				t.Fatalf("isServiceAlreadyExists() = %v, want %v (output %q)", got, tc.want, tc.output)
+			}
+		})
+	}
+}
 
 // TestBuildDefenderExclusionCmd_SingleParamName 验证 -ExclusionPath 参数名只出现一次。
 // 回归防护：旧代码用 `-ExclusionPath A -ExclusionPath B` 会导致 PowerShell

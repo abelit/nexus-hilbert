@@ -3,10 +3,12 @@
 package install
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/edgedirs"
 )
@@ -57,9 +59,31 @@ func (sc *SCServiceController) Create(binPath string) error {
 		"DisplayName=", "Ongrid Edge Agent",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
+		// Reinstall over an existing service: 1073 / ERROR_SERVICE_EXISTS is
+		// the desired end state. Treating it as success keeps runInstall from
+		// rolling back (deleting) the existing secrets.enc.
+		if isServiceAlreadyExists(err, out) {
+			return nil
+		}
 		return fmt.Errorf("sc.exe create: %w (output: %s)", err, out)
 	}
 	return nil
+}
+
+// exitCoder is implemented by *exec.ExitError and by test doubles.
+type exitCoder interface {
+	ExitCode() int
+}
+
+// isServiceAlreadyExists reports whether sc.exe create failed only because the
+// service is already registered (exit code 1073, ERROR_SERVICE_EXISTS).
+func isServiceAlreadyExists(err error, output []byte) bool {
+	var coder exitCoder
+	if errors.As(err, &coder) && coder.ExitCode() == 1073 {
+		return true
+	}
+	text := strings.ToLower(string(output))
+	return strings.Contains(text, "1073") || strings.Contains(text, "already exists")
 }
 
 // ConfigureRecovery 配置 SCM failure recovery action。
