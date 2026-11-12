@@ -33,12 +33,18 @@ write_sidecar() {
 
 for target in "$@"; do
     case "$target" in
-        linux-amd64|linux-arm64) ;;
+        linux-amd64|linux-arm64|windows-amd64) ;;
         *) echo "build-edge-attachments: unsupported target $target" >&2; exit 2 ;;
     esac
 
     case "$MODE" in
         deps)
+            # Dependency archives are Linux-only payloads; Windows attaches its
+            # own binaries through the edge mode below.
+            case "$target" in
+                linux-amd64|linux-arm64) ;;
+                *) echo "build-edge-attachments: deps mode does not support $target" >&2; exit 2 ;;
+            esac
             : "${OBI_VERSION:?OBI_VERSION is required}"
             : "${OTELCOL_VERSION:?OTELCOL_VERSION is required}"
             : "${NODE_EXPORTER_VERSION:?NODE_EXPORTER_VERSION is required}"
@@ -83,11 +89,28 @@ EOF
             write_sidecar "$output"
             ;;
         edge)
-            src="$BIN_ROOT/$target/ongrid-edge"
-            [[ -s "$src" ]] || { echo "build-edge-attachments: missing $src" >&2; exit 1; }
-            output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}"
-            install -m 0755 "$src" "$output"
-            write_sidecar "$output"
+            case "$target" in
+                windows-amd64)
+                    supervisor_src="$BIN_ROOT/$target/ongrid-edge-supervisor.exe"
+                    worker_src="$BIN_ROOT/$target/ongrid-edge-worker.exe"
+                    [[ -s "$supervisor_src" ]] || { echo "build-edge-attachments: missing $supervisor_src" >&2; exit 1; }
+                    [[ -s "$worker_src" ]] || { echo "build-edge-attachments: missing $worker_src" >&2; exit 1; }
+                    supervisor_output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}-supervisor.exe"
+                    worker_output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}-worker.exe"
+                    install -m 0755 "$supervisor_src" "$supervisor_output"
+                    install -m 0755 "$worker_src" "$worker_output"
+                    write_sidecar "$supervisor_output"
+                    write_sidecar "$worker_output"
+                    output="$supervisor_output $worker_output"
+                    ;;
+                *)
+                    src="$BIN_ROOT/$target/ongrid-edge"
+                    [[ -s "$src" ]] || { echo "build-edge-attachments: missing $src" >&2; exit 1; }
+                    output="$OUT_DIR/ongrid-edge-${target}-${IDENTIFIER}"
+                    install -m 0755 "$src" "$output"
+                    write_sidecar "$output"
+                    ;;
+            esac
             ;;
         *)
             echo "build-edge-attachments: mode must be deps or edge" >&2

@@ -46,6 +46,9 @@ K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
 # dependencies use an immutable tag derived from every upstream version and
 # are uploaded only once; the small self-developed binary follows VERSION.
 EDGE_ATTACHMENT_TARGETS ?= linux-amd64 linux-arm64
+# Versioned Edge binaries cover Windows too, but the immutable dependency
+# archives stay Linux-only, so keep the two target sets separate.
+EDGE_VERSION_ATTACHMENT_TARGETS ?= $(EDGE_ATTACHMENT_TARGETS) windows-amd64
 OBI_VERSION ?= 0.14.0-ongrid.5
 EDGE_DEPS_TAG ?= edge-deps-layout2-obi$(OBI_VERSION)-o$(OTELCOL_VERSION)-n$(NODE_EXPORTER_VERSION)-pr$(PROCESS_EXPORTER_VERSION)-my$(MYSQLD_EXPORTER_VERSION)-pg$(POSTGRES_EXPORTER_VERSION)-r$(REDIS_EXPORTER_VERSION)-m$(MONGODB_EXPORTER_VERSION)
 EDGE_ATTACHMENTS_OUT ?= $(OUT)/edge-attachments
@@ -325,6 +328,16 @@ build-edge-darwin-arm64: ## [release] edge darwin/arm64
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
 		go build -trimpath -ldflags "-s -w $(LDFLAGS)" \
 		-o $(BIN_DIR)/darwin-arm64/ongrid-edge ./cmd/ongrid-edge
+
+.PHONY: build-edge-windows-amd64
+build-edge-windows-amd64: ## [release] edge windows/amd64 supervisor and worker
+	@mkdir -p $(BIN_DIR)/windows-amd64
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+		go build -trimpath -ldflags "-s -w $(LDFLAGS)" \
+		-o $(BIN_DIR)/windows-amd64/ongrid-edge-supervisor.exe ./cmd/ongrid-edge-supervisor
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+		go build -trimpath -ldflags "-s -w $(LDFLAGS)" \
+		-o $(BIN_DIR)/windows-amd64/ongrid-edge-worker.exe ./cmd/ongrid-edge
 
 .PHONY: docker-build
 docker-build: ## [release] 构建 ongrid:$(VERSION) 镜像（默认 linux/amd64，可用 PLATFORM 覆盖）
@@ -765,7 +778,7 @@ check-release-target:
 # Direct CNB Release attachments. Target-specific EDGE_PLUGIN_ARCHES makes the
 # existing fetch targets populate both Linux architectures. The dependency tag
 # is immutable; the publisher skips it once every expected file exists.
-.PHONY: edge-deps-tag verify-edge-deps-release verify-edge-version-release build-edge-deps-attachments build-edge-version-attachments build-edge-attachments publish-edge-deps-attachments publish-edge-version-attachments publish-edge-attachments test-edge-attachments test-release-workflow
+.PHONY: edge-deps-tag verify-edge-deps-release verify-edge-version-release build-edge-deps-attachments build-edge-version-attachments build-edge-attachments publish-edge-deps-attachments publish-edge-version-attachments publish-edge-attachments test-edge-attachments test-release-workflow build-edge-windows-amd64
 edge-deps-tag: ## [release] 打印当前不可变公共依赖 Release tag
 	@printf '%s\n' "$(EDGE_DEPS_TAG)"
 
@@ -801,8 +814,8 @@ build-edge-deps-attachments: fetch-obi fetch-otelcol fetch-node-exporter fetch-p
 	MONGODB_EXPORTER_VERSION="$(MONGODB_EXPORTER_VERSION)" \
 		bash dist/build-edge-attachments.sh deps "$(EDGE_DEPS_TAG)" "$(EDGE_ATTACHMENTS_OUT)" $(EDGE_ATTACHMENT_TARGETS)
 
-build-edge-version-attachments: build-edge-linux-amd64 build-edge-linux-arm64 ## [release] 构建随 VERSION 变化的 ongrid-edge 附件
-	bash dist/build-edge-attachments.sh edge "$(VERSION)" "$(EDGE_ATTACHMENTS_OUT)" $(EDGE_ATTACHMENT_TARGETS)
+build-edge-version-attachments: build-edge-linux-amd64 build-edge-linux-arm64 build-edge-windows-amd64 ## [release] 构建随 VERSION 变化的 ongrid-edge 附件
+	bash dist/build-edge-attachments.sh edge "$(VERSION)" "$(EDGE_ATTACHMENTS_OUT)" $(EDGE_VERSION_ATTACHMENT_TARGETS)
 
 build-edge-attachments: build-edge-deps-attachments build-edge-version-attachments ## [release] 构建全部 CNB Edge 直链附件
 
@@ -851,6 +864,7 @@ test-edge-attachments: ## [test] 校验附件构建、直链下载和 checksum �
 	bash scripts/test-edge-assets.sh
 	bash scripts/test-edge-assets-lib.sh
 	bash scripts/test-edge-bundle.sh
+	bash scripts/test-windows-attachments.sh
 	bash scripts/test-verify-cnb-release-attachments.sh
 	bash scripts/test-ensure-cnb-release.sh
 	bash scripts/test-publish-cnb-release-attachments.sh
