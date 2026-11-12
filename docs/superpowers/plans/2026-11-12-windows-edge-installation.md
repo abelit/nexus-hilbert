@@ -975,6 +975,7 @@ git commit -m "build(edge): add go 1.20 legacy windows build harness"
 - Modify: `dist/build-edge-attachments.sh`
 - Modify: `dist/build-windows-manifest.sh`
 - Modify: `Makefile`
+- Modify: `deploy/install/edge/fetch-edge-assets.sh`
 - Create: `docs/install/windows.md`
 - Modify: `deploy/install/README.md`
 - Modify: `docs/design/windows-edge-installation.md`（决策记录）
@@ -1002,6 +1003,10 @@ Do not use a zip; the manifest and installer verify each file individually.
 - [ ] **Step 2b: Extend release publish/verify to Windows**
 
 Update `verify-edge-version-release` and both file lists in `publish-edge-version-attachments` (in `Makefile`) to include the four Windows files for each variant. Decide the ordering relative to already-published tags: `scripts/publish-cnb-release-attachments.sh` refuses to add files to a partially populated immutable release, so Windows must be included before the first tagged publish that is meant to carry it.
+
+- [ ] **Step 2c: Build and stage the installer bootstrap**
+
+Add `make build-edge-windows-installer` using `GOTOOLCHAIN=go1.20.14` and `tools/windows-installer`, output `bin/windows-amd64/ongrid-edge-installer.exe`. Publish it as `ongrid-edge-windows-amd64-<version>-installer.exe` plus `.sha256`, and stage it at the fixed UI URL `windows/ongrid-edge-installer.exe`. Extend `fetch-edge-assets.sh` and the publish/verify file lists to include it. The manifest does not need to reference the installer.
 
 - [ ] **Step 3: Write `docs/install/windows.md`**
 
