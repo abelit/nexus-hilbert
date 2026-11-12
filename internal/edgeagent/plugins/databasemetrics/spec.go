@@ -3,12 +3,12 @@ package databasemetrics
 import (
 	"fmt"
 	"net"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins/metricscommon"
 )
 
@@ -174,10 +174,10 @@ func (s sourceSpec) command(binDir, secretPath, secret string) (binary string, a
 			args = append(args, "--tls.insecure-skip-verify")
 		}
 		args = append(args, mysqlExporterArgs(s.Exporter)...)
-		return filepath.Join(binDir, "mysqld_exporter"), args, nil, nil
+		return plugins.BinaryPath(binDir, "mysqld_exporter"), args, nil, nil
 	case "postgresql":
 		args := append([]string{listenArg}, postgresExporterArgs(s.Exporter)...)
-		return filepath.Join(binDir, "postgres_exporter"), args, []string{"DATA_SOURCE_NAME=" + secret}, nil
+		return plugins.BinaryPath(binDir, "postgres_exporter"), args, []string{"DATA_SOURCE_NAME=" + secret}, nil
 	case "redis":
 		args := []string{listenArg}
 		if s.TLS.SkipVerify {
@@ -193,10 +193,10 @@ func (s sourceSpec) command(binDir, secretPath, secret string) (binary string, a
 			args = append(args, "-tls-client-key-file="+s.TLS.KeyFile)
 		}
 		args = append(args, redisExporterArgs(s.Exporter)...)
-		return filepath.Join(binDir, "redis_exporter"), args, []string{"REDIS_ADDR=" + secret}, nil
+		return plugins.BinaryPath(binDir, "redis_exporter"), args, []string{"REDIS_ADDR=" + secret}, nil
 	case "mongodb":
 		args := append([]string{listenArg}, mongodbExporterArgs(s.Exporter)...)
-		return filepath.Join(binDir, "mongodb_exporter"), args, []string{"MONGODB_URI=" + secret}, nil
+		return plugins.BinaryPath(binDir, "mongodb_exporter"), args, []string{"MONGODB_URI=" + secret}, nil
 	default:
 		return "", nil, nil, fmt.Errorf("unsupported db_type %q", s.DBType)
 	}

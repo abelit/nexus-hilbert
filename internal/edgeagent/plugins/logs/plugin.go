@@ -25,7 +25,7 @@ const Name = "logs"
 // The returned *plugins.SubprocessPlugin satisfies plugins.Plugin and is
 // registered with the Supervisor by ongrid-edge main.
 func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
-	binary := filepath.Join(binDir, "otelcol-contrib")
+	binary := plugins.BinaryPath(binDir, "otelcol-contrib")
 	return plugins.NewSubprocess(plugins.SubprocessOpts{
 		Name:            Name,
 		Binary:          binary,

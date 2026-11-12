@@ -33,7 +33,7 @@ const DefaultListenAddress = ":9256"
 func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
 	return plugins.NewSubprocess(plugins.SubprocessOpts{
 		Name:         Name,
-		Binary:       filepath.Join(binDir, "process_exporter"),
+		Binary:       plugins.BinaryPath(binDir, "process_exporter"),
 		WorkDir:      filepath.Join(workDir, Name),
 		ConfigFile:   filepath.Join(workDir, Name, "process-exporter.yaml"),
 		ConfigRender: render,

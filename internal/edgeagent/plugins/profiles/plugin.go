@@ -32,7 +32,7 @@ type profilePlugin struct {
 // pprof receiver. The target application must expose a compatible endpoint.
 func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
 	root := filepath.Join(workDir, Name)
-	runtimeBinary := filepath.Join(binDir, "otelcol-contrib")
+	runtimeBinary := plugins.BinaryPath(binDir, "otelcol-contrib")
 	return &profilePlugin{
 		duration: 30 * time.Second,
 		log:      log,

@@ -67,7 +67,7 @@ func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
 	textfileDir := filepath.Join(pluginWorkDir, "textfile")
 	sub := plugins.NewSubprocess(plugins.SubprocessOpts{
 		Name:    Name,
-		Binary:  filepath.Join(binDir, "node_exporter"),
+		Binary:  plugins.BinaryPath(binDir, "node_exporter"),
 		WorkDir: pluginWorkDir,
 		// node_exporter is CLI-only. We still set ConfigFile so the
 		// supervisor's per-plugin workdir gets created, but render is
@@ -104,9 +104,9 @@ type plugin struct {
 	wg     sync.WaitGroup
 }
 
-func (p *plugin) Name() string                            { return Name }
+func (p *plugin) Name() string                             { return Name }
 func (p *plugin) Configure(cfg plugins.PluginConfig) error { return p.sub.Configure(cfg) }
-func (p *plugin) HealthSnapshot() plugins.PluginHealth    { return p.sub.HealthSnapshot() }
+func (p *plugin) HealthSnapshot() plugins.PluginHealth     { return p.sub.HealthSnapshot() }
 
 // Start brings up the subprocess and the producer goroutine. The
 // producer uses its own context so it survives subprocess restarts
