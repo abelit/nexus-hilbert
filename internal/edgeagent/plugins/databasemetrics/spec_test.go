@@ -488,6 +488,30 @@ func TestParseSpecRejectsDuplicateListenPort(t *testing.T) {
 	}
 }
 
+func TestIsSupportedDBTypeForOS(t *testing.T) {
+	tests := []struct {
+		dbType string
+		goos   string
+		want   bool
+	}{
+		{dbType: "mysql", goos: "linux", want: true},
+		{dbType: "mysql", goos: "windows", want: true},
+		{dbType: "postgresql", goos: "windows", want: true},
+		{dbType: "redis", goos: "windows", want: true},
+		{dbType: "mongodb", goos: "linux", want: true},
+		{dbType: "mongodb", goos: "darwin", want: true},
+		{dbType: "mongodb", goos: "windows", want: false},
+		{dbType: "unknown", goos: "linux", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.dbType+"/"+tt.goos, func(t *testing.T) {
+			if got := isSupportedDBTypeForOS(tt.dbType, tt.goos); got != tt.want {
+				t.Fatalf("isSupportedDBTypeForOS(%q, %q) = %v, want %v", tt.dbType, tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSpecRejectsReservedListenPort(t *testing.T) {
 	_, err := parseSpec(map[string]interface{}{
 		"sources": []interface{}{

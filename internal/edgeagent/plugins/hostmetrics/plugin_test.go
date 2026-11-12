@@ -23,13 +23,37 @@ func TestBuildArgsWindowsOmitsNodeExporterFlags(t *testing.T) {
 	if !containsArg(args, "--collectors.enabled=cpu,memory") {
 		t.Fatalf("argv = %v, want --collectors.enabled=cpu,memory", args)
 	}
-	if !containsArg(args, "--collectors.disabled=net") {
-		t.Fatalf("argv = %v, want --collectors.disabled=net", args)
-	}
 	for _, arg := range args {
+		if strings.HasPrefix(arg, "--collectors.disabled") {
+			t.Fatalf("argv = %v, contains flag missing from windows_exporter 0.29.x: %q", args, arg)
+		}
 		if strings.HasPrefix(arg, "--collector.") || strings.HasPrefix(arg, "--no-collector.") {
 			t.Fatalf("argv = %v, contains node_exporter-only flag %q", args, arg)
 		}
+	}
+}
+
+func TestValidateWindowsCollectorsRejectsDisabled(t *testing.T) {
+	cfg := plugins.PluginConfig{Spec: map[string]interface{}{
+		"collectors_disabled": []interface{}{"net"},
+	}}
+	err := validateWindowsCollectors(cfg)
+	if err == nil {
+		t.Fatal("validateWindowsCollectors() error = nil, want rejection")
+	}
+	for _, want := range []string{"collectors_disabled", "--collectors.disabled", "collectors_enabled"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("validateWindowsCollectors() error = %v, want %q", err, want)
+		}
+	}
+}
+
+func TestValidateWindowsCollectorsAllowsEnabled(t *testing.T) {
+	cfg := plugins.PluginConfig{Spec: map[string]interface{}{
+		"collectors_enabled": []interface{}{"cpu", "memory"},
+	}}
+	if err := validateWindowsCollectors(cfg); err != nil {
+		t.Fatalf("validateWindowsCollectors() error = %v, want nil", err)
 	}
 }
 

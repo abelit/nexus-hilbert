@@ -3,6 +3,7 @@ package databasemetrics
 import (
 	"fmt"
 	"net"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,6 +100,11 @@ func parseSource(i int, m map[string]interface{}) (sourceSpec, error) {
 	}
 	dbType := strings.ToLower(stringFrom(m, "db_type"))
 	if !isSupportedDBType(dbType) {
+		if dbType == "mongodb" && runtime.GOOS == "windows" {
+			return sourceSpec{}, fmt.Errorf(
+				"sources[%d].db_type %q is not supported on windows: mongodb_exporter has no Windows amd64 release",
+				i, dbType)
+		}
 		return sourceSpec{}, fmt.Errorf("sources[%d].db_type unsupported %q", i, dbType)
 	}
 	listen := stringFrom(m, "listen_address")
@@ -388,9 +394,19 @@ func (s sourceSpec) scrapeTarget() metricscommon.Target {
 }
 
 func isSupportedDBType(v string) bool {
+	return isSupportedDBTypeForOS(v, runtime.GOOS)
+}
+
+// isSupportedDBTypeForOS reports whether the edge can run an exporter for
+// dbType on goos. mongodb is unavailable on Windows because
+// percona/mongodb_exporter publishes no windows-amd64 release asset; packaging
+// therefore does not ship mongodb_exporter.exe there.
+func isSupportedDBTypeForOS(v, goos string) bool {
 	switch v {
-	case "mysql", "postgresql", "redis", "mongodb":
+	case "mysql", "postgresql", "redis":
 		return true
+	case "mongodb":
+		return goos != "windows"
 	default:
 		return false
 	}

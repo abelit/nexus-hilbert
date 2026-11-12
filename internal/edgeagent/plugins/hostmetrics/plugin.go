@@ -23,7 +23,7 @@
 //
 //	listen_address : string         (default ":9102")
 //	collectors_enabled: []string   (optional — Linux: `--collector.<name>` per entry; Windows: `--collectors.enabled=a,b`)
-//	collectors_disabled: []string  (optional — Linux: `--no-collector.<name>` per entry; Windows: `--collectors.disabled=a,b`)
+//	collectors_disabled: []string  (optional — Linux: `--no-collector.<name>` per entry; rejected on Windows because windows_exporter has no `--collectors.disabled` flag)
 //	extra_args     : []string       (optional — appended verbatim)
 package hostmetrics
 
@@ -99,9 +99,27 @@ type plugin struct {
 	wg     sync.WaitGroup
 }
 
-func (p *plugin) Name() string                             { return Name }
-func (p *plugin) Configure(cfg plugins.PluginConfig) error { return p.sub.Configure(cfg) }
-func (p *plugin) HealthSnapshot() plugins.PluginHealth     { return p.sub.HealthSnapshot() }
+func (p *plugin) Name() string { return Name }
+func (p *plugin) Configure(cfg plugins.PluginConfig) error {
+	if runtime.GOOS == "windows" {
+		if err := validateWindowsCollectors(cfg); err != nil {
+			return err
+		}
+	}
+	return p.sub.Configure(cfg)
+}
+func (p *plugin) HealthSnapshot() plugins.PluginHealth { return p.sub.HealthSnapshot() }
+
+// validateWindowsCollectors rejects spec keys that the pinned windows_exporter
+// (0.29.x) does not understand. In particular there is no
+// --collectors.disabled flag; passing it makes the exporter exit at startup.
+// Collector selection must use collectors_enabled or extra_args instead.
+func validateWindowsCollectors(cfg plugins.PluginConfig) error {
+	if len(stringSliceSpec(cfg, "collectors_disabled")) > 0 {
+		return fmt.Errorf("hostmetrics: collectors_disabled is not supported on Windows: windows_exporter has no --collectors.disabled flag; use collectors_enabled or extra_args instead")
+	}
+	return nil
+}
 
 // Start brings up the subprocess and the producer goroutine. The
 // producer uses its own context so it survives subprocess restarts
@@ -268,9 +286,9 @@ func windowsExporterArgs(cfg plugins.PluginConfig, listen, textfileDir string) [
 	if len(enabled) > 0 {
 		args = append(args, "--collectors.enabled="+strings.Join(enabled, ","))
 	}
-	if disabled := stringSliceSpec(cfg, "collectors_disabled"); len(disabled) > 0 {
-		args = append(args, "--collectors.disabled="+strings.Join(disabled, ","))
-	}
+	// --collectors.disabled does not exist in any 0.29.x windows_exporter
+	// release. validateWindowsCollectors rejects a collectors_disabled spec
+	// before Configure succeeds, so no invalid flag is emitted here.
 	// windows_exporter's textfile collector is disabled by default. Only point
 	// it at our managed directory when the operator explicitly enables it.
 	for _, c := range enabled {

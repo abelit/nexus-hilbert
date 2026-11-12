@@ -552,12 +552,13 @@ FETCH_CURL_FLAGS ?= -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-t
 # default install works without forcing users to compile their own.
 OTELCOL_VERSION ?= 0.157.0
 
-# windows_exporter pinned for the Windows hostmetrics plugin. 0.29.0 is the
-# last release before the 0.30 config-file rewrite and keeps the pre-0.30 flag
-# contract used by internal/edgeagent/plugins/hostmetrics:
+# windows_exporter pinned for the Windows hostmetrics plugin. 0.29.2 is the
+# last 0.29 patch release before the 0.30 config-file rewrite and keeps the
+# pre-0.30 flag contract used by internal/edgeagent/plugins/hostmetrics:
 #   --web.listen-address, --collectors.enabled, --collector.textfile.directories
-# Do not bump to >= 0.30 without re-validating those args.
-WINDOWS_EXPORTER_VERSION ?= 0.29.0
+# The 0.29.x line has no --collectors.disabled flag; the plugin rejects that
+# spec key on Windows. Do not bump to >= 0.30 without re-validating the args.
+WINDOWS_EXPORTER_VERSION ?= 0.29.2
 
 .PHONY: fetch-otelcol
 fetch-otelcol: ## [release] 下载 otelcol-contrib 到 bin/<os>-<arch>/otelcol-contrib (linux-only)

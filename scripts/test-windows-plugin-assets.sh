@@ -24,7 +24,7 @@ require_file_text() {
 }
 
 # 1. Version pins and fetch targets.
-require_file_text "$makefile" 'WINDOWS_EXPORTER_VERSION ?= 0.29.0' "windows_exporter pin"
+require_file_text "$makefile" 'WINDOWS_EXPORTER_VERSION ?= 0.29.2' "windows_exporter pin"
 require_file_text "$makefile" 'MYSQLD_EXPORTER_VERSION ?= 0.19.0' "mysqld_exporter pin"
 require_file_text "$makefile" 'POSTGRES_EXPORTER_VERSION ?= 0.19.1' "postgres_exporter pin"
 require_file_text "$makefile" 'REDIS_EXPORTER_VERSION ?= 1.86.0' "redis_exporter pin"
@@ -38,8 +38,8 @@ if grep -Eq '^fetch-mongodb-exporter-windows:' "$makefile"; then
 fi
 
 # 2. The design doc must record the pins and the capability decision.
-require_file_text "$design_doc" 'WINDOWS_EXPORTER_VERSION=0.29.0' "design doc windows_exporter pin"
-require_file_text "$design_doc" 'windows_exporter-0.29.0-amd64.exe' "design doc windows_exporter asset"
+require_file_text "$design_doc" 'WINDOWS_EXPORTER_VERSION=0.29.2' "design doc windows_exporter pin"
+require_file_text "$design_doc" 'windows_exporter-0.29.2-amd64.exe' "design doc windows_exporter asset"
 require_file_text "$design_doc" 'otelcol-contrib_0.157.0_windows_amd64.tar.gz' "design doc otelcol asset"
 require_file_text "$design_doc" 'mongodb' "design doc mongodb omission"
 require_file_text "$design_doc" 'windows/modern-amd64/plugins/' "design doc modern plugin staging"

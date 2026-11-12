@@ -298,19 +298,19 @@ Windows 插件二进制随 `VERSION` 作为版本化 Release 附件发布，不�
 
 | 插件 | 二进制 | 版本变量 | 固定版本 | 上游资产 |
 | --- | --- | --- | --- | --- |
-| `hostmetrics` | `windows_exporter.exe` | `WINDOWS_EXPORTER_VERSION` | `0.29.0` | `windows_exporter-0.29.0-amd64.exe` |
+| `hostmetrics` | `windows_exporter.exe` | `WINDOWS_EXPORTER_VERSION` | `0.29.2` | `windows_exporter-0.29.2-amd64.exe` |
 | `logs` / `traces` | `otelcol-contrib.exe` | `OTELCOL_VERSION` | `0.157.0` | `otelcol-contrib_0.157.0_windows_amd64.tar.gz` |
 | `databasemetrics`（mysql） | `mysqld_exporter.exe` | `MYSQLD_EXPORTER_VERSION` | `0.19.0` | `mysqld_exporter-0.19.0.windows-amd64.tar.gz` |
 | `databasemetrics`（postgresql） | `postgres_exporter.exe` | `POSTGRES_EXPORTER_VERSION` | `0.19.1` | `postgres_exporter-0.19.1.windows-amd64.tar.gz` |
 | `databasemetrics`（redis） | `redis_exporter.exe` | `REDIS_EXPORTER_VERSION` | `1.86.0` | `redis_exporter-v1.86.0.windows-amd64.zip` |
 
-`WINDOWS_EXPORTER_VERSION=0.29.0` 是 0.30 配置重写前的最后一个版本，保留 pre-0.30 参数：
+`WINDOWS_EXPORTER_VERSION=0.29.2` 是 0.30 配置重写前 0.29 分支的最后一个 patch release，保留 pre-0.30 参数：
 
 - `--web.listen-address`;
 - `--collectors.enabled`（逗号分隔）；
 - `--collector.textfile.directories`（textfile collector 默认关闭，仅在显式启用 `textfile` 时传入）。
 
-0.29.0 不提供 `--collectors.disabled`；Windows `hostmetrics` 配置必须通过 `collectors_enabled` 或 `extra_args` 选择 collector，不能依赖 `collectors_disabled`。升级到 >= 0.30 前必须重新验证 `internal/edgeagent/plugins/hostmetrics` 的参数契约。
+0.29.x 全系列都不提供 `--collectors.disabled`。Windows `hostmetrics` 在 `Configure` 阶段直接拒绝 `collectors_disabled` 并返回配置错误，避免进程带着无效参数启动；配置必须通过 `collectors_enabled` 或 `extra_args` 选择 collector。升级到 >= 0.30 前必须重新验证 `internal/edgeagent/plugins/hostmetrics` 的参数契约。
 
 数据库 exporter 能力按上游资产决定：
 
