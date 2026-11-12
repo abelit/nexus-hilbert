@@ -197,7 +197,7 @@ func TestRestartServiceTool_SchemaPatternMatchesAllowList(t *testing.T) {
 	if len(schema.Properties.Service.Enum) != 0 {
 		t.Errorf("schema must not use a case-sensitive enum, got %v", schema.Properties.Service.Enum)
 	}
-	if want := buildRestartServicePattern(AllowedRestartServices); schema.Properties.Service.Pattern != want {
+	if want := RestartServicePattern(); schema.Properties.Service.Pattern != want {
 		t.Errorf("schema pattern = %q, want %q (must be derived from AllowedRestartServices)",
 			schema.Properties.Service.Pattern, want)
 	}
@@ -225,6 +225,35 @@ func TestRestartServiceTool_SchemaPatternMatchesAllowList(t *testing.T) {
 	}
 	if re.MatchString("spooler") {
 		t.Errorf("schema pattern %q must reject unknown service spooler", schema.Properties.Service.Pattern)
+	}
+}
+
+func TestRestartServicePatternMatchesAllowList(t *testing.T) {
+	// RestartServicePattern is the single source of truth shared by the
+	// main BaseTool schema and the external MCP surface. It must accept
+	// every allow-list entry in lower, upper and title case while
+	// rejecting unknown services.
+	pattern := RestartServicePattern()
+	if pattern == "" {
+		t.Fatal("RestartServicePattern returned empty pattern")
+	}
+	if want := buildRestartServicePattern(AllowedRestartServices); pattern != want {
+		t.Errorf("RestartServicePattern() = %q, want %q", pattern, want)
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		t.Fatalf("RestartServicePattern does not compile: %v", err)
+	}
+	for _, s := range AllowedRestartServices {
+		title := strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
+		for _, form := range []string{strings.ToLower(s), strings.ToUpper(s), title} {
+			if !re.MatchString(form) {
+				t.Errorf("pattern %q rejects allow-listed service %q", pattern, form)
+			}
+		}
+	}
+	if re.MatchString("spooler") {
+		t.Errorf("pattern %q must reject unknown service spooler", pattern)
 	}
 }
 

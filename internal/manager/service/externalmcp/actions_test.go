@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	biz "github.com/ongridio/ongrid/internal/manager/biz/externalmcp"
 	"github.com/ongridio/ongrid/internal/pkg/integrationauth"
@@ -44,6 +45,22 @@ func TestBuiltinActionsRequireScopesAndDryRunDoesNotSend(t *testing.T) {
 	base.info.Origin = "mcp"
 	_, err = BuiltinWriteTools([]basetool.BaseTool{base})
 	require.Error(t, err)
+}
+
+func TestActionToolsRestartServiceAcceptsMixedCase(t *testing.T) {
+	list, err := ActionTools(&catalogTool{info: basetool.ToolInfo{Name: tools.ToolNameRestartService, Class: "write"}}, nil)
+	require.NoError(t, err)
+	catalog, err := biz.NewCatalog(list)
+	require.NoError(t, err)
+	tool := catalog[tools.ToolNameRestartService]
+	require.NotNil(t, tool)
+	for _, service := range []string{"W3SVC", "w3svc", "W3Svc"} {
+		args, err := tool.Parse([]byte(`{"device_id":1,"service":"` + service + `","reason":"requested","idempotency_key":"fixture-key-01"}`))
+		require.NoError(t, err, "service %q", service)
+		require.Equal(t, service, biz.String(args, "service"))
+	}
+	_, err = tool.Parse([]byte(`{"device_id":1,"service":"spooler","reason":"requested","idempotency_key":"fixture-key-02"}`))
+	require.Error(t, err, "spooler must be rejected by the schema")
 }
 
 func TestQueryAdapterDoesNotShadowResourceContractsOrExportDynamicTools(t *testing.T) {

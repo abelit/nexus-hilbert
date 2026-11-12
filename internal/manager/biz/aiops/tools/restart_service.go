@@ -99,6 +99,15 @@ func buildRestartServicePattern(services []string) string {
 // schema constraint and the runtime allow-list cannot drift.
 var restartServicePattern = buildRestartServicePattern(AllowedRestartServices)
 
+// RestartServicePattern returns the case-insensitive anchored regexp
+// used as the `service` schema constraint. It is the single source of
+// truth for both the main BaseTool schema and the external MCP surface,
+// so the two schemas cannot drift. The runtime allow-list check in
+// InvokableRun remains the second gate.
+func RestartServicePattern() string {
+	return restartServicePattern
+}
+
 // RestartServiceSchema is the JSON Schema of the tool's argument
 // object. The allow-list is enforced both by the schema's `pattern` (so
 // the LLM gets a structured, case-insensitive constraint) AND by an

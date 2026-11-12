@@ -100,7 +100,7 @@ func BuiltinWriteTools(base []basetool.BaseTool) ([]biz.Tool, error) {
 func ActionTools(restart, k8s basetool.BaseTool) ([]biz.Tool, error) {
 	out := []biz.Tool{}
 	if restart != nil {
-		out = append(out, biz.Tool{Name: tools.ToolNameRestartService, Description: "Restart one allowed host service after the user confirms once at approval_url. dry_run only previews the request. Poll get_operation; remote acceptance is not a health check.", Scopes: []string{"devices:read", "host:execute"}, Mutation: true, Schema: writeSchema(map[string]any{"device_id": idSchema(), "service": enumSchema(tools.AllowedRestartServices...)}, "device_id", "service", "reason"), Validate: requireReason, Policy: func(a biz.Arguments) (biz.Policy, error) {
+		out = append(out, biz.Tool{Name: tools.ToolNameRestartService, Description: "Restart one allowed host service after the user confirms once at approval_url. dry_run only previews the request. Poll get_operation; remote acceptance is not a health check.", Scopes: []string{"devices:read", "host:execute"}, Mutation: true, Schema: writeSchema(map[string]any{"device_id": idSchema(), "service": map[string]any{"type": "string", "pattern": tools.RestartServicePattern()}}, "device_id", "service", "reason"), Validate: requireReason, Policy: func(a biz.Arguments) (biz.Policy, error) {
 			return biz.Policy{Target: target("device", uint64(biz.Number(a, "device_id"))), Remote: true}, nil
 		}, Run: func(ctx context.Context, a biz.Arguments) (any, error) {
 			if biz.Bool(a, "dry_run") {
