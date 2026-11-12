@@ -156,6 +156,12 @@ func normalizeEnrollmentManagerURL(raw string) (string, error) {
 	if scheme != "http" && scheme != "https" {
 		return "", fmt.Errorf("enroll: manager URL scheme must be http or https")
 	}
+	// Enforce the loopback rule here as well as in ParseArgs: Enroll is the
+	// boundary that actually sends the token, and callers may not have gone
+	// through the CLI parser.
+	if scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return "", fmt.Errorf("enroll: http is only allowed for loopback manager hosts")
+	}
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", errors.New("enroll: manager URL must not contain credentials, query, or fragment")
 	}

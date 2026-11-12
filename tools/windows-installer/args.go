@@ -21,6 +21,7 @@ type Options struct {
 	TLSInsecure     bool
 	Variant         string
 	Uninstall       bool
+	Purge           bool
 	DryRun          bool
 	LogFile         string
 }
@@ -42,6 +43,7 @@ func ParseArgs(args []string) (Options, error) {
 	fs.BoolVar(&opts.TLSInsecure, "tls-insecure", false, "skip TLS certificate verification (self-signed testing only)")
 	fs.StringVar(&opts.Variant, "variant", "auto", "artifact variant: auto, modern, or legacy")
 	fs.BoolVar(&opts.Uninstall, "uninstall", false, "uninstall the service")
+	fs.BoolVar(&opts.Purge, "purge", false, "remove installed binaries, plugins, and data on uninstall")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "validate the configuration without changing the host")
 	fs.StringVar(&opts.LogFile, "log-file", "", "installer log file")
 

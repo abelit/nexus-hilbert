@@ -56,6 +56,7 @@ func main() {
 			if err := opts.Validate(); err != nil {
 				log.Error("--install 参数错误", "err", err)
 				fmt.Fprintf(os.Stderr, "Usage: ongrid-edge-supervisor.exe --install --token <X> --cloud-addr <host:port> --access-key <X> [--collector-mode off] [--plugin-bin-dir <P>] [--plugin-work-dir <P>] [--scrape-config-file <P>] [--tls-ca-file <P>] [--tls-server-name <X>]\n")
+				fmt.Fprintf(os.Stderr, "       ongrid-edge-supervisor.exe --install --config-file <P>  (secret read from the file, never argv)\n")
 				os.Exit(2)
 			}
 			if err := runInstall(log, opts,
@@ -91,6 +92,7 @@ func main() {
 		case "--help", "-h":
 			fmt.Fprintf(os.Stdout, "Usage:\n")
 			fmt.Fprintf(os.Stdout, "  ongrid-edge-supervisor.exe --install --token <X> --cloud-addr <host:port> --access-key <X> [--collector-mode off] [--plugin-bin-dir <P>] [--plugin-work-dir <P>] [--scrape-config-file <P>] [--tls-ca-file <P>] [--tls-server-name <X>]\n")
+			fmt.Fprintf(os.Stdout, "  ongrid-edge-supervisor.exe --install --config-file <P>  (secret read from the file, never argv)\n")
 			fmt.Fprintf(os.Stdout, "  ongrid-edge-supervisor.exe --uninstall\n")
 			fmt.Fprintf(os.Stdout, "  ongrid-edge-supervisor.exe --upgrade  (write sentinel + exit; SCM restart triggers SelfSwap)\n")
 			fmt.Fprintf(os.Stdout, "  ongrid-edge-supervisor.exe (run as Windows Service)\n")

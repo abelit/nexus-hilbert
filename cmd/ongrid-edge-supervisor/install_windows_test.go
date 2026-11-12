@@ -754,3 +754,139 @@ func TestRunInstall_SecuresStageAndPluginDirs(t *testing.T) {
 		t.Error("credentials should be installed after dirs are secured")
 	}
 }
+
+// writeInstallConfig writes a --config-file fixture and returns its path.
+func writeInstallConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "install.json")
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+	return path
+}
+
+// TestParseInstallOptions_ConfigFileFlag 验证 --config-file 同时支持 space 和
+// = 两种形式。
+func TestParseInstallOptions_ConfigFileFlag(t *testing.T) {
+	t.Run("space form", func(t *testing.T) {
+		opts := parseInstallOptions([]string{"--config-file", `C:\ProgramData\ongrid-edge\install.json`})
+		if opts.ConfigFile != `C:\ProgramData\ongrid-edge\install.json` {
+			t.Errorf("ConfigFile = %q", opts.ConfigFile)
+		}
+	})
+	t.Run("equals form", func(t *testing.T) {
+		opts := parseInstallOptions([]string{"--config-file=C:/ProgramData/ongrid-edge/install.json"})
+		if opts.ConfigFile != "C:/ProgramData/ongrid-edge/install.json" {
+			t.Errorf("ConfigFile = %q", opts.ConfigFile)
+		}
+	})
+}
+
+// TestInstallOptions_ValidateLoadsConfigFile 验证 --config-file 从 JSON 读取
+// 全部字段，secret 只来自文件，默认值仍然生效。
+func TestInstallOptions_ValidateLoadsConfigFile(t *testing.T) {
+	cfg := writeInstallConfig(t, `{
+		"cloud_addr": "1.2.3.4:40012",
+		"access_key": "ak_from_file",
+		"secret_key": "sk_from_file",
+		"collector_mode": "all",
+		"plugin_bin_dir": "C:\\bin",
+		"plugin_work_dir": "C:\\data",
+		"tls_ca_file": "",
+		"tls_server_name": "frontier.example.com",
+		"scrape_config_file": "C:\\data\\scrape.yaml"
+	}`)
+	opts := installOptions{ConfigFile: cfg}
+	if err := opts.Validate(); err != nil {
+		t.Fatalf("Validate() error: %v", err)
+	}
+	if opts.Token != "sk_from_file" {
+		t.Errorf("Token = %q, want secret_key from config", opts.Token)
+	}
+	if opts.CloudAddr != "1.2.3.4:40012" || opts.AccessKey != "ak_from_file" {
+		t.Errorf("config fields not applied: %+v", opts)
+	}
+	if opts.CollectorMode != "all" {
+		t.Errorf("CollectorMode = %q, want all", opts.CollectorMode)
+	}
+	if opts.PluginBinDir != `C:\bin` || opts.PluginWorkDir != `C:\data` {
+		t.Errorf("plugin dirs not applied: %+v", opts)
+	}
+	if opts.TLSServerName != "frontier.example.com" {
+		t.Errorf("TLSServerName = %q", opts.TLSServerName)
+	}
+	if opts.ScrapeConfigFile != `C:\data\scrape.yaml` {
+		t.Errorf("ScrapeConfigFile = %q", opts.ScrapeConfigFile)
+	}
+}
+
+// TestInstallOptions_ValidateConfigFileAppliesDefaults 验证配置文件缺省字段
+// 仍由 Validate 填充默认值。
+func TestInstallOptions_ValidateConfigFileAppliesDefaults(t *testing.T) {
+	cfg := writeInstallConfig(t, `{
+		"cloud_addr": "1.2.3.4:40012",
+		"access_key": "ak",
+		"secret_key": "sk"
+	}`)
+	opts := installOptions{ConfigFile: cfg}
+	if err := opts.Validate(); err != nil {
+		t.Fatalf("Validate() error: %v", err)
+	}
+	if opts.CollectorMode != "off" {
+		t.Errorf("CollectorMode = %q, want off", opts.CollectorMode)
+	}
+	if opts.PluginBinDir == "" || opts.PluginWorkDir == "" || opts.ScrapeConfigFile == "" {
+		t.Errorf("defaults not applied: %+v", opts)
+	}
+}
+
+// TestInstallOptions_ValidateConfigFileMissingRequired 验证配置文件缺少必需
+// 字段时报错。
+func TestInstallOptions_ValidateConfigFileMissingRequired(t *testing.T) {
+	cases := map[string]string{
+		"missing cloud_addr": `{"access_key":"ak","secret_key":"sk"}`,
+		"missing access_key": `{"cloud_addr":"1.2.3.4:40012","secret_key":"sk"}`,
+		"missing secret_key": `{"cloud_addr":"1.2.3.4:40012","access_key":"ak"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			opts := installOptions{ConfigFile: writeInstallConfig(t, body)}
+			if err := opts.Validate(); err == nil {
+				t.Fatal("Validate() error = nil, want missing required field error")
+			}
+		})
+	}
+}
+
+// TestInstallOptions_ValidateRejectsTokenWithConfigFile 验证 --config-file 模式
+// 下不接受 argv 中的 secret，避免 secret 出现在命令行。
+func TestInstallOptions_ValidateRejectsTokenWithConfigFile(t *testing.T) {
+	cfg := writeInstallConfig(t, `{
+		"cloud_addr": "1.2.3.4:40012",
+		"access_key": "ak",
+		"secret_key": "sk"
+	}`)
+	opts := installOptions{ConfigFile: cfg, Token: "sk_from_argv"}
+	err := opts.Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want argv secret rejection")
+	}
+	if !strings.Contains(err.Error(), "--token") {
+		t.Errorf("error = %v, want --token mentioned", err)
+	}
+}
+
+// TestInstallOptions_ValidateRejectsUnknownConfigField 验证配置文件使用与
+// 其他 JSON 解析一致的严格模式。
+func TestInstallOptions_ValidateRejectsUnknownConfigField(t *testing.T) {
+	cfg := writeInstallConfig(t, `{
+		"cloud_addr": "1.2.3.4:40012",
+		"access_key": "ak",
+		"secret_key": "sk",
+		"unexpected": true
+	}`)
+	opts := installOptions{ConfigFile: cfg}
+	if err := opts.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want unknown field rejection")
+	}
+}

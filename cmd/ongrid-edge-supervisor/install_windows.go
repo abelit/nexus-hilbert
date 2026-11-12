@@ -1,6 +1,10 @@
 // install_windows.go 实现 supervisor.exe --install / --uninstall 子命令
 //。
 // --install --token <X> --cloud-addr <X> --access-key <X> [--collector-mode off] [--plugin-bin-dir <P>] [--plugin-work-dir <P>]:
+// 或 --install --config-file <P>：从受限 ACL 的 JSON 文件读取
+// cloud_addr / access_key / secret_key / collector_mode / plugin_*_dir /
+// tls_* / scrape_config_file。使用 --config-file 时 secret 只能来自文件，
+// 不允许同时传 --token，避免 secret 出现在 argv。
 //   1. DPAPI CryptProtectData(token) → secrets.enc
 //   2. 验证 CryptUnprotectData(secrets.enc) 能还原
 //   3. 清零明文 token 内存
@@ -21,7 +25,11 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -63,12 +71,89 @@ type installOptions struct {
 	// 缺失会导致 worker 用 embedded baseline 只 scrape windows_exporter，
 	// 自定义 metrics 全断（NSSM→supervisor 切换功能回退，修复）。
 	ScrapeConfigFile string
+	// ConfigFile 是 --config-file <P> 指定的 JSON 配置文件。设置时从文件
+	// 读取所有字段，secret 不再从 argv 读取；Validate 读完后调用方负责
+	// 删除该文件（installer 在安装成功/失败后都会删除）。
+	ConfigFile string
+	// configLoaded 防止 Validate 被重复调用时把文件里的 secret 当成 argv
+	// secret 而误报冲突。
+	configLoaded bool
 }
 
-// Validate 校验必需字段并应用默认值。
+// installConfigFile 是 --config-file 的 JSON 结构。字段与 CLI 参数一一对应，
+// 使用 DisallowUnknownFields 拒绝拼写错误。
+type installConfigFile struct {
+	CloudAddr        string `json:"cloud_addr"`
+	AccessKey        string `json:"access_key"`
+	SecretKey        string `json:"secret_key"`
+	CollectorMode    string `json:"collector_mode"`
+	PluginBinDir     string `json:"plugin_bin_dir"`
+	PluginWorkDir    string `json:"plugin_work_dir"`
+	TLSCAFile        string `json:"tls_ca_file"`
+	TLSServerName    string `json:"tls_server_name"`
+	ScrapeConfigFile string `json:"scrape_config_file"`
+}
+
+// loadConfigFile 从 --config-file 填充 installOptions。secret 只允许来自
+// 文件：同时出现 --token 直接报错，确保它不会出现在 argv 中。
+// 读取完成后立即清零原始 JSON 字节（Go string 副本不可清零，但至少不额外
+// 保留一份明文缓冲）。
+func (o *installOptions) loadConfigFile() error {
+	if o.ConfigFile == "" || o.configLoaded {
+		return nil
+	}
+	if o.Token != "" {
+		return errors.New("--token cannot be combined with --config-file: the secret must come from the config file only")
+	}
+
+	data, err := os.ReadFile(o.ConfigFile)
+	if err != nil {
+		return fmt.Errorf("read --config-file %q: %w", o.ConfigFile, err)
+	}
+	var cfg installConfigFile
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		return fmt.Errorf("parse --config-file %q: %w", o.ConfigFile, err)
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return fmt.Errorf("parse --config-file %q: unexpected trailing data", o.ConfigFile)
+	}
+	zeroBytes(data)
+
+	o.Token = strings.TrimSpace(cfg.SecretKey)
+	o.CloudAddr = strings.TrimSpace(cfg.CloudAddr)
+	o.AccessKey = strings.TrimSpace(cfg.AccessKey)
+	if cfg.CollectorMode != "" {
+		o.CollectorMode = cfg.CollectorMode
+	}
+	if cfg.PluginBinDir != "" {
+		o.PluginBinDir = cfg.PluginBinDir
+	}
+	if cfg.PluginWorkDir != "" {
+		o.PluginWorkDir = cfg.PluginWorkDir
+	}
+	if cfg.TLSCAFile != "" {
+		o.TLSCAFile = cfg.TLSCAFile
+	}
+	if cfg.TLSServerName != "" {
+		o.TLSServerName = cfg.TLSServerName
+	}
+	if cfg.ScrapeConfigFile != "" {
+		o.ScrapeConfigFile = cfg.ScrapeConfigFile
+	}
+	o.configLoaded = true
+	return nil
+}
+
+// Validate 校验必需字段并应用默认值。--config-file 在其余校验之前读取。
 func (o *installOptions) Validate() error {
+	if err := o.loadConfigFile(); err != nil {
+		return err
+	}
 	if o.Token == "" {
-		return fmt.Errorf("--token <X> is required")
+		return fmt.Errorf("--token <X> (or secret_key in --config-file) is required")
 	}
 	if o.CloudAddr == "" {
 		return fmt.Errorf("--cloud-addr <host:port> is required")
@@ -285,6 +370,8 @@ func parseInstallOptions(args []string) installOptions {
 			opts.TLSServerName = getValue()
 		case "--scrape-config-file":
 			opts.ScrapeConfigFile = getValue()
+		case "--config-file":
+			opts.ConfigFile = getValue()
 		}
 	}
 	return opts

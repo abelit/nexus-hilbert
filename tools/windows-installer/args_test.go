@@ -261,3 +261,13 @@ func TestParseArgsRejectsInvalidArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestParseArgsUninstallPurge(t *testing.T) {
+	opts, err := ParseArgs([]string{"--uninstall", "--purge"})
+	if err != nil {
+		t.Fatalf("ParseArgs() error: %v", err)
+	}
+	if !opts.Uninstall || !opts.Purge {
+		t.Fatalf("opts = %+v, want Uninstall and Purge set", opts)
+	}
+}

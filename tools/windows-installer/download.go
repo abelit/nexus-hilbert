@@ -11,13 +11,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // downloadErrorBodyLimit bounds how much of a failed response body is included
 // in diagnostics so a hostile server cannot flood the installer log.
 const downloadErrorBodyLimit = 4 << 10
 
-// DownloadFile fetches rawURL into dest.
+// maxDownloadSize bounds one artifact download (512 MiB). It keeps a hostile
+// or misconfigured Manager from filling the installer host's disk.
+const maxDownloadSize int64 = 512 << 20
+
+// downloadClientTimeout bounds a whole artifact transfer when the installer
+// uses newDownloadClient. A caller-supplied client controls its own timeout.
+const downloadClientTimeout = 5 * time.Minute
+
+// newDownloadClient returns the client used for artifact and manifest
+// downloads. The timeout covers the entire request, including body reads.
+func newDownloadClient() *http.Client {
+	return &http.Client{Timeout: downloadClientTimeout}
+}
+
+// DownloadFile fetches rawURL into dest with a 512 MiB size bound.
 //
 // The body is written to a temporary file in the destination directory and
 // renamed into place only after the write succeeds, so a failed download never
@@ -27,8 +42,15 @@ const downloadErrorBodyLimit = 4 << 10
 // Redirect handling is delegated to the supplied client. The standard client
 // follows up to ten redirects, including redirects to another host or scheme;
 // callers that require same-origin downloads should supply a client with a
-// CheckRedirect policy. A nil client uses http.DefaultClient.
+// CheckRedirect policy. A nil client uses http.DefaultClient, which has no
+// timeout: callers using the default client must supply a deadline on ctx.
 func DownloadFile(ctx context.Context, client *http.Client, rawURL, dest string) error {
+	return downloadFile(ctx, client, rawURL, dest, maxDownloadSize)
+}
+
+// downloadFile is DownloadFile with an explicit size bound, so the bound can be
+// exercised without transferring half a gigabyte in tests.
+func downloadFile(ctx context.Context, client *http.Client, rawURL, dest string, limit int64) error {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return fmt.Errorf("download: url is empty")
@@ -78,9 +100,17 @@ func DownloadFile(ctx context.Context, client *http.Client, rawURL, dest string)
 		}
 	}()
 
-	if _, err := io.Copy(temporary, response.Body); err != nil {
+	written, err := io.Copy(temporary, io.LimitReader(response.Body, limit+1))
+	if err != nil {
 		closeErr := temporary.Close()
 		return fmt.Errorf("download %s: write temporary file: %w", rawURL, errors.Join(err, closeErr))
+	}
+	if written > limit {
+		closeErr := temporary.Close()
+		if closeErr != nil {
+			return fmt.Errorf("download %s: artifact exceeds the %d-byte size limit: %w", rawURL, limit, closeErr)
+		}
+		return fmt.Errorf("download %s: artifact exceeds the %d-byte size limit", rawURL, limit)
 	}
 	if err := temporary.Sync(); err != nil {
 		closeErr := temporary.Close()

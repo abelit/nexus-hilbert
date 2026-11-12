@@ -281,3 +281,41 @@ func TestCollectHostInfoUnavailableOffWindows(t *testing.T) {
 		t.Fatal("CollectHostInfo() error = nil, want a clear non-Windows error")
 	}
 }
+
+func TestNormalizeEnrollmentManagerURLRejectsRemotePlaintext(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{name: "remote https", raw: "https://manager.example.com", wantErr: false},
+		{name: "remote http", raw: "http://manager.example.com", wantErr: true},
+		{name: "non-loopback ip http", raw: "http://10.0.0.5:8080", wantErr: true},
+		{name: "loopback ipv4 http", raw: "http://127.0.0.1:8080", wantErr: false},
+		{name: "loopback localhost http", raw: "http://localhost:8080", wantErr: false},
+		{name: "loopback ipv6 http", raw: "http://[::1]:8080", wantErr: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := normalizeEnrollmentManagerURL(tc.raw)
+			if tc.wantErr && err == nil {
+				t.Fatalf("normalizeEnrollmentManagerURL(%q) error = nil, want error", tc.raw)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("normalizeEnrollmentManagerURL(%q) error: %v", tc.raw, err)
+			}
+		})
+	}
+}
+
+// TestEnrollRejectsRemotePlaintextBeforeRequest verifies the loopback rule is
+// enforced at the Enroll boundary, not only in ParseArgs.
+func TestEnrollRejectsRemotePlaintextBeforeRequest(t *testing.T) {
+	_, err := Enroll(context.Background(), nil, "http://manager.example.com", "token", fixedHostInfo(), "v1")
+	if err == nil {
+		t.Fatal("Enroll() error = nil, want loopback rejection")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "loopback") {
+		t.Fatalf("error = %v, want loopback mention", err)
+	}
+}

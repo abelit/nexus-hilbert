@@ -123,6 +123,33 @@ func TestDownloadFileHonorsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestDownloadFileRejectsOversizedBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("0123456789"))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "artifact.exe")
+	err := downloadFile(context.Background(), server.Client(), server.URL, dest, 4)
+	if err == nil {
+		t.Fatal("downloadFile() error = nil, want size limit error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "size") {
+		t.Fatalf("error = %v, want size limit mentioned", err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("oversized download left destination: %v", statErr)
+	}
+}
+
+func TestDownloadClientHasTimeout(t *testing.T) {
+	client := newDownloadClient()
+	if client.Timeout <= 0 {
+		t.Fatalf("download client timeout = %v, want positive", client.Timeout)
+	}
+}
+
 func TestVerifySHA256Matches(t *testing.T) {
 	payload := []byte("verified payload")
 	dir := t.TempDir()
