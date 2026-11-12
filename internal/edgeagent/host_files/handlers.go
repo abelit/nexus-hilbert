@@ -17,11 +17,13 @@
 //   - find_large_files shells out to `find` with -printf on Linux /
 //     -exec stat on Darwin (the BSD find ships without -printf).
 //     Output is parsed into HostFileInfo, sorted descending by size,
-//     truncated to top_n.
+//     truncated to top_n. On Windows (where find.exe is an unrelated
+//     text-search tool) the Go-native walker in find_walk.go is used.
 //
 //   - du_summary shells out to `du`. Linux uses --max-depth=N -B1; Darwin
 //     uses -d N (no -B flag). The TSV output (size<TAB>path) is parsed
-//     and the path-itself row peeled off into the total.
+//     and the path-itself row peeled off into the total. On Windows the
+//     Go-native walker in du_walk.go is used instead.
 //
 //   - stat_file is pure Go (os.Stat / os.Readlink + syscall.Stat_t for
 //     Uid/Gid lookup). Subprocess overhead would dwarf the actual work.
@@ -158,11 +160,19 @@ func makeFindLargeFilesHandler(sb *SandboxConfig, log *slog.Logger) tunnel.Handl
 		if req.MinSizeBytes <= 0 {
 			req.MinSizeBytes = 1 << 20 // 1 MiB
 		}
-		findBin, err := sb.ResolveBinary("find")
-		if err != nil {
-			// Whole-batch fail: no find binary means none of the paths
-			// can run; surface a single error rather than N copies.
-			return nil, fmt.Errorf("find_large_files: %w", err)
+		// Windows has no usable find.exe (its find is an unrelated
+		// text-search tool), so the Go-native walker is used instead of
+		// resolving a binary. On Linux/Darwin the shell-out path stays
+		// byte-for-byte unchanged.
+		findBin := ""
+		if runtime.GOOS != "windows" {
+			var err error
+			findBin, err = sb.ResolveBinary("find")
+			if err != nil {
+				// Whole-batch fail: no find binary means none of the paths
+				// can run; surface a single error rather than N copies.
+				return nil, fmt.Errorf("find_large_files: %w", err)
+			}
 		}
 
 		log.Debug("find_large_files invoked",
@@ -172,6 +182,10 @@ func makeFindLargeFilesHandler(sb *SandboxConfig, log *slog.Logger) tunnel.Handl
 
 		results := make([]tunnel.FindLargeFilesResultEntry, len(req.Paths))
 		_ = runBatch(ctx, req.Paths, results, func(gctx context.Context, idx int, path string) {
+			if runtime.GOOS == "windows" {
+				results[idx] = runFindOnePathWindows(gctx, sb, path, req)
+				return
+			}
 			results[idx] = runFindOnePath(gctx, sb, findBin, path, req)
 		})
 
@@ -396,9 +410,15 @@ func makeDuSummaryHandler(sb *SandboxConfig, log *slog.Logger) tunnel.Handler {
 		if req.Depth <= 0 {
 			req.Depth = 1
 		}
-		duBin, err := sb.ResolveBinary("du")
-		if err != nil {
-			return nil, fmt.Errorf("du_summary: %w", err)
+		// Windows has no du.exe; the Go-native walker replaces it. The
+		// Linux/Darwin shell-out path stays unchanged.
+		duBin := ""
+		if runtime.GOOS != "windows" {
+			var err error
+			duBin, err = sb.ResolveBinary("du")
+			if err != nil {
+				return nil, fmt.Errorf("du_summary: %w", err)
+			}
 		}
 
 		log.Debug("du_summary invoked",
@@ -407,6 +427,10 @@ func makeDuSummaryHandler(sb *SandboxConfig, log *slog.Logger) tunnel.Handler {
 
 		results := make([]tunnel.DuSummaryResultEntry, len(req.Paths))
 		_ = runBatch(ctx, req.Paths, results, func(gctx context.Context, idx int, path string) {
+			if runtime.GOOS == "windows" {
+				results[idx] = runDuOnePathWindows(gctx, sb, path, req.Depth)
+				return
+			}
 			results[idx] = runDuOnePath(gctx, sb, duBin, path, req.Depth)
 		})
 
@@ -426,6 +450,12 @@ func makeDuSummaryHandler(sb *SandboxConfig, log *slog.Logger) tunnel.Handler {
 // coverage hint when the scanned du totals only explain a small slice
 // of fs_used.
 func collectFilesystems(ctx context.Context, sb *SandboxConfig, paths []string) []tunnel.HostFilesystem {
+	// Windows has no df; return an empty list rather than trying to
+	// resolve or spawn a Unix-style binary. The manager treats this as
+	// best-effort metadata already.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	dfBin, err := sb.ResolveBinary("df")
 	if err != nil {
 		return nil

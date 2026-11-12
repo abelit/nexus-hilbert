@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -87,21 +88,31 @@ var DefaultDeniedReadPaths = []string{
 // Binary discovery best-efforts each candidate; missing binaries simply
 // do not appear in AllowedBinaries (calls to ResolveBinary then error
 // cleanly with a message the LLM can render).
+//
+// On Windows find_large_files / du_summary use Go-native walkers, so no
+// binaries are required (and Windows' find.exe is a different tool that
+// must not be allow-listed).
 func DefaultSandboxConfig() *SandboxConfig {
-	return &SandboxConfig{
+	cfg := &SandboxConfig{
 		DeniedReadPaths: append([]string(nil), DefaultDeniedReadPaths...),
 		// AllowedReadPaths intentionally empty — denylist alone.
+	}
+	if runtime.GOOS != "windows" {
 		// `df` is added for the coverage hint in du_summary — read-only,
 		// no path argument unless we pass one explicitly, fits the same
 		// "host triage primitive" envelope as du/find/stat.
-		AllowedBinaries: discoverBinaries([]string{"find", "du", "df", "stat", "ls"}),
+		cfg.AllowedBinaries = discoverBinaries([]string{"find", "du", "df", "stat", "ls"})
 	}
+	return cfg
 }
 
 // Validate performs startup-time invariants on the sandbox.
 //
 // Required:
 //   - find + du resolved (stat is Go-native via os.Stat so it is not required)
+//
+// Windows is exempt: find_large_files / du_summary use the Go-native
+// walkers there, and Windows' find.exe/du.exe are absent or unrelated.
 //
 // AllowedReadPaths can be empty (denylist alone is the policy);
 // DeniedReadPaths can be empty in dev / tests but defaults to the
@@ -113,6 +124,9 @@ func DefaultSandboxConfig() *SandboxConfig {
 func (s *SandboxConfig) Validate() error {
 	if s == nil {
 		return errors.New("host_files sandbox: config is nil")
+	}
+	if runtime.GOOS == "windows" {
+		return nil
 	}
 	for _, name := range []string{"find", "du"} {
 		if _, ok := s.AllowedBinaries[name]; !ok {
