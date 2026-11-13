@@ -879,6 +879,12 @@ fetch-redis-exporter-windows: ## [release] 下载 redis_exporter Windows 版到 
 fetch-db-exporters-windows: fetch-mysqld-exporter-windows fetch-postgres-exporter-windows fetch-redis-exporter-windows ## [release] 下载 Windows 数据库 exporter 到 bin/windows-amd64/ (windows-only)
 fetch-edge-plugins-windows: fetch-windows-exporter fetch-otelcol-windows fetch-db-exporters-windows ## [release] 下载全部 Windows 插件二进制到 bin/windows-amd64/ (windows-only)
 
+# Linux counterpart of fetch-edge-plugins-windows. Every component honours
+# EDGE_PLUGIN_ARCHES (default linux-amd64), so dual-architecture staging is:
+#   make fetch-edge-plugins-linux EDGE_PLUGIN_ARCHES="linux-amd64 linux-arm64"
+.PHONY: fetch-edge-plugins-linux
+fetch-edge-plugins-linux: fetch-obi fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters ## [release] 下载全部 Linux 插件二进制到 bin/<os>-<arch>/ (EDGE_PLUGIN_ARCHES 控制架构)
+
 # package deps deliberately exclude `build-linux` and `build-web`:
 #   - the Compose installer pulls the published manager image at install time.
 #   - build-web produces web/dist/ which docker-build-web doesn't use

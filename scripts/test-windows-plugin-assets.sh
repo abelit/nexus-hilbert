@@ -42,8 +42,8 @@ require_file_text "$design_doc" 'WINDOWS_EXPORTER_VERSION=0.29.2' "design doc wi
 require_file_text "$design_doc" 'windows_exporter-0.29.2-amd64.exe' "design doc windows_exporter asset"
 require_file_text "$design_doc" 'otelcol-contrib_0.157.0_windows_amd64.tar.gz' "design doc otelcol asset"
 require_file_text "$design_doc" 'mongodb' "design doc mongodb omission"
-require_file_text "$design_doc" 'windows/modern-amd64/plugins/' "design doc modern plugin staging"
-require_file_text "$design_doc" 'windows/legacy-amd64/plugins/' "design doc legacy plugin staging"
+require_file_text "$design_doc" 'windows/<plugin>-windows-amd64.exe' "design doc flat plugin staging"
+require_file_text "$design_doc" 'legacy-windows-amd64' "design doc legacy tag"
 
 # 3. Real builder with fake fixture binaries.
 version=vtest

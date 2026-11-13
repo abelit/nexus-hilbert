@@ -388,6 +388,16 @@ func normalizeCloudAddr(candidate, fallback string) (string, error) {
 
 // managerAssetURL joins a Manager root (with an optional path prefix) and one
 // installer asset path. Plaintext HTTP is accepted only for loopback hosts.
+// installedName is the canonical filename written into the destination
+// directory. install_as lets the flat distribution names (which carry the
+// OS/arch and legacy tags) install as the fixed names the service expects.
+func installedName(file File) string {
+	if file.InstallAs != "" {
+		return file.InstallAs
+	}
+	return filepath.Base(filepath.FromSlash(file.Path))
+}
+
 func managerAssetURL(managerURL string, parts ...string) (string, error) {
 	raw := strings.TrimRight(strings.TrimSpace(managerURL), "/")
 	if raw == "" {
@@ -775,7 +785,9 @@ func Install(ctx context.Context, opts Options, deps installDeps) error {
 		if err := os.MkdirAll(filepath.Dir(stagedPath), 0755); err != nil {
 			return fmt.Errorf("create staging path for %s: %w", file.Path, err)
 		}
-		artifactURL, err := managerAssetURL(opts.ManagerURL, variant.ID, file.Path)
+		// Flat layout: every variant's files are served directly under
+		// /edge/windows/ with the OS/arch (and legacy) tag in the filename.
+		artifactURL, err := managerAssetURL(opts.ManagerURL, file.Path)
 		if err != nil {
 			return err
 		}
@@ -802,7 +814,7 @@ func Install(ctx context.Context, opts Options, deps installDeps) error {
 		if err != nil {
 			return err
 		}
-		destination := filepath.Join(destinationDir, filepath.Base(filepath.FromSlash(file.Path)))
+		destination := filepath.Join(destinationDir, installedName(file))
 		if err := moveFile(staged[file.Path], destination); err != nil {
 			return fmt.Errorf("place %s: %w", file.Path, err)
 		}

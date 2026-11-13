@@ -55,7 +55,7 @@ Linux 已具备从 UI 生成命令、Manager 托管制品、enrollment、systemd
 - 安装器只需要 HTTP、SHA-256、注册表/服务控制、ACL，不需要项目依赖；
 - 安装器可以用 Go 的 TLS 栈连接 Manager，绕开 Server 2008 R2 Schannel 的 TLS 1.2 限制。
 
-安装器根据 OS build 选择 `modern-amd64` 或 `legacy-amd64` 制品。
+安装器根据 OS build 选择 `windows-amd64` 或 `legacy-windows-amd64` 制品；制品文件名沿用 Linux 的 `<component>-<os>-<arch>` 规则，legacy 额外带 `legacy-` 标签。
 
 ### 3.3 2008 R2 的引导下载
 
@@ -107,22 +107,18 @@ Manager 宿主目录：
 /opt/ongrid/edge/windows/
 ├── ongrid-edge-installer.exe
 ├── manifest.json
-├── modern-amd64/
-│   ├── ongrid-edge-supervisor.exe
-│   ├── ongrid-edge-worker.exe
-│   ├── plugins/
-│   │   ├── windows_exporter.exe
-│   │   ├── otelcol-contrib.exe
-│   │   └── ...
-│   └── apply-pending-upgrade.ps1
-└── legacy-amd64/
-    ├── ongrid-edge-supervisor.exe
-    ├── ongrid-edge-worker.exe
-    ├── plugins/
-    └── apply-pending-upgrade.ps1
+├── ongrid-edge-supervisor-windows-amd64.exe
+├── ongrid-edge-worker-windows-amd64.exe
+├── windows_exporter-windows-amd64.exe
+├── otelcol-contrib-windows-amd64.exe
+├── mysqld_exporter-windows-amd64.exe
+├── postgres_exporter-windows-amd64.exe
+├── redis_exporter-windows-amd64.exe
+├── ongrid-edge-supervisor-legacy-windows-amd64.exe
+└── ongrid-edge-worker-legacy-windows-amd64.exe
 ```
 
-`manifest.json`：
+插件载荷由两个变体共用，只暂存一份。`manifest.json` 的 `path` 指向扁平分发文件，`install_as` 是安装到 `bin/`、`plugins/` 时使用的规范文件名（服务固定读取 `ongrid-edge-supervisor.exe` 等）：
 
 ```json
 {
@@ -130,22 +126,28 @@ Manager 宿主目录：
   "version": "v0.20.0",
   "variants": [
     {
-      "id": "modern-amd64",
+      "id": "windows-amd64",
       "min_os": { "major": 10, "build": 14393 },
       "files": [
-        { "path": "ongrid-edge-supervisor.exe", "sha256": "...", "dest": "bin" },
-        { "path": "ongrid-edge-worker.exe", "sha256": "...", "dest": "bin" },
-        { "path": "plugins/windows_exporter.exe", "sha256": "...", "dest": "plugins" }
+        { "path": "ongrid-edge-supervisor-windows-amd64.exe", "sha256": "...", "dest": "bin", "install_as": "ongrid-edge-supervisor.exe" },
+        { "path": "ongrid-edge-worker-windows-amd64.exe", "sha256": "...", "dest": "bin", "install_as": "ongrid-edge-worker.exe" },
+        { "path": "windows_exporter-windows-amd64.exe", "sha256": "...", "dest": "plugins", "install_as": "windows_exporter.exe" }
       ]
     },
     {
-      "id": "legacy-amd64",
+      "id": "legacy-windows-amd64",
       "min_os": { "major": 6, "build": 7601 },
-      "files": []
+      "files": [
+        { "path": "ongrid-edge-supervisor-legacy-windows-amd64.exe", "sha256": "...", "dest": "bin", "install_as": "ongrid-edge-supervisor.exe" },
+        { "path": "ongrid-edge-worker-legacy-windows-amd64.exe", "sha256": "...", "dest": "bin", "install_as": "ongrid-edge-worker.exe" },
+        { "path": "windows_exporter-windows-amd64.exe", "sha256": "...", "dest": "plugins", "install_as": "windows_exporter.exe" }
+      ]
     }
   ]
 }
 ```
+
+安装器按 `/edge/windows/<path>` 下载，再以 `install_as` 落盘；`install_as` 只允许单个文件名，不能包含路径分隔符。
 
 要求：
 
@@ -321,7 +323,7 @@ Windows 插件二进制随 `VERSION` 作为版本化 Release 附件发布，不�
 
 - `make fetch-edge-plugins-windows`（`fetch-windows-exporter` + `fetch-otelcol-windows` + `fetch-db-exporters-windows`）把插件下载并校验到 `bin/windows-amd64/<plugin>.exe`；目标已存在时跳过。校验来源分别为 windows_exporter 的 `sha256sums.txt`、otelcol 的 `opentelemetry-collector-releases_otelcol-contrib_windows_checksums.txt`、各 DB exporter 的 `sha256sums.txt`。
 - `dist/build-edge-attachments.sh edge <version> <out> windows-amd64` 为每个插件生成 `ongrid-edge-windows-amd64-<version>-<plugin>.exe` 及 `.sha256` sidecar；任一必需插件缺失即构建失败。
-- `fetch-edge-assets.sh` 下载这些版本化附件，并同时 stage 到 `windows/modern-amd64/plugins/` 与 `windows/legacy-amd64/plugins/`，供 manifest 生成器引用。
+- `fetch-edge-assets.sh` 下载这些版本化附件，并按扁平分发名暂存为 `windows/<plugin>-windows-amd64.exe`（两个变体共用一份），供 manifest 生成器引用。
 - `scripts/test-windows-plugin-assets.sh` 用 fixture 二进制校验附件、sidecar、缺失插件失败路径和版本固定。
 
 ## 8. Manager 与 UI
@@ -431,4 +433,4 @@ Windows 插件二进制随 `VERSION` 作为版本化 Release 附件发布，不�
 - **Windows 安装器引导位置。** 安装器作为版本化附件 `ongrid-edge-windows-amd64-<version>-installer.exe`（配 `.sha256`）发布，并固定暂存为 Manager 的 `windows/ongrid-edge-installer.exe`，UI 从 `https://<host>/edge/windows/ongrid-edge-installer.exe` 下载；manifest 不引用安装器自身。
 - **Windows 发布附件集合。** 每个 `VERSION` Release 同时包含 modern `supervisor`/`worker`/`installer`/5 个插件、legacy `supervisor`/`worker`，以及每个文件的 `.sha256`；`Makefile` 的发布与校验共用 `EDGE_VERSION_ATTACHMENT_NAMES`，避免不可变 Release 的部分发布。
 - **不可变 Release 的发布顺序。** `scripts/publish-cnb-release-attachments.sh` 拒绝向已部分填充的 Release 追加文件；如果某个 tag 在 Windows 制品加入前已经发布且缺少这些文件，不能原地补齐，必须重新切一个版本/tag 再发布。
-- **Windows manifest 生成。** `dist/build-windows-manifest.sh` 在制品暂存后遍历 `modern-amd64/` 和 `legacy-amd64/`，为每个文件写入 SHA-256 和 `bin`/`plugins` 目标；变体顺序和文件顺序固定，缺任一必需文件即失败。
+- **Windows manifest 生成。** `dist/build-windows-manifest.sh` 在制品暂存后校验扁平 `<component>-windows-amd64[-legacy].exe` 文件集，为每个文件写入 SHA-256、`bin`/`plugins` 目标和 `install_as` 规范名；变体顺序和文件顺序固定，缺任一必需文件即失败。

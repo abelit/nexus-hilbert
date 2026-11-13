@@ -78,9 +78,9 @@ set -euo pipefail
 dest=$1
 for target in "${@:3}"; do
     if [[ "$target" == windows-amd64 ]]; then
-        mkdir -p "$dest/windows/modern-amd64"
-        printf 'new supervisor\n' > "$dest/windows/modern-amd64/ongrid-edge-supervisor.exe"
-        printf 'new worker\n' > "$dest/windows/modern-amd64/ongrid-edge-worker.exe"
+        mkdir -p "$dest/windows"
+        printf 'new supervisor\n' > "$dest/windows/ongrid-edge-supervisor-windows-amd64.exe"
+        printf 'new worker\n' > "$dest/windows/ongrid-edge-worker-windows-amd64.exe"
     fi
 done
 EOF
@@ -153,8 +153,8 @@ for prepare in "$tmp_dir/install-prepare.sh" "$tmp_dir/upgrade-prepare.sh"; do
         fail "$label passed windows-amd64 to the Linux-only bundle builder"
     fi
     grep -Eq '^build ' "$log" || fail "$label did not build the Linux bundle"
-    [[ -f "$stage/windows/modern-amd64/ongrid-edge-supervisor.exe" ]] \
-        || fail "$label did not stage windows/modern-amd64"
+    [[ -f "$stage/windows/ongrid-edge-supervisor-windows-amd64.exe" ]] \
+        || fail "$label did not stage the flat windows-amd64 artifacts"
     grep -Fxq 'ONGRID_WINDOWS_EDGE_TARGETS=windows-amd64' "$stage/edge-artifacts.env" \
         || fail "$label did not persist the Windows target selection"
 done
@@ -165,9 +165,9 @@ install_dir="$tmp_dir/install-preserve"
 log="$tmp_dir/preserve-calls.log"
 stage_out="$tmp_dir/preserve-stage.txt"
 make_package "$package"
-mkdir -p "$install_dir/edge/windows/modern-amd64"
-printf 'old supervisor\n' > "$install_dir/edge/windows/modern-amd64/ongrid-edge-supervisor.exe"
-printf 'old worker\n' > "$install_dir/edge/windows/modern-amd64/ongrid-edge-worker.exe"
+mkdir -p "$install_dir/edge/windows"
+printf 'old supervisor\n' > "$install_dir/edge/windows/ongrid-edge-supervisor-windows-amd64.exe"
+printf 'old worker\n' > "$install_dir/edge/windows/ongrid-edge-worker-windows-amd64.exe"
 : > "$log"
 
 run_prepare "$tmp_dir/upgrade-prepare.sh" "$package" "$install_dir" explicit '' "$log" "$stage_out"
@@ -179,8 +179,8 @@ fi
 if grep -q '^build .*windows-amd64' "$log"; then
     fail "a Linux-only upgrade passed windows-amd64 to the bundle builder"
 fi
-cmp -s "$install_dir/edge/windows/modern-amd64/ongrid-edge-supervisor.exe" \
-    "$stage/windows/modern-amd64/ongrid-edge-supervisor.exe" \
+cmp -s "$install_dir/edge/windows/ongrid-edge-supervisor-windows-amd64.exe" \
+    "$stage/windows/ongrid-edge-supervisor-windows-amd64.exe" \
     || fail "the Linux-only upgrade stage did not preserve the existing Windows supervisor"
 grep -Fxq 'ONGRID_WINDOWS_EDGE_TARGETS=' "$stage/edge-artifacts.env" \
     || fail "the Linux-only upgrade did not persist the disabled Windows selection"
@@ -190,7 +190,7 @@ backup="$tmp_dir/preserve-backup"
 mkdir -p "$backup"
 mv "$install_dir/edge" "$backup/edge"
 mv "$stage" "$install_dir/edge"
-cmp -s "$install_dir/edge/windows/modern-amd64/ongrid-edge-supervisor.exe" \
+cmp -s "$install_dir/edge/windows/ongrid-edge-supervisor-windows-amd64.exe" \
     <(printf 'old supervisor\n') \
     || fail "the upgrade swap deleted the served windows/ tree"
 

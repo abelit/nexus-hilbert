@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 // withNoopACL 把 ACL apply/verify 函数替换为 noop，t.Cleanup 还原。
@@ -65,8 +67,32 @@ func TestApplySecretACL_RestrictsToSystemAndAdmins(t *testing.T) {
 // 黑名单式检查（只查 Users/Everyone）检不出这种"具体用户 ACE"，
 // 这正是预植目录攻击（install 前给自己授予显式 ACE）的形态。
 func TestVerifyDirACL_RejectsDefaultTempACL(t *testing.T) {
-	if err := VerifyDirACL(t.TempDir()); err == nil {
+	err := VerifyDirACL(t.TempDir())
+	if err == nil {
 		t.Fatal("VerifyDirACL should reject default TempDir ACL (extra trustees present)")
+	}
+	// 回归：x/sys 的 DACL() 第二个返回值是 defaulted 而非 present，曾导致
+	// 存在 DACL 的目录被误报为 "no DACL present"。默认 TempDir 一定有 DACL，
+	// 因此拒绝原因必须是 trustee 白名单，而不是读不到 DACL。
+	if strings.Contains(err.Error(), "no DACL present") {
+		t.Fatalf("verifier failed to read an existing DACL: %v", err)
+	}
+}
+
+// TestWindowsDACLAPI_ReportsPresentDACL 锁定本项目依赖的 x/sys DACL() 语义：
+// 目录存在显式/继承 DACL 时必须返回非 nil ACL 且无错误，第二个返回值是
+// defaulted（SE_DACL_DEFAULTED 恒为 false），不能拿来判断 DACL 是否存在。
+func TestWindowsDACLAPI_ReportsPresentDACL(t *testing.T) {
+	sd, err := windows.GetNamedSecurityInfo(t.TempDir(), windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatalf("GetNamedSecurityInfo: %v", err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatalf("DACL(): %v", err)
+	}
+	if dacl == nil || dacl.AceCount == 0 {
+		t.Fatal("t.TempDir() should carry a non-empty DACL")
 	}
 }
 

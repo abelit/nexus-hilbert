@@ -3,21 +3,26 @@
 #
 # Usage: dist/build-windows-manifest.sh <windows-dir> <version>
 #
-# <windows-dir> is the directory served as /edge/windows/; it must contain
-# modern-amd64/ and legacy-amd64/ trees with supervisor, worker, and the
-# bundled plugin binaries. Every regular file below a variant directory is
-# listed, hashed, and mapped to an install destination:
+# <windows-dir> is the directory served as /edge/windows/. It uses the same
+# flat `<component>-<os>-<arch>[-variant].exe` naming as the Linux payloads:
 #
-#   <variant>/ongrid-edge-*.exe  -> bin
-#   <variant>/plugins/*.exe      -> plugins
+#   ongrid-edge-supervisor-windows-amd64.exe
+#   ongrid-edge-worker-windows-amd64.exe
+#   windows_exporter-windows-amd64.exe
+#   otelcol-contrib-windows-amd64.exe
+#   mysqld_exporter-windows-amd64.exe
+#   postgres_exporter-windows-amd64.exe
+#   redis_exporter-windows-amd64.exe
+#   ongrid-edge-supervisor-legacy-windows-amd64.exe
+#   ongrid-edge-worker-legacy-windows-amd64.exe
 #
-# The resulting manifest.json is schema 1 and is consumed by
-# tools/windows-installer, which resolves each entry as
-# /edge/windows/<variant>/<path>. Output is deterministic: variants are
-# emitted modern then legacy, and file paths are sorted bytewise, so an
-# unchanged tree re-publishes byte-identical JSON.
+# manifest.json (schema 1) lists each file once per variant. `install_as` is
+# the canonical filename the installer writes into `bin/` or `plugins/`; the
+# flat distribution name carries the OS/arch (and legacy) tag instead.
 #
-# A missing or non-regular required artifact fails without replacing an
+# Variants are emitted windows-amd64 then legacy-windows-amd64, and files are
+# emitted in a fixed order, so an unchanged tree re-publishes byte-identical
+# JSON. A missing or non-regular required artifact fails without replacing an
 # existing manifest.
 set -euo pipefail
 
@@ -41,32 +46,55 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
 # Variant order and minimum OS versions are part of the installer contract
 # (see tools/windows-installer/manifest.go).
-variants=(modern-amd64 legacy-amd64)
+variants=(windows-amd64 legacy-windows-amd64)
 modern_major=10 modern_minor=0 modern_build=14393
 legacy_major=6 legacy_minor=1 legacy_build=7601
 
-# Both variants carry the same runtime payload. mongodb_exporter is absent
-# because upstream publishes no Windows amd64 asset.
-required_root=(ongrid-edge-supervisor.exe ongrid-edge-worker.exe)
-required_plugins=(
-    windows_exporter.exe otelcol-contrib.exe mysqld_exporter.exe
-    postgres_exporter.exe redis_exporter.exe
+# Plugins are shared by both variants: the legacy build only replaces the
+# supervisor and worker. mongodb_exporter is absent because upstream
+# publishes no Windows amd64 asset.
+plugin_files=(
+    windows_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter
 )
 
 is_regular_file() {
     [[ -f "$1" && ! -L "$1" && -s "$1" ]]
 }
 
+# Required flat files per variant, as "path:dest:install_as".
+modern_files=(
+    "ongrid-edge-supervisor-windows-amd64.exe:bin:ongrid-edge-supervisor.exe"
+    "ongrid-edge-worker-windows-amd64.exe:bin:ongrid-edge-worker.exe"
+    "windows_exporter-windows-amd64.exe:plugins:windows_exporter.exe"
+    "otelcol-contrib-windows-amd64.exe:plugins:otelcol-contrib.exe"
+    "mysqld_exporter-windows-amd64.exe:plugins:mysqld_exporter.exe"
+    "postgres_exporter-windows-amd64.exe:plugins:postgres_exporter.exe"
+    "redis_exporter-windows-amd64.exe:plugins:redis_exporter.exe"
+)
+legacy_files=(
+    "ongrid-edge-supervisor-legacy-windows-amd64.exe:bin:ongrid-edge-supervisor.exe"
+    "ongrid-edge-worker-legacy-windows-amd64.exe:bin:ongrid-edge-worker.exe"
+    "windows_exporter-windows-amd64.exe:plugins:windows_exporter.exe"
+    "otelcol-contrib-windows-amd64.exe:plugins:otelcol-contrib.exe"
+    "mysqld_exporter-windows-amd64.exe:plugins:mysqld_exporter.exe"
+    "postgres_exporter-windows-amd64.exe:plugins:postgres_exporter.exe"
+    "redis_exporter-windows-amd64.exe:plugins:redis_exporter.exe"
+)
+
+for name in "${plugin_files[@]}"; do
+    is_regular_file "$windows_dir/${name}-windows-amd64.exe" \
+        || die "missing required artifact: ${name}-windows-amd64.exe"
+done
 for variant in "${variants[@]}"; do
-    variant_dir="$windows_dir/$variant"
-    [[ -d "$variant_dir" ]] || die "missing variant directory: $variant_dir"
-    for name in "${required_root[@]}"; do
-        is_regular_file "$variant_dir/$name" \
-            || die "missing required artifact: $variant/$name"
-    done
-    for name in "${required_plugins[@]}"; do
-        is_regular_file "$variant_dir/plugins/$name" \
-            || die "missing required artifact: $variant/plugins/$name"
+    case "$variant" in
+        windows-amd64) files=("${modern_files[@]}") ;;
+        legacy-windows-amd64) files=("${legacy_files[@]}") ;;
+        *) die "unknown variant: $variant" ;;
+    esac
+    for entry in "${files[@]}"; do
+        IFS=: read -r path _dest _install_as <<<"$entry"
+        is_regular_file "$windows_dir/$path" \
+            || die "missing required artifact: $path"
     done
 done
 
@@ -76,8 +104,8 @@ trap 'rm -f "$tmp_manifest"' EXIT
 
 min_os_for() {
     case "$1" in
-        modern-amd64) printf '%d %d %d' "$modern_major" "$modern_minor" "$modern_build" ;;
-        legacy-amd64) printf '%d %d %d' "$legacy_major" "$legacy_minor" "$legacy_build" ;;
+        windows-amd64) printf '%d %d %d' "$modern_major" "$modern_minor" "$modern_build" ;;
+        legacy-windows-amd64) printf '%d %d %d' "$legacy_major" "$legacy_minor" "$legacy_build" ;;
         *) die "unknown variant: $1" ;;
     esac
 }
@@ -90,41 +118,32 @@ min_os_for() {
     variant_index=0
     for variant in "${variants[@]}"; do
         read -r major minor build <<<"$(min_os_for "$variant")"
-        variant_dir="$windows_dir/$variant"
+        case "$variant" in
+            windows-amd64) files=("${modern_files[@]}") ;;
+            legacy-windows-amd64) files=("${legacy_files[@]}") ;;
+        esac
         printf '    {\n'
         printf '      "id": "%s",\n' "$variant"
         printf '      "min_os": {"major": %d, "minor": %d, "build": %d},\n' \
             "$major" "$minor" "$build"
         printf '      "files": [\n'
 
-        mapfile -t paths < <(
-            cd "$variant_dir"
-            find . -type f -print | LC_ALL=C sort | sed 's|^\./||'
-        )
         file_index=0
-        last_index=$(( ${#paths[@]} - 1 ))
-        for path in "${paths[@]}"; do
-            # Manifest paths become URLs and later Win32 paths. Restrict them
-            # to the canonical relative form the installer validates, instead
-            # of trying to JSON-escape arbitrary filesystem names.
-            [[ "$path" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]] \
+        last_index=$(( ${#files[@]} - 1 ))
+        for entry in "${files[@]}"; do
+            IFS=: read -r path dest install_as <<<"$entry"
+            [[ "$path" =~ ^[A-Za-z0-9._-]+$ ]] \
                 || die "unsupported file name in $variant: $path"
-            case "$path" in
-                /*|*/../*|../*|*/..|..) die "unsafe path in $variant: $path" ;;
-            esac
-            if [[ "$path" == plugins/* ]]; then
-                dest=plugins
-            else
-                dest=bin
-            fi
-            digest=$(sha256sum "$variant_dir/$path" | awk '{print $1}')
+            [[ "$install_as" =~ ^[A-Za-z0-9._-]+$ ]] \
+                || die "unsupported install_as in $variant: $install_as"
+            digest=$(sha256sum "$windows_dir/$path" | awk '{print $1}')
             if (( file_index == last_index )); then
                 comma=""
             else
                 comma=","
             fi
-            printf '        {"path": "%s", "sha256": "%s", "dest": "%s"}%s\n' \
-                "$path" "$digest" "$dest" "$comma"
+            printf '        {"path": "%s", "sha256": "%s", "dest": "%s", "install_as": "%s"}%s\n' \
+                "$path" "$digest" "$dest" "$install_as" "$comma"
             file_index=$((file_index + 1))
         done
 

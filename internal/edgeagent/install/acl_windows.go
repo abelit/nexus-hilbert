@@ -3,6 +3,7 @@
 package install
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -168,11 +169,16 @@ func verifyACLStrict(path string) error {
 	if err != nil {
 		return fmt.Errorf("read DACL of %s: %w", filepath.Base(path), err)
 	}
-	dacl, present, err := sd.DACL()
-	if err != nil {
+	// 注意：x/sys 的 DACL() 签名是 (dacl *ACL, defaulted bool, err error)，
+	// 第二个返回值是 "defaulted"（SE_DACL_DEFAULTED），不是 "present"。
+	// icacls 显式写入的 DACL 的 defaulted 恒为 false，所以不能用它判断
+	// DACL 是否存在。缺失 DACL 时 x/sys 返回 (nil, false, ERROR_OBJECT_NOT_FOUND)；
+	// NULL DACL（Everyone 完全控制）时返回 (nil, false, nil)。两者都视为不受限。
+	dacl, _, err := sd.DACL()
+	if err != nil && !errors.Is(err, windows.ERROR_OBJECT_NOT_FOUND) {
 		return fmt.Errorf("get DACL of %s: %w", filepath.Base(path), err)
 	}
-	if !present || dacl == nil {
+	if dacl == nil {
 		return fmt.Errorf("no DACL present on %s (unrestricted access)", filepath.Base(path))
 	}
 

@@ -2,6 +2,8 @@
 
 本文说明如何在 Windows Server 上安装、验证、升级和卸载 Ongrid Edge。Windows 制品由 Manager 以只读静态目录 `/edge/windows/` 提供，安装器负责下载校验、enrollment、ACL、服务安装和自检。
 
+构建矩阵、组件获取、发布附件与两平台安装布局的完整对照见 [Edge 构建、组件分发与安装布局](../design/edge-build-and-distribution.md)。
+
 ## 1. 支持矩阵
 
 | 变体 | 系统 | 架构 | 工具链 | 能力 |
@@ -10,7 +12,7 @@
 | Legacy | Server 2008 R2 SP1 | amd64 | Go 1.20 | 同上，使用 Go 1.20 兼容构建 |
 | 不承诺 | Server 2008 非 R2、x86、2012/2012 R2 | - | - | 除非在目标机单独验证 |
 
-`--variant auto` 按系统版本选择：`10.0 build >= 14393` 使用 `modern-amd64`，`6.1 build >= 7601` 使用 `legacy-amd64`。显式传入 `--variant legacy` 可在受控环境中跳过版本检查。
+`--variant auto` 按系统版本选择：`10.0 build >= 14393` 使用 `windows-amd64`，`6.1 build >= 7601` 使用 `legacy-windows-amd64`。显式传入 `--variant legacy` 可在受控环境中跳过版本检查。
 
 ## 2. 前置条件
 

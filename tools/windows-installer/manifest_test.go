@@ -22,7 +22,7 @@ func manifestFixture(t *testing.T) *Manifest {
 		"version": "v0.20.0",
 		"variants": [
 			{
-				"id": "modern-amd64",
+				"id": "windows-amd64",
 				"min_os": {"major": 10, "build": 14393},
 				"files": [
 					{"path": "ongrid-edge-supervisor.exe", "sha256": %q, "dest": "bin"},
@@ -32,7 +32,7 @@ func manifestFixture(t *testing.T) *Manifest {
 				]
 			},
 			{
-				"id": "legacy-amd64",
+				"id": "legacy-windows-amd64",
 				"min_os": {"major": 6, "minor": 1, "build": 7601},
 				"files": [
 					{"path": "ongrid-edge-supervisor.exe", "sha256": %q, "dest": "bin"}
@@ -55,7 +55,7 @@ func manifestFixture(t *testing.T) *Manifest {
 
 func manifestWithFile(path, dest, sha string) string {
 	return fmt.Sprintf(
-		`{"schema":1,"variants":[{"id":"modern-amd64","files":[{"path":%q,"sha256":%q,"dest":%q}]}]}`,
+		`{"schema":1,"variants":[{"id":"windows-amd64","files":[{"path":%q,"sha256":%q,"dest":%q}]}]}`,
 		path, sha, dest,
 	)
 }
@@ -72,7 +72,7 @@ func TestParseManifestValid(t *testing.T) {
 	if len(m.Variants) != 2 {
 		t.Fatalf("len(Variants) = %d, want 2", len(m.Variants))
 	}
-	if m.Variants[0].ID != "modern-amd64" {
+	if m.Variants[0].ID != "windows-amd64" {
 		t.Fatalf("Variants[0].ID = %q", m.Variants[0].ID)
 	}
 	if got := len(m.Variants[0].Files); got != 4 {
@@ -182,11 +182,11 @@ func TestParseManifestRejectsInvalidManifest(t *testing.T) {
 		},
 		{
 			name: "missing schema",
-			body: `{"variants":[{"id":"modern-amd64","files":[]}]}`,
+			body: `{"variants":[{"id":"windows-amd64","files":[]}]}`,
 		},
 		{
 			name: "wrong schema",
-			body: `{"schema":2,"variants":[{"id":"modern-amd64","files":[]}]}`,
+			body: `{"schema":2,"variants":[{"id":"windows-amd64","files":[]}]}`,
 		},
 		{
 			name: "no variants",
@@ -198,15 +198,23 @@ func TestParseManifestRejectsInvalidManifest(t *testing.T) {
 		},
 		{
 			name: "unknown top-level field",
-			body: fmt.Sprintf(`{"schema":1,"extra":true,"variants":[{"id":"modern-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin"}]}]}`, sha),
+			body: fmt.Sprintf(`{"schema":1,"extra":true,"variants":[{"id":"windows-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin"}]}]}`, sha),
 		},
 		{
 			name: "unknown variant field",
-			body: fmt.Sprintf(`{"schema":1,"variants":[{"id":"modern-amd64","extra":true,"files":[{"path":"worker.exe","sha256":%q,"dest":"bin"}]}]}`, sha),
+			body: fmt.Sprintf(`{"schema":1,"variants":[{"id":"windows-amd64","extra":true,"files":[{"path":"worker.exe","sha256":%q,"dest":"bin"}]}]}`, sha),
 		},
 		{
 			name: "unknown file field",
-			body: fmt.Sprintf(`{"schema":1,"variants":[{"id":"modern-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin","extra":true}]}]}`, sha),
+			body: fmt.Sprintf(`{"schema":1,"variants":[{"id":"windows-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin","extra":true}]}]}`, sha),
+		},
+		{
+			name: "install_as with a path",
+			body: fmt.Sprintf(`{"schema":1,"variants":[{"id":"windows-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin","install_as":"sub/worker.exe"}]}]}`, sha),
+		},
+		{
+			name: "install_as traversal",
+			body: fmt.Sprintf(`{"schema":1,"variants":[{"id":"windows-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin","install_as":"../worker.exe"}]}]}`, sha),
 		},
 		{
 			name: "malformed json",
@@ -214,7 +222,7 @@ func TestParseManifestRejectsInvalidManifest(t *testing.T) {
 		},
 		{
 			name: "trailing data",
-			body: fmt.Sprintf(`{"schema":1,"variants":[{"id":"modern-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin"}]}]} {}`, sha),
+			body: fmt.Sprintf(`{"schema":1,"variants":[{"id":"windows-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin"}]}]} {}`, sha),
 		},
 	}
 
@@ -224,6 +232,18 @@ func TestParseManifestRejectsInvalidManifest(t *testing.T) {
 				t.Fatalf("ParseManifest() succeeded, want error")
 			}
 		})
+	}
+}
+
+func TestParseManifestInstallAs(t *testing.T) {
+	sha := strings.Repeat("a", 64)
+	body := fmt.Sprintf(`{"schema":1,"variants":[{"id":"windows-amd64","files":[{"path":"ongrid-edge-supervisor-windows-amd64.exe","sha256":%q,"dest":"bin","install_as":"ongrid-edge-supervisor.exe"}]}]}`, sha)
+	m, err := ParseManifest([]byte(body))
+	if err != nil {
+		t.Fatalf("ParseManifest() error: %v", err)
+	}
+	if got := m.Variants[0].Files[0].InstallAs; got != "ongrid-edge-supervisor.exe" {
+		t.Fatalf("InstallAs = %q", got)
 	}
 }
 
@@ -241,61 +261,73 @@ func TestSelectVariant(t *testing.T) {
 			name:      "auto modern minimum build",
 			version:   OSVersion{Major: 10, Build: 14393},
 			requested: "auto",
-			wantID:    "modern-amd64",
+			wantID:    "windows-amd64",
 		},
 		{
 			name:      "auto modern server 2019",
 			version:   OSVersion{Major: 10, Build: 17763},
 			requested: "auto",
-			wantID:    "modern-amd64",
+			wantID:    "windows-amd64",
 		},
 		{
 			name:      "auto modern major 11",
 			version:   OSVersion{Major: 11, Build: 22621},
 			requested: "auto",
-			wantID:    "modern-amd64",
+			wantID:    "windows-amd64",
 		},
 		{
 			name:      "auto legacy 2008 r2 sp1",
 			version:   OSVersion{Major: 6, Minor: 1, Build: 7601},
 			requested: "auto",
-			wantID:    "legacy-amd64",
+			wantID:    "legacy-windows-amd64",
 		},
 		{
 			name:      "auto legacy later build",
 			version:   OSVersion{Major: 6, Minor: 1, Build: 7602},
 			requested: "auto",
-			wantID:    "legacy-amd64",
+			wantID:    "legacy-windows-amd64",
 		},
 		{
 			name:      "empty requested means auto",
 			version:   OSVersion{Major: 10, Build: 17763},
 			requested: "",
-			wantID:    "modern-amd64",
+			wantID:    "windows-amd64",
 		},
 		{
 			name:      "explicit modern wins on legacy os",
 			version:   OSVersion{Major: 6, Minor: 1, Build: 7601},
-			requested: "modern-amd64",
-			wantID:    "modern-amd64",
+			requested: "windows-amd64",
+			wantID:    "windows-amd64",
 		},
 		{
 			name:      "explicit legacy wins on modern os",
 			version:   OSVersion{Major: 10, Build: 17763},
-			requested: "legacy-amd64",
-			wantID:    "legacy-amd64",
+			requested: "legacy-windows-amd64",
+			wantID:    "legacy-windows-amd64",
 		},
 		{
 			name:      "explicit modern short name",
 			version:   OSVersion{Major: 10, Build: 17763},
 			requested: "modern",
-			wantID:    "modern-amd64",
+			wantID:    "windows-amd64",
 		},
 		{
 			name:      "explicit legacy short name",
 			version:   OSVersion{Major: 10, Build: 17763},
 			requested: "legacy",
-			wantID:    "legacy-amd64",
+			wantID:    "legacy-windows-amd64",
+		},
+		{
+			name:      "legacy modern alias",
+			version:   OSVersion{Major: 10, Build: 17763},
+			requested: "modern-amd64",
+			wantID:    "windows-amd64",
+		},
+		{
+			name:      "legacy legacy alias",
+			version:   OSVersion{Major: 10, Build: 17763},
+			requested: "legacy-amd64",
+			wantID:    "legacy-windows-amd64",
 		},
 		{
 			name:      "unsupported 2008 r2 without sp1",
@@ -362,7 +394,7 @@ func TestSelectVariantUnsupportedOSListsMatrix(t *testing.T) {
 		t.Fatal("SelectVariant() succeeded, want error")
 	}
 	msg := err.Error()
-	for _, want := range []string{"modern-amd64", "legacy-amd64"} {
+	for _, want := range []string{"windows-amd64", "legacy-windows-amd64"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q does not mention supported variant %q", msg, want)
 		}
@@ -371,7 +403,7 @@ func TestSelectVariantUnsupportedOSListsMatrix(t *testing.T) {
 
 func TestSelectVariantRequiresRequestedVariantInManifest(t *testing.T) {
 	body := fmt.Sprintf(
-		`{"schema":1,"variants":[{"id":"modern-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin"}]}]}`,
+		`{"schema":1,"variants":[{"id":"windows-amd64","files":[{"path":"worker.exe","sha256":%q,"dest":"bin"}]}]}`,
 		validSHA256Fixture("only-modern"),
 	)
 	m, err := ParseManifest([]byte(body))

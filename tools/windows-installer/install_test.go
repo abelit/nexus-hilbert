@@ -272,7 +272,7 @@ func newInstallFixture(t *testing.T, files map[string][]byte, dests map[string]s
 			_, _ = io.WriteString(w, fixtureManifest(files, dests))
 			return
 		}
-		const prefix = "/edge/windows/modern-amd64/"
+		const prefix = "/edge/windows/"
 		if strings.HasPrefix(r.URL.Path, prefix) {
 			name := strings.TrimPrefix(r.URL.Path, prefix)
 			payload, ok := files[name]
@@ -297,7 +297,7 @@ func fixtureManifest(files map[string][]byte, dests map[string]string) string {
 			name, sha256Hex(payload), dests[name],
 		))
 	}
-	return fmt.Sprintf(`{"schema":1,"version":"v1.0.0","variants":[{"id":"modern-amd64","min_os":{"major":10,"build":14393},"files":[%s]}]}`,
+	return fmt.Sprintf(`{"schema":1,"version":"v1.0.0","variants":[{"id":"windows-amd64","min_os":{"major":10,"build":14393},"files":[%s]}]}`,
 		strings.Join(entries, ","))
 }
 
@@ -512,7 +512,7 @@ func TestInstallSecuresStagingBeforeAgentDownload(t *testing.T) {
 			_, _ = io.WriteString(w, fixtureManifest(files, dests))
 			return
 		}
-		name := strings.TrimPrefix(r.URL.Path, "/edge/windows/modern-amd64/")
+		name := strings.TrimPrefix(r.URL.Path, "/edge/windows/")
 		payload, ok := files[name]
 		if !ok {
 			http.NotFound(w, r)
@@ -911,5 +911,35 @@ func TestUninstallPropagatesServiceFailure(t *testing.T) {
 	}
 	if err := Uninstall(deps, false); err == nil {
 		t.Fatal("Uninstall() error = nil, want service failure")
+	}
+}
+
+func TestInstalledName(t *testing.T) {
+	tests := []struct {
+		name string
+		file File
+		want string
+	}{
+		{
+			name: "defaults to the path basename",
+			file: File{Path: "plugins/windows_exporter.exe"},
+			want: "windows_exporter.exe",
+		},
+		{
+			name: "install_as wins over the flat distribution name",
+			file: File{
+				Path:      "ongrid-edge-supervisor-windows-amd64.exe",
+				InstallAs: "ongrid-edge-supervisor.exe",
+			},
+			want: "ongrid-edge-supervisor.exe",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := installedName(tt.file); got != tt.want {
+				t.Fatalf("installedName() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

@@ -43,6 +43,16 @@ const (
 	CategoryWebSearch = "websearch" // built-in web_search skill: Tavily key + future provider knobs
 	CategoryAgent     = "agent"     // AI agent behaviour toggles (write-action gate, …)
 	CategoryPlatform  = "platform"  // platform-wide infrastructure behaviour toggles
+	CategoryEdge      = "edge"      // Edge install entry points shown in the UI
+)
+
+// Well-known keys under CategoryEdge. Both values are base URLs
+// (scheme + host[:port], no path) used to build the copy-paste install
+// commands on the Edges page and the cluster enrollment dialog. An empty
+// value clears the row so the UI falls back to window.location.
+const (
+	KeyEdgeInstallInternalURL = "install_internal_url"
+	KeyEdgeInstallExternalURL = "install_external_url"
 )
 
 const CategoryObservability = "observability"

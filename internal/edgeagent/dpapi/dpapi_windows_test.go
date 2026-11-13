@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+// TestCryptProtectFlagValueMatchesWincrypt 锁定机器作用域 flag 的取值。
+// wincrypt.h: CRYPTPROTECT_LOCAL_MACHINE = 0x4；0x1 是 CRYPTPROTECT_UI_FORBIDDEN。
+// 用 0x1 会退化为用户作用域，安装进程能解密但 LocalSystem 服务不能。
+func TestCryptProtectFlagValueMatchesWincrypt(t *testing.T) {
+	if CRYPTPROTECT_LOCAL_MACHINE != 0x4 {
+		t.Fatalf("CRYPTPROTECT_LOCAL_MACHINE = %#x, want 0x4 (wincrypt.h)", CRYPTPROTECT_LOCAL_MACHINE)
+	}
+}
+
 // TestProtect_Unprotect_RoundTrip 验证加密→解密还原原始数据。
 func TestProtect_Unprotect_RoundTrip(t *testing.T) {
 	cases := []struct {

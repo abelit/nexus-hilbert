@@ -167,37 +167,32 @@ for target in "${TARGETS[@]}"; do
             ;;
         windows-amd64)
             # Each Windows variant ships a supervisor and worker executable.
-            # The installer bootstrap is staged once at the fixed UI URL, and
-            # the manifest is generated from the fully staged tree so the
-            # installer can resolve /edge/windows/<variant>/<path>.
+            # Flat layout, matching the Linux `<component>-<os>-<arch>`
+            # naming: every payload is served directly under /edge/windows/
+            # and the manifest's install_as maps it to the canonical filename.
             windows_dir="$DEST_DIR/windows"
-            modern_dir="$windows_dir/modern-amd64"
-            legacy_dir="$windows_dir/legacy-amd64"
-            mkdir -p "$modern_dir" "$legacy_dir"
+            mkdir -p "$windows_dir"
             for component in supervisor worker; do
                 windows_name="ongrid-edge-windows-amd64-${VERSION}-${component}.exe"
                 windows_binary=$(download_verified "$VERSION" "$windows_name")
-                install -m 0755 "$windows_binary" "$modern_dir/ongrid-edge-${component}.exe"
+                install -m 0755 "$windows_binary" \
+                    "$windows_dir/ongrid-edge-${component}-windows-amd64.exe"
 
                 # The 2008 R2 variant is built separately with Go 1.20.
                 legacy_name="ongrid-edge-legacy-windows-amd64-${VERSION}-${component}.exe"
                 legacy_binary=$(download_verified "$VERSION" "$legacy_name")
-                install -m 0755 "$legacy_binary" "$legacy_dir/ongrid-edge-${component}.exe"
+                install -m 0755 "$legacy_binary" \
+                    "$windows_dir/ongrid-edge-${component}-legacy-windows-amd64.exe"
             done
             installer_name="ongrid-edge-windows-amd64-${VERSION}-installer.exe"
             installer_binary=$(download_verified "$VERSION" "$installer_name")
             install -m 0755 "$installer_binary" "$windows_dir/ongrid-edge-installer.exe"
-            # Plugin payloads are shared by the modern and legacy variants.
-            # Stage them under both so the manifest can reference either tree
-            # without a second download.
-            modern_plugins_dir="$modern_dir/plugins"
-            legacy_plugins_dir="$legacy_dir/plugins"
-            mkdir -p "$modern_plugins_dir" "$legacy_plugins_dir"
+            # Plugin payloads are shared by both variants; the manifest lists
+            # the same file in windows-amd64 and legacy-windows-amd64.
             for plugin in "${windows_plugins[@]}"; do
                 windows_name="ongrid-edge-windows-amd64-${VERSION}-${plugin}.exe"
                 windows_binary=$(download_verified "$VERSION" "$windows_name")
-                install -m 0755 "$windows_binary" "$modern_plugins_dir/${plugin}.exe"
-                install -m 0755 "$windows_binary" "$legacy_plugins_dir/${plugin}.exe"
+                install -m 0755 "$windows_binary" "$windows_dir/${plugin}-windows-amd64.exe"
             done
 
             manifest_generator=${ONGRID_WINDOWS_MANIFEST_GENERATOR:-}

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -189,9 +190,52 @@ func validateSetting(category, key, value string) error {
 		return validateAgentSetting(key, value)
 	case model.CategoryObservability:
 		return validateObservabilitySetting(key, value)
+	case model.CategoryEdge:
+		return validateEdgeSetting(key, value)
 	default:
 		return nil
 	}
+}
+
+// validateEdgeSetting validates the Edge install entry points shown in the
+// UI. Values are base URLs such as https://ongrid.example.com or
+// https://10.0.0.10:8443; an empty value clears the setting so the UI falls
+// back to the browser's current host.
+func validateEdgeSetting(key, value string) error {
+	switch key {
+	case model.KeyEdgeInstallInternalURL, model.KeyEdgeInstallExternalURL:
+		return validateInstallBaseURL(key, value)
+	default:
+		return fmt.Errorf("%w: unsupported edge setting %q", errs.ErrInvalid, key)
+	}
+}
+
+// validateInstallBaseURL accepts empty (clear) or an absolute http(s) URL
+// without userinfo, query, or fragment. Paths are rejected because the UI
+// appends /install.sh and /edge/windows/... directly.
+func validateInstallBaseURL(key, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if len(value) > 512 {
+		return fmt.Errorf("%w: %s must be at most 512 characters", errs.ErrInvalid, key)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("%w: %s must be an absolute URL such as https://ongrid.example.com", errs.ErrInvalid, key)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("%w: %s must use http or https", errs.ErrInvalid, key)
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%w: %s must not contain credentials, query, or fragment", errs.ErrInvalid, key)
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return fmt.Errorf("%w: %s must not contain a path", errs.ErrInvalid, key)
+	}
+	return nil
 }
 
 func validateObservabilitySetting(key, value string) error {

@@ -22,6 +22,11 @@ describe("EdgesPage", () => {
       http.get("/api/v1/version", () =>
         HttpResponse.json({ manager_version: "dev" }),
       ),
+      // Edge install addresses are unset by default, so the command falls
+      // back to the browser origin (http://localhost in jsdom).
+      http.get("/api/v1/system-settings", () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
       http.get("/api/v1/edges", () =>
         HttpResponse.json({
           items: [
@@ -527,7 +532,7 @@ describe("EdgesPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "已创建设备" });
     expect(within(dialog).getByRole("radio", { name: "Linux" })).toBeChecked();
     expect(
-      within(dialog).getByText(/curl -k -sSL https:\/\/.*\/install\.sh/),
+      within(dialog).getByText(/curl -k -sSL https?:\/\/.*\/install\.sh/),
     ).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("radio", { name: "Windows" }));
@@ -549,6 +554,50 @@ describe("EdgesPage", () => {
     expect(within(dialog).getByText(/curl -k -sSL/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/Windows Server 2008 R2/)).not.toBeInTheDocument();
     writeText.mockRestore();
+  });
+
+  it("配置内网/外网地址后安装命令可切换", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/v1/system-settings", () =>
+        HttpResponse.json({
+          items: [
+            { category: "edge", key: "install_internal_url", value: "https://ongrid.intra", sensitive: false, updated_at: "" },
+            { category: "edge", key: "install_external_url", value: "https://ongrid.example.com", sensitive: false, updated_at: "" },
+          ],
+          total: 2,
+        }),
+      ),
+      http.post("/api/v1/edges", () =>
+        HttpResponse.json(
+          {
+            id: 22,
+            name: "addr-host",
+            access_key_id: "ak-addr",
+            secret_key: "sk-addr",
+            created_at: "2026-11-12T00:00:00Z",
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+
+    await screen.findByText("bare-metal-1");
+    await user.click(screen.getByRole("button", { name: "新建设备" }));
+    const createDialog = await screen.findByRole("dialog", { name: "新建设备" });
+    await user.click(within(createDialog).getByRole("button", { name: "创建" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "已创建设备" });
+    await waitFor(() =>
+      expect(within(dialog).getByRole("radio", { name: "内网" })).toBeChecked(),
+    );
+    expect(within(dialog).getByText(/https:\/\/ongrid\.intra\/install\.sh/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("radio", { name: "外网" }));
+    expect(
+      within(dialog).getByText(/https:\/\/ongrid\.example\.com\/install\.sh/),
+    ).toBeInTheDocument();
   });
 
   it("批量安装命令默认 Linux，可切换到 Windows 并复制所选命令", async () => {

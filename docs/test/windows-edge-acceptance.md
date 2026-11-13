@@ -55,7 +55,7 @@
 
 2. **Phase 0 尚未在真实 2008 R2 上执行。** 本地已完成 Go 1.20.14 交叉编译、`go test`、`go vet`、`go test -race` 和 geminio 依赖构建，但这不能替代 VM 上的 TLS 1.2、geminio handshake 和 PE 加载验证。W-00 未通过前，2008 R2 的其他 `PASS` 不得用于宣称 Legacy 已验收。
 
-3. **2012 R2 是 best-effort。** 即使复用 `legacy-amd64` 构建，也必须在该系统上单独执行本清单；不得用 2008 R2 或 2016 的结果替代。
+3. **2012 R2 是 best-effort。** 即使复用 `legacy-windows-amd64` 构建，也必须在该系统上单独执行本清单；不得用 2008 R2 或 2016 的结果替代。
 
 4. **单设备安装命令会把 key 放在安装器命令行。** 这是安装指南 §4.2 记录的已知暴露面；W-04 的 secret 检查应使用批量 enrollment token 模式，并单独记录服务常驻进程的命令行和日志。
 

@@ -128,16 +128,29 @@ if ongrid_validate_embedded_edge_assets "$embedded" 'linux-amd64 linux-arm64' \
     fail "an incomplete embedded package was accepted"
 fi
 
-# Windows binaries live under windows/modern-amd64 and validate independently
-# of the Linux component list.
-mkdir -p "$embedded/windows/modern-amd64"
-printf 'supervisor\n' > "$embedded/windows/modern-amd64/ongrid-edge-supervisor.exe"
-printf 'worker\n' > "$embedded/windows/modern-amd64/ongrid-edge-worker.exe"
+# Windows binaries use the flat <component>-windows-amd64[-legacy] names
+# shared with the Linux payloads and validate independently of the Linux
+# component list.
+mkdir -p "$embedded/windows"
+windows_files=(
+    ongrid-edge-supervisor-windows-amd64.exe
+    ongrid-edge-worker-windows-amd64.exe
+    ongrid-edge-supervisor-legacy-windows-amd64.exe
+    ongrid-edge-worker-legacy-windows-amd64.exe
+    windows_exporter-windows-amd64.exe
+    otelcol-contrib-windows-amd64.exe
+    mysqld_exporter-windows-amd64.exe
+    postgres_exporter-windows-amd64.exe
+    redis_exporter-windows-amd64.exe
+)
+for name in "${windows_files[@]}"; do
+    printf '%s\n' "$name" > "$embedded/windows/$name"
+done
 ongrid_validate_embedded_edge_assets "$embedded" windows-amd64 \
     || fail "a complete embedded Windows payload was rejected"
 ongrid_validate_embedded_edge_assets "$embedded" 'linux-amd64 windows-amd64' \
     || fail "a mixed Linux/Windows embedded payload was rejected"
-rm "$embedded/windows/modern-amd64/ongrid-edge-worker.exe"
+rm "$embedded/windows/ongrid-edge-worker-windows-amd64.exe"
 if ongrid_validate_embedded_edge_assets "$embedded" windows-amd64 >/dev/null 2>&1; then
     fail "an incomplete embedded Windows payload was accepted"
 fi
@@ -147,18 +160,18 @@ ongrid_validate_embedded_edge_assets "$embedded" linux-amd64 \
 # Preserve the served Windows tree when the new stage did not produce one.
 preserve_stage="$tmp_dir/preserve-stage"
 preserve_installed="$tmp_dir/preserve-installed"
-mkdir -p "$preserve_stage" "$preserve_installed/windows/modern-amd64"
-printf 'old supervisor\n' > "$preserve_installed/windows/modern-amd64/ongrid-edge-supervisor.exe"
+mkdir -p "$preserve_stage" "$preserve_installed/windows"
+printf 'old supervisor\n' > "$preserve_installed/windows/ongrid-edge-supervisor-windows-amd64.exe"
 ongrid_preserve_windows_edge_assets "$preserve_stage" "$preserve_installed" \
     || fail "preserving an existing Windows tree failed"
-cmp -s "$preserve_installed/windows/modern-amd64/ongrid-edge-supervisor.exe" \
-    "$preserve_stage/windows/modern-amd64/ongrid-edge-supervisor.exe" \
+cmp -s "$preserve_installed/windows/ongrid-edge-supervisor-windows-amd64.exe" \
+    "$preserve_stage/windows/ongrid-edge-supervisor-windows-amd64.exe" \
     || fail "the existing Windows tree was not carried into the new stage"
 # A stage that already has fresh Windows artifacts wins; preservation is a
 # fallback for Linux-only packages, not an overwrite.
-printf 'new supervisor\n' > "$preserve_stage/windows/modern-amd64/ongrid-edge-supervisor.exe"
+printf 'new supervisor\n' > "$preserve_stage/windows/ongrid-edge-supervisor-windows-amd64.exe"
 ongrid_preserve_windows_edge_assets "$preserve_stage" "$preserve_installed"
-grep -Fxq 'new supervisor' "$preserve_stage/windows/modern-amd64/ongrid-edge-supervisor.exe" \
+grep -Fxq 'new supervisor' "$preserve_stage/windows/ongrid-edge-supervisor-windows-amd64.exe" \
     || fail "preservation overwrote freshly staged Windows artifacts"
 ongrid_preserve_windows_edge_assets "$tmp_dir/absent-stage" "$tmp_dir/absent-installed" \
     || fail "preservation without an existing Windows tree should succeed"

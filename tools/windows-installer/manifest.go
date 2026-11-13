@@ -14,9 +14,16 @@ const manifestSchema = 1
 
 // Supported variant identifiers. The short names are accepted on the command
 // line, but the manifest and the resolved variant always use the full name.
+// They match the release target names (`windows-amd64`, `legacy-windows-amd64`)
+// so the flat artifact filenames carry the same `<component>-<os>-<arch>`
+// suffix as the Linux payloads.
 const (
-	variantModernAMD64 = "modern-amd64"
-	variantLegacyAMD64 = "legacy-amd64"
+	variantWindowsAMD64      = "windows-amd64"
+	variantLegacyWindowsAMD64 = "legacy-windows-amd64"
+
+	// Legacy full names accepted from older manifests / operators.
+	legacyVariantModernAMD64 = "modern-amd64"
+	legacyVariantLegacyAMD64 = "legacy-amd64"
 )
 
 // OSVersion is the Windows NT version reported by RtlGetVersion.
@@ -48,10 +55,18 @@ type MinOS struct {
 }
 
 // File is one artifact within a variant.
+//
+// Path is the flat filename served under /edge/windows/ (for example
+// ongrid-edge-supervisor-windows-amd64.exe). InstallAs is the canonical
+// filename the installer writes into the destination directory; it defaults
+// to the last path element when omitted. The two differ because the flat
+// distribution names carry the OS/arch (and legacy) tag while the installed
+// service relies on fixed filenames such as ongrid-edge-supervisor.exe.
 type File struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
-	Dest   string `json:"dest"`
+	Path      string `json:"path"`
+	SHA256    string `json:"sha256"`
+	Dest      string `json:"dest"`
+	InstallAs string `json:"install_as,omitempty"`
 }
 
 // ParseManifest decodes and validates a manifest. Unknown fields, duplicate
@@ -99,6 +114,11 @@ func (m *Manifest) validate() error {
 			if err := validateSHA256(f.SHA256); err != nil {
 				return fmt.Errorf("parse manifest: variant %q file %q: %w", v.ID, f.Path, err)
 			}
+			if f.InstallAs != "" {
+				if err := validateInstallName(f.InstallAs); err != nil {
+					return fmt.Errorf("parse manifest: variant %q file %q: %w", v.ID, f.Path, err)
+				}
+			}
 		}
 	}
 	return nil
@@ -130,6 +150,19 @@ func validateRelativePath(path string) error {
 		if part == "" || strings.TrimRight(part, " .") == "" {
 			return fmt.Errorf("path %q contains an unsafe component %q", path, part)
 		}
+	}
+	return nil
+}
+
+// validateInstallName pins install_as to a single canonical file name. It
+// deliberately rejects separators so a manifest cannot redirect the installed
+// file outside the destination directory.
+func validateInstallName(name string) error {
+	if err := validateRelativePath(name); err != nil {
+		return fmt.Errorf("install_as %q: %w", name, err)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("install_as %q must be a file name, not a path", name)
 	}
 	return nil
 }
@@ -174,14 +207,14 @@ func (m *Manifest) SelectVariant(version OSVersion, requested string) (*Variant,
 			return nil, err
 		}
 		return m.variantByID(id)
-	case "modern", variantModernAMD64:
-		return m.variantByID(variantModernAMD64)
-	case "legacy", variantLegacyAMD64:
-		return m.variantByID(variantLegacyAMD64)
+	case "modern", variantWindowsAMD64, legacyVariantModernAMD64:
+		return m.variantByID(variantWindowsAMD64)
+	case "legacy", variantLegacyWindowsAMD64, legacyVariantLegacyAMD64:
+		return m.variantByID(variantLegacyWindowsAMD64)
 	default:
 		return nil, fmt.Errorf(
 			"unknown variant %q: supported values are auto, modern, legacy, %s, %s",
-			requested, variantModernAMD64, variantLegacyAMD64,
+			requested, variantWindowsAMD64, variantLegacyWindowsAMD64,
 		)
 	}
 }
@@ -189,16 +222,16 @@ func (m *Manifest) SelectVariant(version OSVersion, requested string) (*Variant,
 func autoVariantID(version OSVersion) (string, error) {
 	switch {
 	case version.Major >= 10 && version.Build >= 14393:
-		return variantModernAMD64, nil
+		return variantWindowsAMD64, nil
 	case version.Major == 6 && version.Minor == 1 && version.Build >= 7601:
-		return variantLegacyAMD64, nil
+		return variantLegacyWindowsAMD64, nil
 	default:
 		return "", fmt.Errorf(
 			"unsupported Windows version %d.%d build %d: supported variants are "+
 				"%s (Windows 10 / Server 2016 or newer, build >= 14393) and "+
 				"%s (Windows Server 2008 R2 SP1, 6.1 build >= 7601)",
 			version.Major, version.Minor, version.Build,
-			variantModernAMD64, variantLegacyAMD64,
+			variantWindowsAMD64, variantLegacyWindowsAMD64,
 		)
 	}
 }

@@ -2,6 +2,9 @@
 
 Edge agents connect managed hosts to the ongrid control plane. The agent dials **out** — no inbound ports required on the host.
 
+For the build matrix, plugin acquisition, release attachments, and the `/edge/` distribution tree, see [Edge build, distribution, and installation layout](../design/edge-build-and-distribution.md).
+For step-by-step build and packaging commands, see [Edge build, packaging, and on-disk layout](../guides/edge-build-and-packaging.md).
+
 ## Quick start (release tarball)
 
 Generate an install command from the web UI under **Devices** (`/devices`), then run it on the target host:

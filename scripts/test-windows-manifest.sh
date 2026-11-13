@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Verify the Windows installer manifest generator.
 #
-# The generator walks the staged windows/<variant>/ trees, hashes every file,
-# and writes windows/manifest.json with the exact relative paths the installer
-# turns into /edge/windows/<variant>/<path> URLs. The test builds a fixture
-# layout, checks the v1 schema, deterministic ordering, digests, and the
+# The staged tree uses the flat `<component>-windows-amd64[-legacy]` naming
+# shared with the Linux payloads. The generator hashes each file and writes
+# windows/manifest.json with an `install_as` canonical name for each entry,
+# which the installer uses as the destination filename under /edge/windows/.
+# The test checks the schema, ordering, digests, install_as mapping, and the
 # missing-file failure path.
 set -euo pipefail
 
@@ -18,23 +19,23 @@ fail() {
     exit 1
 }
 
-make_variant() {
-    local windows_dir=$1 variant=$2
-    mkdir -p "$windows_dir/$variant/plugins"
-    printf '%s supervisor\n' "$variant" > "$windows_dir/$variant/ongrid-edge-supervisor.exe"
-    printf '%s worker\n' "$variant" > "$windows_dir/$variant/ongrid-edge-worker.exe"
+make_layout() {
+    local windows_dir=$1
+    mkdir -p "$windows_dir"
+    printf 'supervisor\n' > "$windows_dir/ongrid-edge-supervisor-windows-amd64.exe"
+    printf 'worker\n' > "$windows_dir/ongrid-edge-worker-windows-amd64.exe"
+    printf 'legacy supervisor\n' > "$windows_dir/ongrid-edge-supervisor-legacy-windows-amd64.exe"
+    printf 'legacy worker\n' > "$windows_dir/ongrid-edge-worker-legacy-windows-amd64.exe"
     for plugin in windows_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter; do
-        printf '%s %s plugin\n' "$variant" "$plugin" \
-            > "$windows_dir/$variant/plugins/$plugin.exe"
+        printf '%s plugin\n' "$plugin" > "$windows_dir/${plugin}-windows-amd64.exe"
     done
+    # The installer bootstrap sits at the Windows root and is deliberately not
+    # a manifest file; the installer never downloads itself.
+    printf 'installer\n' > "$windows_dir/ongrid-edge-installer.exe"
 }
 
 windows_dir="$tmp_dir/windows"
-make_variant "$windows_dir" modern-amd64
-make_variant "$windows_dir" legacy-amd64
-# The installer bootstrap sits at the Windows root and is deliberately not a
-# manifest file; the installer never downloads itself.
-printf 'installer\n' > "$windows_dir/ongrid-edge-installer.exe"
+make_layout "$windows_dir"
 
 bash "$generator" "$windows_dir" vtest || fail "manifest generation failed"
 
@@ -65,27 +66,36 @@ if data.get("version") != "vtest":
 
 variants = data.get("variants")
 if not isinstance(variants, list) or [v.get("id") for v in variants] != [
-    "modern-amd64",
-    "legacy-amd64",
+    "windows-amd64",
+    "legacy-windows-amd64",
 ]:
     fail(f"variant order = {variants!r}")
 
 expected_min_os = {
-    "modern-amd64": {"major": 10, "minor": 0, "build": 14393},
-    "legacy-amd64": {"major": 6, "minor": 1, "build": 7601},
+    "windows-amd64": {"major": 10, "minor": 0, "build": 14393},
+    "legacy-windows-amd64": {"major": 6, "minor": 1, "build": 7601},
 }
 plugins = [
-    "mysqld_exporter",
+    "windows_exporter",
     "otelcol-contrib",
+    "mysqld_exporter",
     "postgres_exporter",
     "redis_exporter",
-    "windows_exporter",
 ]
-expected_paths = [
-    "ongrid-edge-supervisor.exe",
-    "ongrid-edge-worker.exe",
-    *[f"plugins/{plugin}.exe" for plugin in plugins],
-]
+variant_roots = {
+    "windows-amd64": ("ongrid-edge-supervisor-windows-amd64.exe", "ongrid-edge-worker-windows-amd64.exe"),
+    "legacy-windows-amd64": (
+        "ongrid-edge-supervisor-legacy-windows-amd64.exe",
+        "ongrid-edge-worker-legacy-windows-amd64.exe",
+    ),
+}
+plugin_names = {
+    "windows_exporter": "windows_exporter.exe",
+    "otelcol-contrib": "otelcol-contrib.exe",
+    "mysqld_exporter": "mysqld_exporter.exe",
+    "postgres_exporter": "postgres_exporter.exe",
+    "redis_exporter": "redis_exporter.exe",
+}
 
 for variant in variants:
     variant_id = variant["id"]
@@ -94,17 +104,31 @@ for variant in variants:
     files = variant.get("files")
     if not isinstance(files, list):
         fail(f"{variant_id} files is not a list")
+    supervisor, worker = variant_roots[variant_id]
+    expected_paths = [supervisor, worker, *[f"{p}-windows-amd64.exe" for p in plugins]]
     paths = [entry["path"] for entry in files]
     if paths != expected_paths:
         fail(f"{variant_id} paths = {paths!r}, want {expected_paths!r}")
+
+    expected_install = {
+        supervisor: "ongrid-edge-supervisor.exe",
+        worker: "ongrid-edge-worker.exe",
+    }
+    plugin_paths = set()
+    for name in plugins:
+        plugin_paths.add(f"{name}-windows-amd64.exe")
+        expected_install[f"{name}-windows-amd64.exe"] = plugin_names[name]
+
     for entry in files:
         path = entry["path"]
-        if path.startswith("/") or path.startswith("\\") or ".." in path.split("/"):
+        if "/" in path or "\\" in path or ".." in path:
             fail(f"{variant_id} unsafe path {path!r}")
-        expected_dest = "plugins" if path.startswith("plugins/") else "bin"
+        expected_dest = "plugins" if path in plugin_paths else "bin"
         if entry.get("dest") != expected_dest:
             fail(f"{variant_id} {path} dest = {entry.get('dest')!r}, want {expected_dest!r}")
-        actual = hashlib.sha256((windows_dir / variant_id / path).read_bytes()).hexdigest()
+        if entry.get("install_as") != expected_install[path]:
+            fail(f"{variant_id} {path} install_as = {entry.get('install_as')!r}")
+        actual = hashlib.sha256((windows_dir / path).read_bytes()).hexdigest()
         if entry.get("sha256") != actual:
             fail(f"{variant_id} {path} sha256 does not match its file")
 PY
@@ -120,12 +144,12 @@ second=$(sha256sum "$manifest" | awk '{print $1}')
 # publishing a manifest the installer cannot satisfy.
 broken="$tmp_dir/broken"
 cp -a "$windows_dir" "$broken"
-rm "$broken/legacy-amd64/plugins/redis_exporter.exe"
+rm "$broken/redis_exporter-windows-amd64.exe"
 rm -f "$broken/manifest.json"
 if output=$(bash "$generator" "$broken" vtest 2>&1); then
-    fail "a missing legacy plugin was accepted"
+    fail "a missing shared plugin was accepted"
 fi
-grep -Fq 'redis_exporter.exe' <<<"$output" \
+grep -Fq 'redis_exporter-windows-amd64.exe' <<<"$output" \
     || fail "missing-file error did not name the absent artifact: $output"
 [[ ! -e "$broken/manifest.json" ]] || fail "a failed run still wrote manifest.json"
 

@@ -174,7 +174,7 @@ grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-linux-amd
     || fail "host architecture auto-detection requested the wrong Edge attachment"
 
 # Windows versioned attachments are staged for the installer manifest under
-# windows/modern-amd64. Windows has no dependency archive, so a windows-only
+# windows/ with the flat <component>-windows-amd64 names. Windows has no dependency archive, so a windows-only
 # invocation must not require ONGRID_EDGE_DEPS_TAG or download edge-deps-*.
 windows_dest="$tmp_dir/windows-dest"
 : > "$tmp_dir/windows-curl.log"
@@ -196,15 +196,15 @@ grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-a
 grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-worker.exe.sha256' \
     "$tmp_dir/windows-curl.log" \
     || fail "windows worker checksum sidecar was not downloaded"
-[[ -f "$windows_dest/windows/modern-amd64/ongrid-edge-supervisor.exe" ]] \
-    || fail "windows supervisor was not staged under windows/modern-amd64"
-[[ -f "$windows_dest/windows/modern-amd64/ongrid-edge-worker.exe" ]] \
-    || fail "windows worker was not staged under windows/modern-amd64"
+[[ -f "$windows_dest/windows/ongrid-edge-supervisor-windows-amd64.exe" ]] \
+    || fail "windows supervisor was not staged with the flat windows-amd64 name"
+[[ -f "$windows_dest/windows/ongrid-edge-worker-windows-amd64.exe" ]] \
+    || fail "windows worker was not staged with the flat windows-amd64 name"
 cmp -s "$bin_root/windows-amd64/ongrid-edge-supervisor.exe" \
-    "$windows_dest/windows/modern-amd64/ongrid-edge-supervisor.exe" \
+    "$windows_dest/windows/ongrid-edge-supervisor-windows-amd64.exe" \
     || fail "staged windows supervisor does not match the verified attachment"
 cmp -s "$bin_root/windows-amd64/ongrid-edge-worker.exe" \
-    "$windows_dest/windows/modern-amd64/ongrid-edge-worker.exe" \
+    "$windows_dest/windows/ongrid-edge-worker-windows-amd64.exe" \
     || fail "staged windows worker does not match the verified attachment"
 # The legacy variant has its own Go 1.20 supervisor/worker; the installer
 # bootstrap is staged once at the fixed UI URL.
@@ -217,15 +217,15 @@ grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-legacy-wi
 grep -Fqx 'https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-installer.exe' \
     "$tmp_dir/windows-curl.log" \
     || fail "windows installer attachment was not downloaded directly"
-[[ -f "$windows_dest/windows/legacy-amd64/ongrid-edge-supervisor.exe" ]] \
-    || fail "legacy supervisor was not staged under windows/legacy-amd64"
-[[ -f "$windows_dest/windows/legacy-amd64/ongrid-edge-worker.exe" ]] \
-    || fail "legacy worker was not staged under windows/legacy-amd64"
+[[ -f "$windows_dest/windows/ongrid-edge-supervisor-legacy-windows-amd64.exe" ]] \
+    || fail "legacy supervisor was not staged with the legacy-windows-amd64 name"
+[[ -f "$windows_dest/windows/ongrid-edge-worker-legacy-windows-amd64.exe" ]] \
+    || fail "legacy worker was not staged with the legacy-windows-amd64 name"
 cmp -s "$bin_root/legacy-windows-amd64/ongrid-edge-supervisor.exe" \
-    "$windows_dest/windows/legacy-amd64/ongrid-edge-supervisor.exe" \
+    "$windows_dest/windows/ongrid-edge-supervisor-legacy-windows-amd64.exe" \
     || fail "staged legacy supervisor does not match the verified attachment"
 cmp -s "$bin_root/legacy-windows-amd64/ongrid-edge-worker.exe" \
-    "$windows_dest/windows/legacy-amd64/ongrid-edge-worker.exe" \
+    "$windows_dest/windows/ongrid-edge-worker-legacy-windows-amd64.exe" \
     || fail "staged legacy worker does not match the verified attachment"
 [[ -f "$windows_dest/windows/ongrid-edge-installer.exe" ]] \
     || fail "windows installer was not staged at the fixed UI URL"
@@ -234,7 +234,7 @@ cmp -s "$bin_root/windows-amd64/ongrid-edge-installer.exe" \
     || fail "staged windows installer does not match the verified attachment"
 [[ -s "$windows_dest/windows/manifest.json" ]] \
     || fail "windows manifest.json was not generated after staging"
-for variant in modern-amd64 legacy-amd64; do
+for variant in windows-amd64 legacy-windows-amd64; do
     grep -Fq "\"id\": \"$variant\"" "$windows_dest/windows/manifest.json" \
         || fail "windows manifest does not list $variant"
 done
@@ -245,14 +245,12 @@ for plugin in "${windows_plugins[@]}"; do
     grep -Fqx "https://cnb.test/repo/-/releases/download/vtest/ongrid-edge-windows-amd64-vtest-${plugin}.exe.sha256" \
         "$tmp_dir/windows-curl.log" \
         || fail "windows ${plugin} checksum sidecar was not downloaded"
-    for variant in modern-amd64 legacy-amd64; do
-        staged="$windows_dest/windows/$variant/plugins/${plugin}.exe"
-        [[ -f "$staged" ]] || fail "windows ${plugin} was not staged under windows/$variant/plugins"
-        cmp -s "$bin_root/windows-amd64/$plugin.exe" "$staged" \
-            || fail "staged windows $variant $plugin does not match the verified attachment"
-    done
+    staged="$windows_dest/windows/${plugin}-windows-amd64.exe"
+    [[ -f "$staged" ]] || fail "windows ${plugin} was not staged with the flat windows-amd64 name"
+    cmp -s "$bin_root/windows-amd64/$plugin.exe" "$staged" \
+        || fail "staged windows $plugin does not match the verified attachment"
 done
-[[ ! -e "$windows_dest/windows/modern-amd64/plugins/mongodb_exporter.exe" ]] \
+[[ ! -e "$windows_dest/windows/mongodb_exporter-windows-amd64.exe" ]] \
     || fail "mongodb_exporter was staged without a Windows upstream asset"
 if grep -Fq 'edge-deps-' "$tmp_dir/windows-curl.log"; then
     fail "windows staging downloaded a linux dependency archive"
@@ -274,7 +272,7 @@ if FAKE_CURL_LOG="$tmp_dir/windows-bad-curl.log" \
         >/dev/null 2>&1; then
     fail "tampered windows attachment passed checksum verification"
 fi
-[[ ! -e "$tmp_dir/windows-bad-dest/windows/modern-amd64/ongrid-edge-supervisor.exe" ]] \
+[[ ! -e "$tmp_dir/windows-bad-dest/windows/ongrid-edge-supervisor-windows-amd64.exe" ]] \
     || fail "tampered windows supervisor was staged after checksum failure"
 
 # Dependency archives keep stable filenames across release tags. Reusing one

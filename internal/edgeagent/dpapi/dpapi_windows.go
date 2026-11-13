@@ -21,7 +21,13 @@ import (
 
 // CRYPTPROTECT_LOCAL_MACHINE 绑定密文到机器而非用户 logon session。
 // Windows Service 跑在 session 0，没有交互式 user logon，必须用此 flag。
-const CRYPTPROTECT_LOCAL_MACHINE = 0x1
+//
+// 值来自 wincrypt.h：CRYPTPROTECT_LOCAL_MACHINE = 0x00000004。
+// 注意 0x1 是 CRYPTPROTECT_UI_FORBIDDEN（禁止弹 UI），不是机器作用域；
+// 误用 0x1 会退化成用户作用域加密——安装时的管理员能解密，但 LocalSystem
+// 服务解密会失败（CryptUnprotectData: The system cannot find the path
+// specified），导致 worker 读不到 token、tunnel 一直 unauthorized。
+const CRYPTPROTECT_LOCAL_MACHINE = 0x4
 
 // Protect 使用 DPAPI 加密数据（CRYPTPROTECT_LOCAL_MACHINE scope）。
 //

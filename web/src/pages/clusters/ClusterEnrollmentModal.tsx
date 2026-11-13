@@ -2,6 +2,14 @@ import { Label, Input } from '@/components/ui';
 import { useEffect, useState } from "react";
 import { Check, Copy, Network } from "lucide-react";
 import { Modal } from "@/components/Modal";
+import { InstallAddressToggle } from "@/components/InstallAddressToggle";
+import {
+  buildInstallCommands,
+  defaultInstallAddressKind,
+  installCommandsForOS,
+  useInstallAddresses,
+  type InstallAddressKind,
+} from "@/lib/installAddresses";
 import { Button, Chip, Radio } from "@/components/ui";
 import {
   createEdgeEnrollmentProfile,
@@ -239,32 +247,18 @@ function EnrollmentCommand({ token }: { token: string }) {
   const { tr } = useI18n();
   const [copied, setCopied] = useState(false);
   const [os, setOs] = useState<InstallOS>("linux");
-  const host =
-    typeof window === "undefined" ? "ongrid.example.com" : window.location.host;
-  const hostname =
-    typeof window === "undefined"
-      ? "ongrid.example.com"
-      : window.location.hostname;
-  const tunnelAddr = `${hostname.includes(":") ? `[${hostname}]` : hostname}:40012`;
-  const linuxCommand =
-    `curl -k -sSL https://${host}/install.sh | bash -s -- ` +
-    `--enrollment-token=${token} ` +
-    `--server-edge-addr=${tunnelAddr} ` +
-    `--server-http-addr=${host} --tls-insecure`;
-  const linuxDisplay =
-    `curl -k -sSL https://${host}/install.sh | bash -s -- \\\n` +
-    `  --enrollment-token=${token} \\\n` +
-    `  --server-edge-addr=${tunnelAddr} \\\n` +
-    `  --server-http-addr=${host} \\\n` +
-    "  --tls-insecure";
-  // PowerShell 2.0 compatible: one statement per line, no fancy syntax.
-  const windowsDisplay =
-    `$u='https://${host}/edge/windows/ongrid-edge-installer.exe'\n` +
-    `$f="$env:TEMP\\ongrid-edge-installer.exe"\n` +
-    `(New-Object Net.WebClient).DownloadFile($u,$f)\n` +
-    `& $f --manager-url https://${host} --enrollment-token ${token} --server-edge-addr ${tunnelAddr} --tls-insecure`;
-  const command = os === "windows" ? windowsDisplay : linuxCommand;
-  const display = os === "windows" ? windowsDisplay : linuxDisplay;
+  const { options } = useInstallAddresses();
+  const [addressKind, setAddressKind] = useState<InstallAddressKind | null>(null);
+  const defaultKind = defaultInstallAddressKind(options);
+  const address =
+    options.find((option) => option.kind === addressKind) ??
+    options.find((option) => option.kind === defaultKind) ??
+    options[0];
+  if (!address) return null;
+  const { command, display } = installCommandsForOS(
+    buildInstallCommands(address, { enrollmentToken: token }),
+    os,
+  );
 
   return (
     <div>
@@ -273,6 +267,12 @@ function EnrollmentCommand({ token }: { token: string }) {
           {tr("在每台目标主机执行", "Run on every target host")}
         </span>
         <div className="flex flex-wrap items-center gap-2">
+          <InstallAddressToggle
+            name="install-addr-cluster"
+            value={address.kind}
+            options={options}
+            onChange={setAddressKind}
+          />
           <InstallOsToggle
             name="install-os-cluster"
             value={os}

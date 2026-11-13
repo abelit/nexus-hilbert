@@ -158,19 +158,29 @@ ongrid_validate_embedded_edge_assets() {
         ongrid-edge node_exporter process_exporter mysqld_exporter postgres_exporter
         redis_exporter mongodb_exporter otelcol-contrib obi obi.NOTICES
     )
-    local windows_components=(supervisor worker)
+    local windows_files=(
+        ongrid-edge-supervisor-windows-amd64.exe
+        ongrid-edge-worker-windows-amd64.exe
+        ongrid-edge-supervisor-legacy-windows-amd64.exe
+        ongrid-edge-worker-legacy-windows-amd64.exe
+        windows_exporter-windows-amd64.exe
+        otelcol-contrib-windows-amd64.exe
+        mysqld_exporter-windows-amd64.exe
+        postgres_exporter-windows-amd64.exe
+        redis_exporter-windows-amd64.exe
+    )
     if [[ -n "$raw_targets" ]]; then
         read -r -a targets <<<"$raw_targets"
     fi
     for target in "${targets[@]}"; do
         case "$target" in
             windows-amd64)
-                for component in "${windows_components[@]}"; do
-                    [[ -f "$edge_dir/windows/modern-amd64/ongrid-edge-${component}.exe" \
-                        && ! -L "$edge_dir/windows/modern-amd64/ongrid-edge-${component}.exe" \
-                        && -s "$edge_dir/windows/modern-amd64/ongrid-edge-${component}.exe" ]] || {
+                for component in "${windows_files[@]}"; do
+                    [[ -f "$edge_dir/windows/${component}" \
+                        && ! -L "$edge_dir/windows/${component}" \
+                        && -s "$edge_dir/windows/${component}" ]] || {
                         printf '[ERROR] embedded Edge package is missing regular file %s\n' \
-                            "windows/modern-amd64/ongrid-edge-${component}.exe" >&2
+                            "windows/${component}" >&2
                         return 1
                     }
                 done
