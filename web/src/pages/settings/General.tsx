@@ -1,9 +1,9 @@
 import { useAssistantPage } from '@/lib/assistantPage';
 import { Switch } from '@/components/ui/Switch';
-import { Button, Input, Label } from '@/components/ui';
+import { Button, Input, Label, Textarea } from '@/components/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { Link2, Loader2, Network } from 'lucide-react';
-import { listSettings, setSetting } from '@/api/settings';
+import { FolderOpen, Link2, Loader2, Network, Upload } from 'lucide-react';
+import { deleteSetting, listSettings, setSetting } from '@/api/settings';
 import { useI18n } from '@/i18n/locale';
 import {
   EDGE_INSTALL_EXTERNAL_KEY,
@@ -14,11 +14,62 @@ import {
 
 const CATEGORY = 'platform';
 const KEY = 'network_discovery_enabled';
+const DEVICE_FILE_ROOTS_KEY = 'device_file_write_roots';
+const MAX_FILE_ROOTS = 32;
+const MAX_FILE_ROOT_LEN = 512;
+// Leaves headroom under the Edge's 16 KiB FM preface limit.
+const MAX_FILE_ROOTS_JSON = 12 * 1024;
+const DEVICE_FILE_MAX_UPLOAD_MB_KEY = 'device_file_max_upload_mb';
+const MIN_UPLOAD_MB = 1;
+const MAX_UPLOAD_MB = 8192;
+const DEFAULT_UPLOAD_MB = 8192;
 
 // Match the manager's fail-open default: only an explicit false disables
 // admission. This keeps the displayed state correct for old or malformed rows.
 function isDiscoveryEnabled(value?: string): boolean {
   return value?.trim().toLowerCase() !== 'false';
+}
+
+// parseFileRoots accepts one absolute path per line (commas also work). It is
+// shared by the save path and the inline validation message.
+function parseFileRoots(
+  raw: string,
+  tr: (zh: string, en: string) => string,
+): { roots: string[]; error: string | null } {
+  const roots = [...new Set(raw.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))];
+  if (roots.length > MAX_FILE_ROOTS) {
+    return { roots, error: tr(`最多 ${MAX_FILE_ROOTS} 个目录`, `At most ${MAX_FILE_ROOTS} directories`) };
+  }
+  for (const root of roots) {
+    if (root.startsWith('\\\\') || root.startsWith('//')) {
+      return { roots, error: tr('不支持 UNC 路径', 'UNC paths are not supported') };
+    }
+    const windowsAbs = /^[A-Za-z]:[\\/]/.test(root);
+    const posixAbs = root.startsWith('/');
+    if (!windowsAbs && !posixAbs) {
+      return {
+        roots,
+        error: tr('必须是绝对路径，例如 D:\\data 或 /srv/app', 'Must be an absolute path, e.g. D:\\data or /srv/app'),
+      };
+    }
+    if (root.length > MAX_FILE_ROOT_LEN) {
+      return {
+        roots,
+        error: tr(`单个目录不能超过 ${MAX_FILE_ROOT_LEN} 个字符`, `Each directory must be at most ${MAX_FILE_ROOT_LEN} characters`),
+      };
+    }
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(roots)).length;
+  if (bytes > MAX_FILE_ROOTS_JSON) {
+    return {
+      roots,
+      error: tr(
+        '可写目录总长度超出请求限制，请减少目录数量或长度',
+        'The directory list exceeds the request size limit; remove entries or shorten them',
+      ),
+    };
+  }
+  return { roots, error: null };
 }
 
 export default function SettingsGeneral() {
@@ -27,6 +78,16 @@ export default function SettingsGeneral() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rootsText, setRootsText] = useState('');
+  const [rootsHasRow, setRootsHasRow] = useState(false);
+  const [rootsSaving, setRootsSaving] = useState(false);
+  const [rootsError, setRootsError] = useState<string | null>(null);
+  const [rootsNotice, setRootsNotice] = useState('');
+  const [uploadLimitText, setUploadLimitText] = useState(String(DEFAULT_UPLOAD_MB));
+  const [uploadLimitHasRow, setUploadLimitHasRow] = useState(false);
+  const [uploadLimitSaving, setUploadLimitSaving] = useState(false);
+  const [uploadLimitError, setUploadLimitError] = useState<string | null>(null);
+  const [uploadLimitNotice, setUploadLimitNotice] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -34,6 +95,16 @@ export default function SettingsGeneral() {
       const row = response.items.find((item) => item.key === KEY);
       // Missing row follows the Manager default: enabled for new installs.
       setEnabled(isDiscoveryEnabled(row?.value));
+      const rootsRow = response.items.find((item) => item.key === DEVICE_FILE_ROOTS_KEY);
+      setRootsHasRow(Boolean(rootsRow));
+      setRootsText(
+        rootsRow?.value
+          ? rootsRow.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).join('\n')
+          : '',
+      );
+      const uploadRow = response.items.find((item) => item.key === DEVICE_FILE_MAX_UPLOAD_MB_KEY);
+      setUploadLimitHasRow(Boolean(uploadRow));
+      setUploadLimitText(uploadRow?.value?.trim() || String(DEFAULT_UPLOAD_MB));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -60,8 +131,92 @@ export default function SettingsGeneral() {
     }
   }, []);
 
+  const onSaveFileRoots = useCallback(async () => {
+    const parsed = parseFileRoots(rootsText, tr);
+    if (parsed.error) {
+      setRootsError(parsed.error);
+      setRootsNotice('');
+      return;
+    }
+    setRootsSaving(true);
+    setRootsError(null);
+    setRootsNotice('');
+    try {
+      const value = parsed.roots.join('\n');
+      await setSetting(CATEGORY, DEVICE_FILE_ROOTS_KEY, value, false);
+      setRootsText(value);
+      setRootsHasRow(true);
+      setRootsNotice(tr('已保存', 'Saved'));
+    } catch (err) {
+      setRootsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRootsSaving(false);
+    }
+  }, [rootsText, tr]);
+
+  const onResetFileRoots = useCallback(async () => {
+    setRootsSaving(true);
+    setRootsError(null);
+    setRootsNotice('');
+    try {
+      await deleteSetting(CATEGORY, DEVICE_FILE_ROOTS_KEY);
+      setRootsText('');
+      setRootsHasRow(false);
+      setRootsNotice(tr('已恢复环境变量默认值', 'Restored env default'));
+    } catch (err) {
+      setRootsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRootsSaving(false);
+    }
+  }, [tr]);
+
+  const onSaveUploadLimit = useCallback(async () => {
+    const n = Number(uploadLimitText);
+    if (!Number.isInteger(n) || n < MIN_UPLOAD_MB || n > MAX_UPLOAD_MB) {
+      setUploadLimitError(
+        tr(
+          `请输入 ${MIN_UPLOAD_MB}–${MAX_UPLOAD_MB} 之间的整数（MiB）`,
+          `Enter an integer between ${MIN_UPLOAD_MB} and ${MAX_UPLOAD_MB} MiB`,
+        ),
+      );
+      setUploadLimitNotice('');
+      return;
+    }
+    setUploadLimitSaving(true);
+    setUploadLimitError(null);
+    setUploadLimitNotice('');
+    try {
+      await setSetting(CATEGORY, DEVICE_FILE_MAX_UPLOAD_MB_KEY, String(n), false);
+      setUploadLimitText(String(n));
+      setUploadLimitHasRow(true);
+      setUploadLimitNotice(tr('已保存', 'Saved'));
+    } catch (err) {
+      setUploadLimitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadLimitSaving(false);
+    }
+  }, [tr, uploadLimitText]);
+
+  const onResetUploadLimit = useCallback(async () => {
+    setUploadLimitSaving(true);
+    setUploadLimitError(null);
+    setUploadLimitNotice('');
+    try {
+      await deleteSetting(CATEGORY, DEVICE_FILE_MAX_UPLOAD_MB_KEY);
+      setUploadLimitText(String(DEFAULT_UPLOAD_MB));
+      setUploadLimitHasRow(false);
+      setUploadLimitNotice(tr('已恢复默认值', 'Restored default'));
+    } catch (err) {
+      setUploadLimitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadLimitSaving(false);
+    }
+  }, [tr]);
+
   useAssistantPage('通用设置', 'General settings', {
     network_discovery_enabled: enabled,
+    device_file_write_roots: rootsText,
+    device_file_max_upload_mb: uploadLimitText,
     loading,
   });
 
@@ -107,6 +262,117 @@ export default function SettingsGeneral() {
             'New Edges collect locally by default. To stop one host only, set ONGRID_NETWORK_DISCOVERY_ENABLED=false in /etc/ongrid-edge/ongrid-edge.env and restart its service.',
           )}
         </p>
+      </section>
+
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <FolderOpen size={14} className="text-zinc-400" />
+          <h2 className="text-sm font-medium text-zinc-100">{tr('设备文件管理', 'Device files')}</h2>
+        </div>
+        <p className="mb-4 text-xs leading-relaxed text-zinc-500">
+          {tr(
+            '允许文件管理上传、新建目录和重命名的设备端目录。所有设备共用；读取不受限制，Edge 传输沙箱始终可写。留空表示只允许传输沙箱。',
+            'Device-side directories where the file manager may upload, create folders, and rename. Shared by all devices; reads are unrestricted and the Edge transfer sandbox is always writable. Leave empty for sandbox-only.',
+          )}
+        </p>
+
+        <Label htmlFor="device-file-roots">{tr('允许上传的目录', 'Writable upload directories')}</Label>
+        <Textarea
+          id="device-file-roots"
+          rows={4}
+          spellCheck={false}
+          placeholder={'D:\\data\n/srv/app'}
+          value={rootsText}
+          onChange={(event) => {
+            setRootsText(event.target.value);
+            setRootsNotice('');
+          }}
+        />
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+          {tr('每行一个绝对路径，也支持逗号分隔。', 'One absolute path per line; commas are also accepted.')}
+        </p>
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          {rootsHasRow
+            ? tr('当前由界面配置；留空表示只允许传输沙箱。', 'Configured here; empty means sandbox-only.')
+            : tr(
+                '尚未保存，使用部署环境变量 ONGRID_DEVICE_FILE_ROOTS（如果已设置）。',
+                'Not saved yet; using the deployment env var ONGRID_DEVICE_FILE_ROOTS if set.',
+              )}
+        </p>
+
+        {rootsError && <div className="mt-3 text-xs text-red-400">{rootsError}</div>}
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button type="button" variant="primary" disabled={rootsSaving} onClick={() => void onSaveFileRoots()}>
+            {rootsSaving ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : null}
+            {tr('保存可写目录', 'Save directories')}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={rootsSaving || !rootsHasRow}
+            onClick={() => void onResetFileRoots()}
+          >
+            {tr('恢复环境变量默认', 'Restore env default')}
+          </Button>
+          {rootsNotice && <span className="text-xs text-emerald-400">{rootsNotice}</span>}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <Upload size={14} className="text-zinc-400" />
+          <h2 className="text-sm font-medium text-zinc-100">{tr('上传大小限制', 'Upload size limit')}</h2>
+        </div>
+        <p className="mb-4 text-xs leading-relaxed text-zinc-500">
+          {tr(
+            '设备文件管理的单文件上传上限。只影响文件管理，不影响 RDP 文件面板。',
+            'Single-file upload limit for the device file manager. Does not affect the RDP file panel.',
+          )}
+        </p>
+
+        <Label htmlFor="device-file-max-upload-mb">{tr('单文件上传上限（MiB）', 'Max upload size (MiB)')}</Label>
+        <Input
+          id="device-file-max-upload-mb"
+          type="number"
+          min={MIN_UPLOAD_MB}
+          max={MAX_UPLOAD_MB}
+          step={1}
+          value={uploadLimitText}
+          onChange={(event) => {
+            setUploadLimitText(event.target.value);
+            setUploadLimitNotice('');
+          }}
+        />
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+          {tr(
+            `范围 ${MIN_UPLOAD_MB}–${MAX_UPLOAD_MB} MiB；当前约 ${(Number(uploadLimitText) / 1024).toFixed(2)} GiB。`,
+            `Range ${MIN_UPLOAD_MB}–${MAX_UPLOAD_MB} MiB; about ${(Number(uploadLimitText) / 1024).toFixed(2)} GiB.`,
+          )}
+        </p>
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          {uploadLimitHasRow
+            ? tr('当前由界面配置。', 'Configured here.')
+            : tr('尚未保存，使用默认值 8 GiB。', 'Not saved yet; using the 8 GiB default.')}
+        </p>
+
+        {uploadLimitError && <div className="mt-3 text-xs text-red-400">{uploadLimitError}</div>}
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button type="button" variant="primary" disabled={uploadLimitSaving} onClick={() => void onSaveUploadLimit()}>
+            {uploadLimitSaving ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : null}
+            {tr('保存上限', 'Save limit')}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={uploadLimitSaving || !uploadLimitHasRow}
+            onClick={() => void onResetUploadLimit()}
+          >
+            {tr('恢复默认', 'Restore default')}
+          </Button>
+          {uploadLimitNotice && <span className="text-xs text-emerald-400">{uploadLimitNotice}</span>}
+        </div>
       </section>
 
       <EdgeInstallAddressCard />

@@ -163,6 +163,9 @@ services:
       # in deploy/README.md).
       ONGRID_ADMIN_EMAIL: ${ONGRID_ADMIN_EMAIL:-}
       ONGRID_ADMIN_PASSWORD: ${ONGRID_ADMIN_PASSWORD:-}
+      # Comma-separated device paths writable through the file manager.
+      # Reads can browse any path; the edge sandbox is always writable.
+      ONGRID_DEVICE_FILE_ROOTS: ${ONGRID_DEVICE_FILE_ROOTS:-}
     # No ./data bind mount in MySQL mode (data lives in the mysql_data
     # named volume on the mysql service).
     # if switching to sqlite: add bind mount here

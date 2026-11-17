@@ -106,6 +106,29 @@ func (s *Service) Get(ctx context.Context, category, key string) (string, bool, 
 	return row.Value, true, nil
 }
 
+// GetUncached reads a setting directly from the repo, bypassing the process
+// cache. Use it for authorization/policy settings whose changes must apply on
+// every manager instance immediately.
+func (s *Service) GetUncached(ctx context.Context, category, key string) (string, bool, error) {
+	row, err := s.repo.Get(ctx, category, key)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return row.Value, true, nil
+}
+
+// DeviceFileWriteRoots reads the device-file write roots directly from the
+// repo, bypassing the process cache. A write roots change is an authorization
+// boundary: in a multi-manager deployment another instance's Set/Delete must
+// apply to new file-manager calls on every manager, not only the one that
+// handled the settings request.
+func (s *Service) DeviceFileWriteRoots(ctx context.Context) (string, bool, error) {
+	return s.GetUncached(ctx, model.CategoryPlatform, model.KeyDeviceFileWriteRoots)
+}
+
 // Set upserts (cat, key) -> value and invalidates the cache entry. The
 // next Get re-loads from the DB, picking up the new value across goroutines.
 func (s *Service) Set(ctx context.Context, category, key, value string, sensitive bool) error {
@@ -180,6 +203,12 @@ func validateSetting(category, key, value string) error {
 		}
 		return nil
 	case model.CategoryPlatform:
+		if key == model.KeyDeviceFileWriteRoots {
+			return validateDeviceFileWriteRoots(value)
+		}
+		if key == model.KeyDeviceFileMaxUploadMB {
+			return validateDeviceFileMaxUploadMB(value)
+		}
 		if key == model.KeyAutoAPMEnabled && value != "true" && value != "false" {
 			return fmt.Errorf("%w: auto_apm_enabled must be true or false", errs.ErrInvalid)
 		}

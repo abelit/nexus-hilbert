@@ -79,7 +79,7 @@ func run() (runErr error) {
 	if err != nil {
 		return err
 	}
-	tunnel, err := bootstrapTunnel(rootCtx, cfg, log, &cleanup, storage, iam, devices, alerts, telemetry)
+	tunnel, err := bootstrapTunnel(rootCtx, cfg, log, &cleanup, storage, iam, devices, alerts, telemetry, settings)
 	if err != nil {
 		return err
 	}

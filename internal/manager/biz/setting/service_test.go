@@ -19,6 +19,8 @@ type fakeRepo struct {
 	rows map[string]*model.Setting
 	// callCount lets tests assert the cache short-circuits subsequent Get.
 	getCalls int
+	// getErr simulates a failed DB read.
+	getErr error
 }
 
 func newFakeRepo() *fakeRepo {
@@ -31,6 +33,9 @@ func (r *fakeRepo) Get(_ context.Context, category, key string) (*model.Setting,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.getCalls++
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
 	row, ok := r.rows[r.key(category, key)]
 	if !ok {
 		return nil, errs.ErrNotFound

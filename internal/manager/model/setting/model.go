@@ -75,6 +75,12 @@ const (
 	KeyNetworkDiscoveryEnabled = "network_discovery_enabled"
 	// KeyAutoAPMEnabled is a legacy setting, retained for API compatibility only.
 	KeyAutoAPMEnabled = "auto_apm_enabled"
+	// KeyDeviceFileWriteRoots is the admin-editable list of device-side paths
+	// the device file manager may write to. Empty means sandbox-only.
+	KeyDeviceFileWriteRoots = "device_file_write_roots"
+	// KeyDeviceFileMaxUploadMB is the global single-file upload cap for the
+	// device file manager, in MiB. Empty/invalid values use the default.
+	KeyDeviceFileMaxUploadMB = "device_file_max_upload_mb"
 )
 
 // Well-known keys under CategoryAgent.

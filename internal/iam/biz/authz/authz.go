@@ -97,6 +97,7 @@ var rolePolicies = [][]string{
 	{iammodel.MembershipRoleMember, "*", "*", "read"},
 	{iammodel.MembershipRoleMember, "*", "*", "write"},
 	{iammodel.MembershipRoleMember, "*", "device:shell", "exec"},
+	{iammodel.MembershipRoleMember, "*", "device:files", "exec"},
 
 	// viewer: read only. No device:shell access — viewers see audit
 	// logs, not live shells.
