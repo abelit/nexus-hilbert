@@ -71,4 +71,44 @@ describe('SkillsPage', () => {
     expect(screen.getByText(/不可在线编辑/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /保存|编辑/ })).not.toBeInTheDocument();
   });
+
+  it('把 CMDB 工具归入 CMDB 分组，不落到其他', async () => {
+    const cmdbSkills = [
+      {
+        key: 'cmdb_search_ci',
+        name: 'cmdb_search_ci',
+        description: '按 CMDB 查询语法搜索配置项。',
+        class: 'safe',
+        scope: 'manager',
+        category: 'cmdb',
+        params: [],
+      },
+      {
+        key: 'cmdb_relation_graph',
+        name: 'cmdb_relation_graph',
+        description: '绘制配置项的关系拓扑图。',
+        class: 'safe',
+        scope: 'manager',
+        category: 'cmdb',
+        params: [],
+      },
+    ];
+    server.use(
+      http.get('/api/v1/skills', () =>
+        HttpResponse.json({ items: cmdbSkills, total: cmdbSkills.length }),
+      ),
+    );
+
+    render(
+      <MemoryRouter>
+        <SkillsPage />
+      </MemoryRouter>,
+    );
+
+    // 分组标题、筛选 chip 都叫 CMDB；没有「其他」分组
+    expect((await screen.findAllByText('CMDB')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('其他')).not.toBeInTheDocument();
+    expect(screen.getAllByText('cmdb_search_ci').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('cmdb_relation_graph').length).toBeGreaterThan(0);
+  });
 });

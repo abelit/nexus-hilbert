@@ -223,7 +223,7 @@ function CatalogTab() {
     });
 
   // The single canonical grouping (shared with the flow palette): built-in
-  // tools → 6 curated skills, MCP → per-server, SKILL.md packs → per-pack.
+  // tools → 8 curated skills, MCP → per-server, SKILL.md packs → per-pack.
   // Keyed by the WIRE name (s.key), not the localized display name.
   const skillKey = useCallback((s: SkillSummary) => toolGroupKey(s.key, s.source, s.category), []);
   const skills = useMemo(() => orderedGroupKeys(items.map(skillKey)), [items, skillKey]);

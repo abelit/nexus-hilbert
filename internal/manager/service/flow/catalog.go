@@ -130,6 +130,8 @@ func categorizeFlowTool(name string) string {
 		return "control"
 	}
 	switch {
+	case strings.HasPrefix(name, "cmdb_"):
+		return "cmdb" // every CMDB tool shares one group, read or write
 	case strings.HasPrefix(name, "mcp__"):
 		return "integration" // MCP server tools (HLD-018)
 	case strings.Contains(name, "k8s"):

@@ -12,7 +12,15 @@ describe('toolSkill grouping', () => {
     expect(groupTitle('other', true)).toBe('其他');
   });
 
-  it('keeps observability before other built-in groups', () => {
-    expect(orderedGroupKeys(['fleet', 'observe', 'other'])).toEqual(['observe', 'fleet', 'other']);
+  it('groups every CMDB tool under cmdb, by prefix or backend category', () => {
+    expect(toolGroupKey('cmdb_search_ci')).toBe('cmdb');
+    expect(toolGroupKey('cmdb_relation_graph')).toBe('cmdb');
+    expect(toolGroupKey('mystery_tool', 'builtin', 'cmdb')).toBe('cmdb');
+    expect(groupTitle('cmdb', true)).toBe('CMDB');
+    expect(groupTitle('cmdb', false)).toBe('CMDB');
+  });
+
+  it('keeps cmdb first and observability before other built-in groups', () => {
+    expect(orderedGroupKeys(['fleet', 'observe', 'cmdb', 'other'])).toEqual(['cmdb', 'observe', 'fleet', 'other']);
   });
 });

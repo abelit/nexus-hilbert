@@ -6,16 +6,17 @@
 // CATEGORY_ORDER concept anymore.
 //
 // A group is one of:
-//   - a curated built-in skill (7 of them), keyed by the tool's WIRE name;
+//   - a curated built-in skill (8 of them), keyed by the tool's WIRE name;
 //   - an MCP server: each server is its own group (tag "mcp");
 //   - a SKILL.md extension pack (category === "skill"): its own group (tag
 //     "ext").
 // Everything maps to a real group. "other" is reserved for cross-cutting write
 // or specialty tools that do not belong to a read-oriented built-in group.
 
-export const SKILL_ORDER = ['observe', 'device', 'fleet', 'incident', 'knowledge', 'messaging', 'cloud', 'other'] as const;
+export const SKILL_ORDER = ['cmdb', 'observe', 'device', 'fleet', 'incident', 'knowledge', 'messaging', 'cloud', 'other'] as const;
 
 const SKILL_LABEL: Record<string, { zh: string; en: string }> = {
+  cmdb: { zh: 'CMDB', en: 'CMDB' },
   observe: { zh: '观测', en: 'Observability' },
   device: { zh: '设备管理', en: 'Devices' },
   fleet: { zh: '集群与拓扑', en: 'Fleet & topology' },
@@ -36,6 +37,10 @@ export function toolGroupKey(wire: string, source?: string, category?: string): 
     return 'mcp:' + server;
   }
   if (category === 'skill') return 'skill:' + wire; // a SKILL.md pack = its own group
+  // Every CMDB tool shares one group, read or write. The backend declares the
+  // category, and the wire prefix keeps the flow palette (which has no
+  // category) in the same group.
+  if (category === 'cmdb' || wire.startsWith('cmdb_')) return 'cmdb';
   if (/^(get_)?host_/.test(wire) || wire.includes('restart_service')) return 'device';
   if (
     /^query_(promql|logql|traceql)$/.test(wire) ||
