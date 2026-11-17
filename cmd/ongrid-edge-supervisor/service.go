@@ -45,6 +45,7 @@ func (h *serviceHandler) Execute(_ []string, req <-chan svc.ChangeRequest, statu
 		edgedirs.StageDir, edgedirs.BinDir,
 		h.log, &windowsProcessController{},
 	)
+	m.SetPluginDir(pluginBinDir())
 	// stage 目录 ACL 运行期门控（fail-closed）：升级 bundle 无签名，完整性
 	// 依赖 StageDir 的 ACL（install 时已收紧）。树级校验（VerifyTreeACL）：
 	// 顶层目录 ACL 正确不代表子项正确——pending / incoming / 哨兵文件的

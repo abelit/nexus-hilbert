@@ -408,6 +408,7 @@ describe("EdgesPage", () => {
         expect(submitted).toEqual({
           edge_ids: [9],
           target_version: "v0.11.1",
+          force_reinstall: false,
         }),
       );
       expect(
@@ -539,9 +540,9 @@ describe("EdgesPage", () => {
 
     expect(within(dialog).getByText(/ongrid-edge-installer\.exe/)).toBeInTheDocument();
     expect(within(dialog).getByText(/--manager-url/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/--access-key ak-windows/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/--secret-key sk-windows/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/--server-edge-addr [^ ]+:40012/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/'--access-key','ak-windows'/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/'--secret-key','sk-windows'/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/'--server-edge-addr','[^']+:40012'/)).toBeInTheDocument();
     expect(within(dialog).getByText(/Windows Server 2008 R2/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/curl/)).not.toBeInTheDocument();
 
@@ -645,14 +646,14 @@ describe("EdgesPage", () => {
 
     expect(within(dialog).getByText(/ongrid-edge-installer\.exe/)).toBeInTheDocument();
     expect(within(dialog).getByText(/--manager-url/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/--enrollment-token oen_windows_token/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/'--enrollment-token','oen_windows_token'/)).toBeInTheDocument();
     expect(within(dialog).getByText(/--tls-insecure/)).toBeInTheDocument();
     expect(within(dialog).getByText(/Windows Server 2008 R2/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/curl/)).not.toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: "复制批量安装命令" }));
     expect(writeText).toHaveBeenCalledWith(
-      expect.stringContaining("--enrollment-token oen_windows_token"),
+      expect.stringContaining("'--enrollment-token','oen_windows_token'"),
     );
     expect(writeText.mock.calls[0][0]).not.toContain("curl");
 
@@ -985,6 +986,69 @@ describe("EdgesPage", () => {
     expect(screen.queryByText("WebSSH 会话")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "批量安装设备" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "新建设备" })).not.toBeInTheDocument();
+  });
+
+  it("Windows 设备的远程桌面入口位于操作菜单，操作列只保留查看图表/终端/操作", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    server.use(
+      http.get("/api/v1/edges", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 70,
+              name: "win-edge",
+              status: "online",
+              roles: [],
+              access_key_id: "ak-win",
+              last_seen_at: "2026-07-01T00:00:00Z",
+              host_info: { hostname: "win2k25", ip_address: "10.0.0.70" },
+              device_id: 42,
+              agent_version: "dev",
+            },
+          ],
+          total: 1,
+        }),
+      ),
+      http.get("/api/v1/devices", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 42,
+              current_edge_id: 70,
+              name: "win2k25",
+              hostname: "win2k25",
+              ip_address: "10.0.0.70",
+              os: "windows",
+              roles: [],
+              online: true,
+              last_seen_at: "2026-07-01T00:00:00Z",
+            },
+          ],
+          total: 1,
+        }),
+      ),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/devices"]}>
+        <EdgesPage />
+      </MemoryRouter>,
+    );
+
+    const row = (await screen.findAllByText("win2k25"))[0].closest("tr") as HTMLTableRowElement;
+    expect(within(row).getByText("查看图表")).toBeInTheDocument();
+    expect(within(row).getByText("终端")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "操作" })).toBeInTheDocument();
+    expect(within(row).queryByText("RDP 桌面")).not.toBeInTheDocument();
+    expect(within(row).queryByText("VNC 桌面")).not.toBeInTheDocument();
+
+    await user.click(within(row).getByRole("button", { name: "操作" }));
+    const rdp = await screen.findByRole("menuitem", { name: "RDP 桌面" });
+    expect(screen.getByRole("menuitem", { name: "VNC 桌面" })).toBeInTheDocument();
+    await user.click(rdp);
+    expect(openSpy).toHaveBeenCalledWith("/devices/42/rdp", "_blank", "noopener,noreferrer");
+    openSpy.mockRestore();
   });
 });
 

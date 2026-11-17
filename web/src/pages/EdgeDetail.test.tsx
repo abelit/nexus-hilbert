@@ -273,4 +273,44 @@ describe('findNearestTooltipEntry', () => {
       payload[0],
     );
   });
+
+  it('Windows 主机按 windows_exporter 指标名查询', async () => {
+    const exprs: string[] = [];
+    const windowsSeries = [
+      { metric: { device_id: '586', core: '0,0' }, values: [[1_785_217_600, '20']] as [number, string][] },
+      { metric: { device_id: '586', core: '0,1' }, values: [[1_785_217_600, '30']] as [number, string][] },
+    ];
+    server.use(
+      http.get('/api/v1/devices/586', () =>
+        HttpResponse.json({
+          id: 586,
+          name: 'win-host',
+          hostname: 'win-host',
+          os: 'windows',
+          online: true,
+        }),
+      ),
+      http.get('/api/v1/metrics/query_range', ({ request }) => {
+        const expr = new URL(request.url).searchParams.get('expr') ?? '';
+        exprs.push(expr);
+        return HttpResponse.json({
+          resolution: '1m',
+          from: '2026-07-28T00:00:00Z',
+          to: '2026-07-28T06:00:00Z',
+          matrix: expr.includes('windows_cpu_time_total') ? windowsSeries : [],
+        });
+      }),
+    );
+
+    renderDeviceMetrics();
+
+    await waitFor(() =>
+      expect(exprs.some((expr) => expr.includes('windows_cpu_time_total'))).toBe(true),
+    );
+    const joined = exprs.join('\n');
+    expect(joined).toContain('windows_logical_disk_size_bytes');
+    expect(joined).toContain('windows_net_bytes_received_total');
+    expect(joined).not.toContain('node_cpu_seconds_total');
+    expect(joined).not.toContain('node_filesystem_size_bytes');
+  });
 });

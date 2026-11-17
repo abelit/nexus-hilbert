@@ -682,7 +682,7 @@ Get-WmiObject Win32_Process | Where-Object { $_.Name -eq 'windows_exporter.exe' 
 - `logs` 的 `health.state` 为 `running`，PID 非 0，对应 `otelcol-contrib.exe`；
 - 没有 `crashed` 或持续增长的 `restart_count`。
 
-**说明**：`hostmetrics` 使用 `windows_exporter`，不是 Linux 的 `node_exporter`。Windows 侧 `collectors_disabled` 会被拒绝，启用时使用 `collectors_enabled` 或 `extra_args`；详见安装指南 §7 和设计文档 §7.4.1。
+**说明**：`hostmetrics` 使用 `windows_exporter`，不是 Linux 的 `node_exporter`。Windows 侧 `collectors_disabled` 会被拒绝，启用时使用 `collectors_enabled` 或 `extra_args`；详见安装指南 §7 和设计文档 §7.4。
 
 **证据**：`plugins-binaries.txt`、`plugins.json`、`plugin-processes.txt`、`ui-plugins-running.png`。
 
@@ -1087,6 +1087,59 @@ Test-Path 'C:\ProgramData\ongrid-edge'
 <PENDING>
 ```
 
+### W-18 PowerShell 只读命令可用且拒绝写操作
+
+**前置**：设备在线，测试账号具备 `device:shell`。
+
+1. 在设备详情“命令”标签页执行 `Get-Service ongrid-edge`，预期返回服务状态。
+2. 执行 `Stop-Service ongrid-edge`，预期被策略拒绝并返回原因。
+3. 执行 `Get-Service ongrid-edge | Select-Object Name,Status`，预期管道输出正常。
+
+```text
+<PENDING>
+```
+
+### W-20 RDP 远程桌面
+
+**前置**：目标机已启用远程桌面，测试账号在 `Remote Desktop Users` 组。
+
+1. 在目标机确认：
+
+   ```powershell
+   (Get-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server').fDenyTSConnections
+   Get-NetTCPConnection -LocalPort 3389 -State Listen
+   ```
+
+   预期第一行为 `0`，3389 处于 `Listen`。
+
+2. 在 UI 中点击 Windows 设备的“RDP 桌面”，输入账号密码，预期看到 Windows 桌面并可操作键盘鼠标。
+3. 测试双向文本剪贴板；打开“文件”面板上传一个文件，确认文件出现在设备 `C:\ProgramData\ongrid-edge\transfer`；点击“下载”确认内容一致；把本地文件拖到桌面区域上传。
+4. 输入错误密码，预期连接失败并显示凭据错误，不进入桌面。
+5. 只读账号访问 `/devices/<id>/rdp`，预期看到权限不足提示。
+
+```text
+<PENDING>
+```
+
+### W-19 VNC 远程桌面
+
+**前置**：目标机已安装 VNC Server（例如 TightVNC），服务运行并监听 `127.0.0.1:5900`。
+
+1. 在目标机确认：
+
+   ```powershell
+   Get-Service tvnserver
+   Get-NetTCPConnection -LocalPort 5900 -State Listen
+   ```
+
+2. 在 UI 中点击 Windows 设备的“远程桌面”，预期新标签页显示桌面；如 VNC 服务设置密码，页面应弹出密码输入框。
+3. 关闭标签页，确认 Manager 日志记录会话结束，且没有把 VNC 密码写入日志。
+4. 只读账号访问 `/devices/<id>/vnc`，预期看到权限不足提示而不是画布。
+
+```text
+<PENDING>
+```
+
 ## 7. 执行后的清理
 
 - 删除测试目录 `C:\Users\Public\ongrid-acceptance`。
@@ -1108,6 +1161,7 @@ Test-Path 'C:\ProgramData\ongrid-edge'
 | W-13 / W-14 | §7 插件可用性 |
 | W-15 / W-16 | §8 升级与回滚 |
 | W-17 | §9 卸载 |
+| W-18 / W-19 / W-20 | §11 远程访问；[远程访问设计](../design/windows-remote-access.md) |
 | W-04 / W-03 | §10 安全声明 |
 
 验收时如安装指南与本清单冲突，以安装指南的操作步骤为准，并在 PR 中记录冲突条款；不要用本清单的局部命令绕过安装指南的安全要求。

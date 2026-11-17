@@ -24,6 +24,7 @@ func TestDestBaseWhitelist_Membership(t *testing.T) {
 	want := []string{
 		WorkerBinaryName, SupervisorBinaryName,
 		"windows_exporter.exe", "promtail.exe", "otelcol-contrib.exe",
+		"mysqld_exporter.exe", "postgres_exporter.exe", "redis_exporter.exe",
 	}
 	if len(destBaseWhitelist) != len(want) {
 		t.Fatalf("白名单成员数 = %d, want %d: %v", len(destBaseWhitelist), len(want), destBaseWhitelist)
@@ -71,7 +72,7 @@ func TestValidateEntry_DestWhitelist(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateDest(binDir, tc.dest)
+			err := validateDest(DestRoots{BinDir: binDir}, tc.dest)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("validateDest(%q) err=%v, wantErr=%v", tc.dest, err, tc.wantErr)
 			}
@@ -93,7 +94,7 @@ func TestValidateEntry_DestSymlinkEscape(t *testing.T) {
 	}
 
 	// 字符串前缀合法（plugins 在 binDir 下），canonical 解析后指向 outside → 必须被拒
-	err := validateDest(binDir, filepath.Join(link, "promtail.exe"))
+	err := validateDest(DestRoots{BinDir: binDir}, filepath.Join(link, "promtail.exe"))
 	if err == nil {
 		t.Errorf("symlink 逃逸必须被拒: dest=%s → %s", filepath.Join(link, "promtail.exe"), outside)
 	}
@@ -111,7 +112,7 @@ func TestValidateEntry_DestSiblingPrefixCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := validateDest(binDir, filepath.Join(evilDir, WorkerBinaryName)); err == nil {
+	if err := validateDest(DestRoots{BinDir: binDir}, filepath.Join(evilDir, WorkerBinaryName)); err == nil {
 		t.Errorf("兄弟目录前缀碰撞必须被拒")
 	}
 }
@@ -332,5 +333,48 @@ func TestDestBase(t *testing.T) {
 		if got := destBase(tc.in); got != tc.want {
 			t.Errorf("destBase(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// TestValidateAllEntriesWithRoots_PluginDir 验证插件载荷只能落到 PluginDir，
+// 主程序只能落到 BinDir；未配置 PluginDir 时插件条目必须被拒绝。
+func TestValidateAllEntriesWithRoots_PluginDir(t *testing.T) {
+	binDir := t.TempDir()
+	pluginDir := t.TempDir()
+	incoming := t.TempDir()
+	writeTestFile(t, filepath.Join(incoming, "ongrid-edge-worker.exe"), "worker")
+	writeTestFile(t, filepath.Join(incoming, "windows_exporter.exe"), "plugin")
+
+	workerEntry := ManifestEntry{
+		SHA256: strings.Repeat("a", 64), Mode: "0755", Src: "ongrid-edge-worker.exe",
+		Dest: filepath.Join(binDir, "ongrid-edge-worker.exe"),
+	}
+	pluginEntry := ManifestEntry{
+		SHA256: strings.Repeat("a", 64), Mode: "0755", Src: "windows_exporter.exe",
+		Dest: filepath.Join(pluginDir, "windows_exporter.exe"),
+	}
+
+	roots := DestRoots{BinDir: binDir, PluginDir: pluginDir}
+	if err := ValidateAllEntriesWithRoots(context.Background(), roots, incoming, []ManifestEntry{workerEntry, pluginEntry}); err != nil {
+		t.Fatalf("valid entries rejected: %v", err)
+	}
+
+	// 插件不能写到 bin。
+	wrongRoot := pluginEntry
+	wrongRoot.Dest = filepath.Join(binDir, "windows_exporter.exe")
+	if err := ValidateAllEntriesWithRoots(context.Background(), roots, incoming, []ManifestEntry{wrongRoot}); err == nil {
+		t.Fatal("plugin entry targeting bin was accepted")
+	}
+
+	// 主程序不能写到 plugins。
+	wrongWorker := workerEntry
+	wrongWorker.Dest = filepath.Join(pluginDir, "ongrid-edge-worker.exe")
+	if err := ValidateAllEntriesWithRoots(context.Background(), roots, incoming, []ManifestEntry{wrongWorker}); err == nil {
+		t.Fatal("worker entry targeting plugins was accepted")
+	}
+
+	// 未配置 PluginDir 时必须拒绝插件条目。
+	if err := ValidateAllEntriesWithRoots(context.Background(), DestRoots{BinDir: binDir}, incoming, []ManifestEntry{pluginEntry}); err == nil {
+		t.Fatal("plugin entry accepted without a plugin root")
 	}
 }

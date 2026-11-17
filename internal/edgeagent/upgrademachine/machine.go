@@ -56,10 +56,11 @@ type ProcessController interface {
 // 持有 stageDir（IPC 文件根）和 binDir（swap 目标目录），
 // 通过注入的 ProcessController 执行平台专属的进程终止。
 type Machine struct {
-	stageDir string
-	binDir   string
-	log      *slog.Logger
-	pc       ProcessController
+	stageDir  string
+	binDir    string
+	pluginDir string
+	log       *slog.Logger
+	pc        ProcessController
 	// selfPathResolver 返回 supervisor 进程实际运行的 .exe 路径。
 	// 生产默认 os.Executable（edgedirs.BinDir 硬编码可能与
 	// 运行路径不一致，如旧 nssm 遗留的 C:\ongrid-edge\ 安装路径）。
@@ -102,6 +103,14 @@ func NewMachine(stageDir, binDir string, log *slog.Logger, pc ProcessController)
 		selfPathResolver:     os.Executable,
 		awaitingHealthMaxAge: DefaultAwaitingHealthMaxAge,
 	}
+}
+
+// SetPluginDir configures the exporter directory for bundle validation.
+// Windows bundles carry plugin .exe files whose Dest lives in
+// <install root>\plugins, a sibling of binDir; without this root the
+// whitelist rejects them.
+func (m *Machine) SetPluginDir(dir string) {
+	m.pluginDir = dir
 }
 
 // resolveSupervisorPath 返回 supervisor.exe 实际运行路径。
@@ -520,7 +529,7 @@ func (m *Machine) Apply(ctx context.Context, workerPID int) error {
 	// 恶意 manifest 的 Dest 既驱动文件写入也驱动 KillByImage，
 	// 校验失败时零磁盘变动、零进程终止（KillTree 是按 PID 杀 worker 树，
 	// 不受 manifest 控制，先于校验执行无旁路面）。
-	if err := ValidateAllEntries(ctx, m.binDir, IncomingDir(m.stageDir), entries); err != nil {
+	if err := ValidateAllEntriesWithRoots(ctx, DestRoots{BinDir: m.binDir, PluginDir: m.pluginDir}, IncomingDir(m.stageDir), entries); err != nil {
 		return fmt.Errorf("validate manifest entries: %w", err)
 	}
 

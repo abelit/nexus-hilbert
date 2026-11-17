@@ -23,8 +23,8 @@ func TestFileBundleResolverCurrentBundlesReportsEachArchitecture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CurrentBundles: %v", err)
 	}
-	if catalog.ManagerVersion != "v1.2.3" || len(catalog.Items) != 2 {
-		t.Fatalf("catalog = %+v, want current version and two architectures", catalog)
+	if catalog.ManagerVersion != "v1.2.3" || len(catalog.Items) != 4 {
+		t.Fatalf("catalog = %+v, want current version and four architectures", catalog)
 	}
 	amd64 := catalog.Items[0]
 	if amd64.Arch != "linux-amd64" || !amd64.Available || amd64.SHA256 != sha || amd64.Bytes != 6 || amd64.ModifiedAt == nil {

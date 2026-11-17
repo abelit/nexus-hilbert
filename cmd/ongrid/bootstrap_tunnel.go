@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	managerbizoperatorrun "github.com/ongridio/ongrid/internal/manager/biz/operatorrun"
+	managerbizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	managerwebshellbiz "github.com/ongridio/ongrid/internal/manager/biz/webshell"
 	manageragenttracedata "github.com/ongridio/ongrid/internal/manager/data/agenttrace"
 	managerapmdata "github.com/ongridio/ongrid/internal/manager/data/apm"
@@ -24,7 +25,7 @@ type tunnelModule struct {
 	webshellHandler *managerwebshellserver.Handler
 }
 
-func bootstrapTunnel(rootCtx context.Context, cfg *config.Config, log *slog.Logger, cleanup *startupCleanup, storage *storageModule, iam *iamModule, devices *devicesModule, alerts *alertsModule, telemetry *telemetryModule) (*tunnelModule, error) {
+func bootstrapTunnel(rootCtx context.Context, cfg *config.Config, log *slog.Logger, cleanup *startupCleanup, storage *storageModule, iam *iamModule, devices *devicesModule, alerts *alertsModule, telemetry *telemetryModule, settings *settingsModule) (*tunnelModule, error) {
 	// Frontierbound service-end SDK: opens a long-lived service connection
 	// to the upstream frontier broker (a separate docker container) and
 	// installs lifecycle callbacks + reverse-call handlers. aiops tools
@@ -123,6 +124,7 @@ func bootstrapTunnel(rootCtx context.Context, cfg *config.Config, log *slog.Logg
 	// runs in the manager; edge is a dumb byte forwarder.
 	webshellHandler := managerwebshellserver.NewHandler(
 		webshellStreamerAdapter{c: fbClient},
+		fbClient,
 		webshellRouter,
 		managerwebshelldata.NewRecorder(webshellAuditRepo),
 		webshellAccess,
@@ -131,6 +133,8 @@ func bootstrapTunnel(rootCtx context.Context, cfg *config.Config, log *slog.Logg
 		log.With(slog.String("comp", "webshell")),
 	)
 	webshellHandler.SetAuthz(iam.authzMW)
+	webshellHandler.SetWriteRoots(managerbizsetting.NewDeviceFileRoots(settings.settingSvc).Roots)
+	webshellHandler.SetMaxUploadBytes(managerbizsetting.NewDeviceFileUploadLimit(settings.settingSvc).LimitBytes)
 
 	return &tunnelModule{
 		fbClient:        fbClient,

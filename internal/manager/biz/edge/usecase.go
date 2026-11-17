@@ -166,10 +166,11 @@ func newEdgeIdentity(name string, createdBy *uint64) (*model.Edge, string, strin
 //   - traces:      otelcol-contrib OTLP receiver on :4318, exporter
 //     points at the manager's /v1/traces (resolved by the
 //     PluginConfigUC's EndpointResolver, so spec stays empty).
-//   - metrics:     in-process scraper polling 127.0.0.1:9100 (the
-//     hostmetrics plugin's node_exporter listen addr).
-//   - hostmetrics: subprocess node_exporter on :9102.
-//   - procmetrics: subprocess process-exporter on :9256.
+//   - metrics:     in-process scraper using the edge's platform defaults
+//     (host exporter on :9102; process_exporter :9256 on Linux only).
+//   - hostmetrics: subprocess node_exporter/windows_exporter on :9102.
+//   - procmetrics: subprocess process-exporter on :9256 (Linux only; the
+//     plugin is not registered on Windows).
 //
 // Specs are "{}" when the plugin's own defaults are enough — both
 // plugin code paths gracefully fill in when SpecJSON is empty.
@@ -185,7 +186,10 @@ func (u *Usecase) seedDefaultPlugins(ctx context.Context, edgeID uint64) {
 	}{
 		{"logs", `{}`},
 		{"traces", `{}`},
-		{"metrics", `{"target":"http://127.0.0.1:9100/metrics"}`},
+		// Empty spec lets the edge apply its platform defaults; the old
+		// {"target":...} key is not understood by the metrics plugin and
+		// hard-coded the Linux-only :9100 port.
+		{"metrics", `{}`},
 		{"hostmetrics", `{}`},
 		{"procmetrics", `{}`},
 	}

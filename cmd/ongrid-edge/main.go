@@ -3,9 +3,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -28,6 +30,8 @@ import (
 
 	edgebiz "github.com/ongridio/ongrid/internal/edgeagent/biz"
 	edgeconfig "github.com/ongridio/ongrid/internal/edgeagent/config"
+	edgefm "github.com/ongridio/ongrid/internal/edgeagent/filemanager"
+	edgefile "github.com/ongridio/ongrid/internal/edgeagent/filetransfer"
 	edgek8s "github.com/ongridio/ongrid/internal/edgeagent/k8s"
 	edgeoperator "github.com/ongridio/ongrid/internal/edgeagent/operator"
 	edgesvc "github.com/ongridio/ongrid/internal/edgeagent/service"
@@ -219,29 +223,28 @@ func run() error {
 	if k8sInfo == nil || edgek8s.IsNode(k8sInfo) {
 		registerEdgeCapabilities(client, log)
 
-		// The interactive operator exec + WebSSH stack is backed by
-		// Linux host tools (bash/PTY). Windows does not advertise it
-		// until a validated parity implementation lands.
+		// Interactive operator exec is Linux-only (PTY). The stream forwarder
+		// itself is platform-neutral: on Windows it carries VNC/RDP to the
+		// loopback ports allowed by internal/edgeagent/webshell.
+		streamHandlers := map[string]edgestreamrouter.Handler{}
 		if supportsWindowsHostTools() {
 			operatorLog := log.With(slog.String("comp", "operator"))
 			edgeoperator.Register(client, operatorLog)
-
-			// WebSSH: edge is a stream port-forwarder. Manager carries the
-			// allowed loopback port in the SSH identification line, then edge
-			// io.Copy's bytes both ways. SSH client
-			// lives entirely on the manager — see internal/manager/server/
-			// webshell. The edge has no SSH lib, no PTY, no session map.
-			webshellLog := log.With(slog.String("comp", "webshell"))
-			edgestreamrouter.Register(client, map[string]edgestreamrouter.Handler{
-				tunnel.StreamKindOperatorExec: func(stream tunnel.StreamConn) {
-					edgeoperator.HandleStream(stream, operatorLog)
-				},
-			}, func(stream tunnel.StreamConn) {
-				edgewebshell.HandleStream(stream, webshellLog)
-			}, log.With(slog.String("comp", "streamrouter")))
+			streamHandlers[tunnel.StreamKindOperatorExec] = func(stream tunnel.StreamConn) {
+				edgeoperator.HandleStream(stream, operatorLog)
+			}
 		} else {
-			log.Info("operator/WebSSH handlers disabled: host toolset unavailable on this platform")
+			log.Info("operator exec disabled: PTY-backed host tools unavailable on this platform")
 		}
+		webshellLog := log.With(slog.String("comp", "webshell"))
+		fileLog := log.With(slog.String("comp", "filetransfer"))
+		fmLog := log.With(slog.String("comp", "filemanager"))
+		// Unknown stream kinds share one fallback. Peek the first control line
+		// to route file-channel streams before the webshell forwarder consumes
+		// the stream; the line is replayed to the selected handler.
+		edgestreamrouter.Register(client, streamHandlers, func(stream tunnel.StreamConn) {
+			dispatchStream(stream, webshellLog, fileLog, fmLog)
+		}, log.With(slog.String("comp", "streamrouter")))
 	} else {
 		log.Info("kubernetes controller: host handlers disabled",
 			slog.String("role", k8sInfo.Role),
@@ -257,6 +260,7 @@ func run() error {
 	if stageDir == "" {
 		stageDir = defaultStageDir()
 	}
+	log.Info("upgrade stage dir resolved", slog.String("path", stageDir))
 	agent := edgebiz.NewAgent(client, collector, edgebiz.Config{
 		MetricsInterval:          cfg.Edge.CollectorInterval,
 		NetworkDiscoveryEnabled:  edgeconfig.EnvBool("ONGRID_NETWORK_DISCOVERY_ENABLED", true),
@@ -364,3 +368,34 @@ func run() error {
 	log.Info("ongrid-edge shutdown complete")
 	return nil
 }
+
+// dispatchStream peeks the first control line and routes file-channel streams
+// before the webshell forwarder consumes the stream. The line is replayed to
+// the selected handler, which parses it as its usual preface.
+func dispatchStream(stream tunnel.StreamConn, webshellLog, fileLog, fmLog *slog.Logger) {
+	br := bufio.NewReaderSize(stream, 8<<10)
+	line, err := br.ReadString('\n')
+	if err != nil {
+		_ = stream.Close()
+		return
+	}
+	replay := &prefacedStream{StreamConn: stream, reader: io.MultiReader(strings.NewReader(line), br)}
+	if strings.HasPrefix(line, edgefile.PrefacePrefix) {
+		edgefile.HandleStream(replay, fileLog)
+		return
+	}
+	if strings.HasPrefix(line, tunnel.FileManagerPreface) {
+		edgefm.HandleStream(replay, fmLog)
+		return
+	}
+	edgewebshell.HandleStream(replay, webshellLog)
+}
+
+// prefacedStream replays the control line already consumed by the fallback
+// dispatcher before reading from the tunnel stream.
+type prefacedStream struct {
+	tunnel.StreamConn
+	reader io.Reader
+}
+
+func (s *prefacedStream) Read(p []byte) (int, error) { return s.reader.Read(p) }

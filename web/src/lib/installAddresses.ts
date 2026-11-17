@@ -140,17 +140,28 @@ export function buildInstallCommands(
       `  --secret-key=${credential.secretKey} \\\n` +
       `  --server-edge-addr=${edgeAddr} \\\n` +
       `  --server-http-addr=${host}`;
-  const windowsArgs = enrollment
-    ? `--enrollment-token ${credential.enrollmentToken} --server-edge-addr ${edgeAddr} --tls-insecure`
-    : `--access-key ${credential.accessKey} --secret-key ${credential.secretKey} --server-edge-addr ${edgeAddr}`;
+  // PowerShell parses `& $f --manager-url ...` as an expression and fails with
+  // "Unexpected token '--manager-url'", so the arguments are passed as an
+  // array. The two try/catch lines cover self-signed Managers on PowerShell
+  // 5.1+; on PowerShell 2.0 the callback property does not exist and the
+  // catch keeps the script running (the cert must then be trusted manually).
+  const windowsCredentialArgs = enrollment
+    ? `'--enrollment-token','${credential.enrollmentToken}'`
+    : `'--access-key','${credential.accessKey}','--secret-key','${credential.secretKey}'`;
   const windowsDisplay =
+    `try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}\n` +
+    `try { [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true } } catch {}\n` +
     `$u='${baseUrl}/edge/windows/ongrid-edge-installer.exe'\n` +
     `$f="$env:TEMP\\ongrid-edge-installer.exe"\n` +
     `(New-Object Net.WebClient).DownloadFile($u,$f)\n` +
-    `& $f --manager-url ${baseUrl} ${windowsArgs}`;
+    `$a=@('--manager-url','${baseUrl}',${windowsCredentialArgs},'--server-edge-addr','${edgeAddr}','--tls-insecure')\n` +
+    `& $f @a`;
   return {
     linux: { command: linuxCommand, display: linuxDisplay },
-    windows: { command: windowsDisplay, display: windowsDisplay },
+    windows: {
+      command: windowsDisplay.replace(/\n/g, '; '),
+      display: windowsDisplay,
+    },
   };
 }
 

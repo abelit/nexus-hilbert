@@ -178,6 +178,8 @@ func TestMachine_Apply_FullOrdering(t *testing.T) {
 	})
 
 	m := NewMachine(stageDir, destDir, testLogger(), nil)
+	// Flat fixture: both binaries and plugins live in destDir.
+	m.SetPluginDir(destDir)
 	if err := m.Apply(context.Background(), 0); err != nil {
 		t.Fatalf("Machine.Apply: %v", err)
 	}

@@ -216,7 +216,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	//    canonical edge_id. The agent doesn't inspect RPC error patterns
 	//    — that's the tunnel's job.
 	a.client.OnReconnect(func() {
-		rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		rctx, cancel := context.WithTimeout(ctx, registerEdgeCallTimeout)
 		defer cancel()
 		if err := a.registerEdge(rctx); err != nil {
 			a.log.Warn("agent: re-register after tunnel reconnect failed",
@@ -237,7 +237,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	// 4. register_edge.
-	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	rctx, cancel := context.WithTimeout(ctx, registerEdgeCallTimeout)
 	err := a.registerEdge(rctx)
 	cancel()
 	if err != nil {
@@ -345,6 +345,13 @@ func (a *Agent) networkDiscoveryLoop(ctx context.Context, discovery NetworkDisco
 // it back to nil so systemd treats the exit as clean and restarts.
 var errUpgradeRequested = errors.New("upgrade requested")
 
+// registerEdgeCallTimeout bounds one register_edge RPC. It is deliberately
+// generous: the Manager persists the registration before replying, and a
+// reconnect can race the previous session's cleanup. A 10s budget caused
+// repeated client-side deadline errors while the Manager had already
+// committed the registration, leaving the upgrade health marker unwritten.
+const registerEdgeCallTimeout = 60 * time.Second
+
 // writeHealthMarker drops <stage>/healthy_marker with the agent version
 // after a successful register_edge. apply-pending-upgrade.sh reads it
 // on the next boot — if it matches last_upgrade_ver the upgrade is
@@ -354,19 +361,27 @@ var errUpgradeRequested = errors.New("upgrade requested")
 func (a *Agent) writeHealthMarker() {
 	dir := strings.TrimSpace(a.cfg.UpgradeStageDir)
 	if dir == "" {
+		// Upgrade health confirmation depends on this marker. Never fail
+		// silently: an empty stage dir would otherwise look like a healthy
+		// boot until the supervisor rolls the upgrade back.
+		a.log.Warn("health marker skipped: upgrade stage dir is not configured")
 		return
 	}
 	ver := strings.TrimSpace(a.cfg.AgentVersion)
 	if ver == "" {
+		a.log.Warn("health marker skipped: agent version is empty",
+			slog.String("dir", dir))
 		return
 	}
 	path := filepath.Join(dir, "healthy_marker")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		a.log.Debug("health marker: mkdir stage", slog.Any("err", err))
+		a.log.Warn("health marker: mkdir stage failed",
+			slog.String("dir", dir), slog.Any("err", err))
 		return
 	}
 	if err := os.WriteFile(path, []byte(ver+"\n"), 0o640); err != nil {
-		a.log.Debug("health marker: write", slog.Any("err", err))
+		a.log.Warn("health marker: write failed",
+			slog.String("path", path), slog.Any("err", err))
 		return
 	}
 	a.log.Info("health marker written", slog.String("path", path), slog.String("version", ver))
@@ -570,7 +585,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 			return nil
 		case <-t.C:
 			if a.EdgeID() == 0 {
-				rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				rctx, cancel := context.WithTimeout(ctx, registerEdgeCallTimeout)
 				err := a.registerEdge(rctx)
 				cancel()
 				if err != nil {

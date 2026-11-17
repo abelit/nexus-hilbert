@@ -199,6 +199,9 @@ func (o *installOptions) envPairs() []string {
 		"ONGRID_EDGE_PLUGIN_WORK_DIR=" + o.PluginWorkDir,
 		// secrets.enc 路径（让 worker main.go 知道从哪加载 DPAPI token）
 		"ONGRID_EDGE_SECRETS_FILE=" + filepath.Join(edgedirs.DataDir, secretsFileName),
+		// 升级暂存/健康标记根目录。显式写入避免 worker 依赖编译期默认值；
+		// 缺失时 writeHealthMarker 会跳过，升级会被 supervisor 回滚。
+		"ONGRID_EDGE_UPGRADE_STAGE_DIR=" + edgedirs.StageDir,
 		// scrape.yaml 路径（worker metrics plugin 加载自定义 scrape targets；
 		// 缺失会让 worker 用 embedded baseline 只 scrape windows_exporter）
 		"ONGRID_EDGE_SCRAPE_CONFIG_FILE=" + o.ScrapeConfigFile,

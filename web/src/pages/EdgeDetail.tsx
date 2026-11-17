@@ -25,6 +25,9 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   ExternalLink,
+  MonitorPlay,
+  MonitorDot,
+  FolderOpen,
   ChevronDown,
   ChevronRight,
   Save,
@@ -38,6 +41,7 @@ import { Modal } from '@/components/Modal';
 import { Button } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { openMetricDrilldown } from '@/lib/drilldown';
+import { hostMetricQueries, hostOSFromEdge, isWindowsHost } from '@/lib/hostMetrics';
 import { relativeTime } from '@/lib/format';
 import { usePoll } from '@/lib/usePoll';
 import {
@@ -64,10 +68,11 @@ import {
   type NetworkInterface,
 } from '@/api/devices';
 import { usePermissions } from '@/store/me';
+import { runPowershell, type PowershellExecResult } from '@/api/devices';
 import { NodeNeighbors } from '@/components/topology/NodeNeighbors';
 import { tr as trInline, useI18n } from '@/i18n/locale';
 
-type Tab = 'metrics' | 'host' | 'plugins' | 'topology' | 'meta';
+type Tab = 'metrics' | 'host' | 'plugins' | 'topology' | 'command' | 'meta';
 type NetworkTab = 'overview' | 'interfaces' | 'topology' | 'meta';
 
 // Window + step align with the backend handler's 30s timeout ceiling. 6h /
@@ -151,6 +156,8 @@ export default function EdgeDetailPage() {
 
   const [device, setDevice] = useState<Device | null>(null);
   const [edge, setEdge] = useState<Edge | null>(null);
+  const hostOS = hostOSFromEdge(device?.os, edge?.host_info as Record<string, unknown> | null | undefined);
+  const windowsHost = isWindowsHost(hostOS);
   const [edgeErr, setEdgeErr] = useState<string | null>(null);
   const [networkDetail, setNetworkDetail] = useState<NetworkDeviceDetail | null>(null);
   const [networkDetailErr, setNetworkDetailErr] = useState<string | null>(null);
@@ -270,36 +277,13 @@ export default function EdgeDetailPage() {
     const from = new Date(to.getTime() - RANGE_MS);
     const fromIso = from.toISOString();
     const toIso = to.toISOString();
-    // Scope by host device_id only. Source labels describe transport, not
-    // resource identity, and can temporarily coexist during an upgrade.
-    // Panel PromQL collapses transport-only dimensions where necessary.
-    const labelSel = `device_id="${deviceID}"`;
-
-    const exprs: Record<PanelKey, { expr: string; nameLabel: string }> = {
-      cpu: {
-        // Keep one line per CPU core while collapsing scrape/source labels.
-        // During collector upgrades both transports can exist in the query
-        // range even though only one is still producing fresh samples.
-        expr: `100 * (1 - avg by (device_id, cpu) (rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m])))`,
-        nameLabel: 'cpu',
-      },
-      disk: {
-        // A physical filesystem can be bind-mounted at many paths (notably
-        // on container hosts). Collapse mountpoint and source dimensions so
-        // each physical device contributes one worst-case utilization line.
-        expr: `100 * max by (device_id, device) ((node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"}) / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
-        nameLabel: 'device',
-      },
-      netRx: {
-        expr: `max by (device_id, device) (rate(node_network_receive_bytes_total{${labelSel}}[5m]))`,
-        nameLabel: 'device',
-      },
-      netTx: {
-        expr: `max by (device_id, device) (rate(node_network_transmit_bytes_total{${labelSel}}[5m]))`,
-        nameLabel: 'device',
-      },
-    };
-
+    // Scope by host device_id only (see hostMetricQueries); source labels
+    // describe transport, not resource identity.
+    const hostOS = hostOSFromEdge(
+      device?.os,
+      edge?.host_info as Record<string, unknown> | null | undefined,
+    );
+    const exprs = hostMetricQueries(isWindowsHost(hostOS), deviceID);
     try {
       const results = await Promise.all(
         (Object.keys(exprs) as PanelKey[]).map(async (k) => {
@@ -320,7 +304,7 @@ export default function EdgeDetailPage() {
     } catch (err) {
       setMetricsErr((err as Error).message || tr('加载指标失败', 'Failed to load metrics'));
     }
-  }, [device?.id, edge?.device_id, isNetworkDevice]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [device?.id, device?.os, edge?.device_id, edge?.host_info, isNetworkDevice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (isNetworkDevice || (!device?.id && !edge?.device_id)) return;
@@ -331,14 +315,18 @@ export default function EdgeDetailPage() {
   const promExprs = useMemo(() => {
     const deviceID = device?.id ?? edge?.device_id;
     if (!deviceID) return null;
-    const labelSel = `device_id="${deviceID}"`;
+    const hostOS = hostOSFromEdge(
+      device?.os,
+      edge?.host_info as Record<string, unknown> | null | undefined,
+    );
+    const queries = hostMetricQueries(isWindowsHost(hostOS), deviceID);
     return {
-      cpu: `100 * (1 - avg by (device_id, cpu) (rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m])))`,
-      disk: `100 * max by (device_id, device) ((node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"}) / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
-      netRx: `max by (device_id, device) (rate(node_network_receive_bytes_total{${labelSel}}[5m]))`,
-      netTx: `max by (device_id, device) (rate(node_network_transmit_bytes_total{${labelSel}}[5m]))`,
+      cpu: queries.cpu.expr,
+      disk: queries.disk.expr,
+      netRx: queries.netRx.expr,
+      netTx: queries.netTx.expr,
     };
-  }, [device?.id, edge?.device_id]);
+  }, [device?.id, device?.os, edge?.device_id, edge?.host_info]);
 
   const openDrilldown = useCallback(
     async (expr: string, title: string) => {
@@ -427,6 +415,7 @@ export default function EdgeDetailPage() {
           <TabsTrigger value={'host'}>{tr('主机信息', 'Host info')}</TabsTrigger>
           <TabsTrigger value={'plugins'}>{tr('插件', 'Plugins')}</TabsTrigger>
           <TabsTrigger value={'topology'}>{tr('拓扑', 'Topology')}</TabsTrigger>
+          {windowsHost && <TabsTrigger value={'command'}>{tr('命令执行', 'Command')}</TabsTrigger>}
           <TabsTrigger value={'meta'}>{tr('元数据', 'Metadata')}</TabsTrigger>
         </TabsList>
 
@@ -512,6 +501,58 @@ export default function EdgeDetailPage() {
                     : undefined
                 }
               />
+            </div>
+          )}
+
+          {tab === 'command' && windowsHost && (
+            <div className="space-y-4">
+              <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-zinc-100">{tr('远程桌面 (VNC)', 'Remote desktop (VNC)')}</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {tr(
+                      '通过设备本机 5900 端口打开 Windows 桌面；需要先在该设备安装并启动 VNC 服务。',
+                      'Open the Windows desktop through the device loopback port 5900. A VNC server must be installed and running on the host.',
+                    )}
+                  </p>
+                </div>
+                {isAdmin && (device?.id ?? edge?.device_id) ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href={`/devices/${encodeURIComponent(String(device?.id ?? edge?.device_id))}/rdp`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-zinc-200 hover:bg-zinc-800"
+                    >
+                      <MonitorDot size={14} />
+                      {tr('RDP 桌面', 'RDP desktop')}
+                    </a>
+                    <a
+                      href={`/devices/${encodeURIComponent(String(device?.id ?? edge?.device_id))}/files`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-zinc-200 hover:bg-zinc-800"
+                    >
+                      <FolderOpen size={14} />
+                      {tr('文件管理', 'File manager')}
+                    </a>
+                    <a
+                      href={`/devices/${encodeURIComponent(String(device?.id ?? edge?.device_id))}/vnc`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-zinc-200 hover:bg-zinc-800"
+                    >
+                      <MonitorPlay size={14} />
+                      {tr('VNC 桌面', 'VNC desktop')}
+                    </a>
+                  </div>
+                ) : (
+                  <span className="text-xs text-zinc-600">
+                    {tr('只读账号不可用', 'Unavailable for viewer accounts')}
+                  </span>
+                )}
+              </Card>
+              <PowershellPanel deviceId={device?.id ?? edge?.device_id ?? undefined} canMutate={isAdmin} />
             </div>
           )}
 
@@ -4346,5 +4387,70 @@ function TracesSpecForm({
         </div>
       </div>
     </div>
+  );
+}
+
+function PowershellPanel({ deviceId, canMutate }: { deviceId?: number; canMutate: boolean }) {
+  const { tr } = useI18n();
+  const [command, setCommand] = useState('');
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<PowershellExecResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    if (!deviceId || !command.trim() || running) return;
+    setRunning(true);
+    setError(null);
+    try {
+      setResult(await runPowershell(deviceId, command.trim()));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <Card className="p-4">
+      <div className="mb-2 text-sm font-medium text-zinc-100">{tr('PowerShell 命令执行', 'PowerShell command')}</div>
+      <p className="mb-3 text-xs leading-relaxed text-zinc-500">
+        {tr(
+          '仅允许只读 cmdlet（Get- / Test- / Select- 等），写操作与脚本块会被拒绝；输出上限 64KB。',
+          'Read-only cmdlets only (Get-, Test-, Select-, …). Mutations and script blocks are rejected; output is capped at 64KB.',
+        )}
+      </p>
+      <Label htmlFor="powershell-command">{tr('命令', 'Command')}</Label>
+      <Textarea
+        id="powershell-command"
+        rows={4}
+        spellCheck={false}
+        placeholder={tr('Get-Service ongrid-edge', 'Get-Service ongrid-edge')}
+        value={command}
+        onChange={(event) => setCommand(event.target.value)}
+      />
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button
+          type="button"
+          variant="primary"
+          disabled={!canMutate || running || !command.trim()}
+          onClick={() => void run()}
+        >
+          {running ? tr('执行中…', 'Running…') : tr('执行', 'Run')}
+        </Button>
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </div>
+      {result && (
+        <div className="mt-3">
+          {result.allowed ? (
+            <div className="text-[11px] text-zinc-500">exit={result.exit_code} · {result.duration_ms}ms</div>
+          ) : (
+            <div className="text-xs text-amber-300">{tr('命令被拒绝：', 'Rejected: ')}{result.reason}</div>
+          )}
+          <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-200">
+            {result.output}
+          </pre>
+        </div>
+      )}
+    </Card>
   );
 }

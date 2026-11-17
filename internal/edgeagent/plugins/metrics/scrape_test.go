@@ -479,3 +479,21 @@ func TestDuplicateMetricsURLsAreScrapedOnce(t *testing.T) {
 		t.Fatalf("targets=%v err=%v", spec.URLs, err)
 	}
 }
+
+func TestPlatformDefaultURLs(t *testing.T) {
+	t.Parallel()
+
+	windows := platformDefaultURLs("windows")
+	if len(windows) != 1 || windows[0] != "http://127.0.0.1:9102/metrics" {
+		t.Fatalf("windows defaults = %v, want only the host exporter on :9102", windows)
+	}
+
+	for _, goos := range []string{"linux", "darwin"} {
+		urls := platformDefaultURLs(goos)
+		if len(urls) != 2 ||
+			urls[0] != "http://127.0.0.1:9102/metrics" ||
+			urls[1] != "http://127.0.0.1:9256/metrics" {
+			t.Fatalf("%s defaults = %v, want host+process exporters", goos, urls)
+		}
+	}
+}

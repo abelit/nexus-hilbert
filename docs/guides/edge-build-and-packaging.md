@@ -163,6 +163,89 @@ curl -sSI https://cnb.cool/ongridio/ongrid-edge/-/releases/download/v0.20.0/ongr
 - Windows legacy：`ongrid-edge-legacy-windows-amd64-<VERSION>-{supervisor,worker}.exe`
 - Linux 依赖：`edge-deps-linux-<arch>.tar.xz`，挂在不可变 `EDGE_DEPS_TAG` 下（由各上游版本拼成）
 
+#### 改用本地 / 自建发布源
+
+可以。发布源是**数据**，不是编译期常量：只要保持 `<base>/<tag>/<asset>` + `<asset>.sha256` 的布局，Manager 就能从任意 HTTP(S) 服务器取件。
+
+**1. 布局要求**
+
+```
+<base>/
+├── <VERSION>/                      # 版本化附件
+│   ├── ongrid-edge-linux-amd64-v0.20.0
+│   ├── ongrid-edge-linux-amd64-v0.20.0.sha256
+│   ├── ongrid-edge-windows-amd64-v0.20.0-supervisor.exe(+.sha256)
+│   └── ...
+└── <EDGE_DEPS_TAG>/                # 不可变依赖归档
+    ├── edge-deps-linux-amd64.tar.xz
+    └── edge-deps-linux-amd64.tar.xz.sha256
+```
+
+`.sha256` 必须是 `hash  filename` 格式（`sha256sum` 输出），缺一个文件校验就会失败。
+
+**2. 把附件放到自建服务器**
+
+```bash
+VERSION=$(cat VERSION)
+DEPS_TAG=$(make --no-print-directory edge-deps-tag)
+OUT=dist/edge-attachments      # 即 Makefile 的 EDGE_ATTACHMENTS_OUT
+
+# 版本化附件 → <base>/<VERSION>/
+rsync -a --include='ongrid-edge-*' --exclude='*' \
+  "$OUT/" "mirror:/srv/ongrid-edge-releases/$VERSION/"
+
+# 依赖归档 → <base>/<EDGE_DEPS_TAG>/
+rsync -a --include='edge-deps-*' --exclude='*' \
+  "$OUT/" "mirror:/srv/ongrid-edge-releases/$DEPS_TAG/"
+```
+
+用 nginx 暴露（只读、目录可浏览或直接按文件名访问均可）：
+
+```nginx
+location /ongrid-edge-releases/ {
+    alias /srv/ongrid-edge-releases/;
+    autoindex off;
+}
+```
+
+**3. Manager 取件改指向自建源**
+
+```bash
+ONGRID_EDGE_ARTIFACT_BASE_URL=https://mirror.example.com/ongrid-edge-releases \
+ONGRID_EDGE_DEPS_TAG=$(make --no-print-directory edge-deps-tag) \
+  deploy/install/edge/fetch-edge-assets.sh /opt/ongrid/edge "$(cat VERSION)" \
+  linux-amd64 linux-arm64 windows-amd64
+```
+
+`fetch-edge-assets.sh` 不强制 https，内网可用 `http://`；但**节点侧 `install.sh` 仍然只拼 `https://`**，所以节点访问的 Manager `/edge/` 必须是 HTTPS。
+
+**4. 校验也指向自建源**
+
+```bash
+make verify-edge-version-release \
+  CNB_RELEASE_BASE_URL=https://mirror.example.com/ongrid-edge-releases
+make verify-edge-deps-release \
+  CNB_RELEASE_BASE_URL=https://mirror.example.com/ongrid-edge-releases
+```
+
+`verify-cnb-release-attachments.sh` 只依赖 base URL + tag + 文件名，不调用 CNB API。
+
+**5. 不使用任何发布服务器**
+
+把文件与 `.sha256` 直接预置到下载缓存，`fetch-edge-assets.sh` 会命中缓存、完全不联网：
+
+```
+/var/cache/ongrid/edge-artifacts/<tag>/<asset>(+ .sha256)
+```
+
+也可用 `ONGRID_EDGE_ARTIFACT_CACHE_DIR` 指向自定义缓存目录。
+
+**注意**
+
+- `make publish-*`、`ensure-cnb-release.sh`、`publish-cnb-release-attachments.sh` 是 CNB 专用，自建源不需要它们；不可变性和访问控制由自建服务器负责。
+- 自建源同样要保证 tag 的不可变性：依赖归档 `EDGE_DEPS_TAG` 一旦发布不要覆盖，版本升级请换新 tag。
+- Windows 安装器从 Manager 的 `/edge/windows/` 下载，与发布源无关；只要 Manager 的 `windows/` 目录完整即可。
+
 ### 6.2 Manager 目录 `/opt/ongrid/edge`（推荐走 install/upgrade）
 
 `deploy/install/install.sh` 与 `deploy/install/upgrade.sh` 会调用 `fetch-edge-assets.sh` 下载校验、生成 bundle、保留 Windows 目录，并**原子替换** `/opt/ongrid/edge`。
@@ -333,6 +416,151 @@ bash deploy/install/edge/build-edge-bundle.sh <dir> "$VERSION" linux-amd64
 ```
 
 把 bundle 和 `install-edge.sh` 拷到目标机，解压后 `sudo ./install-edge.sh`；它会从同目录读取 `ongrid-edge-<os>-<arch>`、`<component>-<os>-<arch>`。
+
+### 6.5 `install.sh` 一行命令解析
+
+以这条命令为例：
+
+```bash
+curl -k -sSL https://localhost/install.sh | bash -s -- \
+  --access-key=<ACCESS_KEY> \
+  --secret-key=<SECRET_KEY> \
+  --server-edge-addr=localhost:40012 \
+  --server-http-addr=localhost
+```
+
+#### 命令结构
+
+| 片段 | 含义 |
+| --- | --- |
+| `curl -k` | 跳过 TLS 证书校验（自签证书场景） |
+| `-sS` | 静默进度，但保留错误输出 |
+| `-L` | 跟随 30x 重定向 |
+| `https://<manager>/install.sh` | 由 Manager nginx 的 `location = /install.sh` 直接别名到 `<edge 目录>/install.sh`，公开、无鉴权、`no-store` |
+| `\| bash -s` | `bash` 从标准输入读取脚本；`-s` 表示脚本来自 stdin |
+| `--` | 结束 bash 自身参数，后面的内容原样成为脚本的 `$1..$n` |
+| `--access-key/--secret-key` | 单设备凭据，二者必须同时提供；不能与 `--enrollment-token` 混用 |
+| `--server-edge-addr` | Frontier 隧道地址，写入 `ONGRID_EDGE_CLOUD_ADDR`，端口通常是 `40012` |
+| `--server-http-addr` | Manager 前端地址，脚本用它拼 `https://<addr>/edge/...` 下载制品；协议固定为 https |
+
+#### 脚本执行步骤
+
+1. **提权**：非 root 时用 `sudo -E` 重新执行（保留环境变量）。
+2. **参数校验**：必须有 access+secret 或 enrollment token；两个地址必填。
+3. **识别平台**：`uname`，只支持 `linux/amd64`、`linux/arm64`。
+4. **下载主程序**：`https://<server-http-addr>/edge/ongrid-edge-linux-<arch>` 到临时文件，校验非空；失败即退出。
+5. **（token 模式才执行）enrollment**：用刚下载的二进制执行 `ongrid-edge enroll`，换取每台设备独立凭据并写入临时 env；随后卸载 token。
+6. **停止旧服务**：如果 `ongrid-edge` 正在运行，先 `systemctl stop`，保证替换确定性。
+7. **安装主程序**：`install -m 0755 -o root -g root` 到 `/usr/local/bin/ongrid-edge`。
+8. **安装升级钩子**：下载 `/edge/apply-pending-upgrade.sh` 到 `/usr/local/lib/ongrid-edge/`；失败只告警（远程整包升级不可用）。
+9. **下载插件**（逐个 best-effort）：`obi`、`obi.NOTICES`、`node_exporter`、`process_exporter`、`otelcol-contrib`、`mysqld_exporter`、`postgres_exporter`、`redis_exporter`、`mongodb_exporter`，落盘到 `/usr/local/lib/ongrid-edge/<name>`；某个失败只影响对应插件。
+10. **建目录**：`/var/log/ongrid-edge`（0750）、`/etc/ongrid-edge`（0750）、`/var/lib/ongrid-edge`（0755），均为 root:root。
+11. **写环境变量**：`/etc/ongrid-edge/ongrid-edge.env`（0640 root:root），内容为
+    `ONGRID_EDGE_CLOUD_ADDR`、`ONGRID_EDGE_ACCESS_KEY`、`ONGRID_EDGE_SECRET_KEY`（以及可选的 metrics 地址）。
+12. **写 systemd 单元**：
+    - `ongrid-edge-upgrade.service`：oneshot，`Before=ongrid-edge.service`，负责启动前应用升级包；
+    - `ongrid-edge.service`：`EnvironmentFile=`、`ExecStart=/usr/local/bin/ongrid-edge`、`Restart=always`、`StateDirectory=ongrid-edge`、日志进 journald。
+13. **启动**：`daemon-reload` → `enable` → `restart`。
+14. **后置验证**：轮询 journal 最多 20 秒（`ONGRID_INSTALL_WAIT` 可调），等待 `registered with cloud`；若服务未激活或出现 `unauthorized` 则报告失败。
+
+#### 落盘结果
+
+| 内容 | 路径 |
+| --- | --- |
+| 主程序 | `/usr/local/bin/ongrid-edge` |
+| 插件与升级钩子 | `/usr/local/lib/ongrid-edge/` |
+| 凭据/配置 | `/etc/ongrid-edge/ongrid-edge.env`（明文，0640） |
+| 状态与升级暂存 | `/var/lib/ongrid-edge/` |
+| 日志 | journald + `/var/log/ongrid-edge/` |
+| 服务 | `/etc/systemd/system/ongrid-edge{,-upgrade}.service` |
+
+#### 注意事项
+
+- **`localhost` 只适用于在 Manager 主机本机安装**。装到其他机器时，`--server-http-addr` 必须是可以访问 Manager 的地址，否则第 4 步下载会失败；`--server-edge-addr` 同理应指向 Frontier 的可达地址。
+- **凭据以 argv 传入**：运行期间会出现在 shell history 和进程列表中；批量场景优先用 `--enrollment-token`。
+- **`-k` 关闭证书校验**：生产环境应换成受信任证书并去掉 `-k` 与 `--tls-insecure`。
+- **幂等**：重复执行会覆盖 env、重启服务；已运行的主机会先停服务再替换二进制。
+- **插件是 best-effort**：安装成功不代表所有插件可用，需检查 `/usr/local/lib/ongrid-edge/` 是否齐全，或看 install.sh 输出的 `plugin binary MISSING`。
+- **HTML 404 的典型症状**：如果 `/install.sh` 路由失效（如 nginx bind mount 失效），`curl | bash` 会尝试执行 HTML，报 `html: No such file or directory` / `syntax error near '<'`。先 `curl -kI` 确认返回 200 再执行。
+
+### 6.6 Windows 一行安装（PowerShell）解析
+
+页面生成的就是下面这一形态（地址取自当前浏览器或“Edge 安装地址”设置）：
+
+```powershell
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+try { [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true } } catch {}
+$u='https://<manager>/edge/windows/ongrid-edge-installer.exe'
+$f="$env:TEMP\ongrid-edge-installer.exe"
+(New-Object Net.WebClient).DownloadFile($u,$f)
+$a=@('--manager-url','https://<manager>','--access-key','<ACCESS_KEY>','--secret-key','<SECRET_KEY>','--server-edge-addr','<manager>:40012','--tls-insecure')
+& $f @a
+```
+
+两行 `try/catch` 处理自签证书：PowerShell 5.1+ 会关闭校验；PowerShell 2.0（Server 2008 R2）没有该回调属性，`catch` 会吞掉错误，此时必须先把 Manager 证书导入受信任存储。
+
+#### 逐行说明
+
+| 语句 | 作用 |
+| --- | --- |
+| `$u='https://<manager>/edge/windows/ongrid-edge-installer.exe'` | 安装器地址；对应 Manager 的 `/edge/windows/` 只读路由，扁平目录，无鉴权 |
+| `$f="$env:TEMP\ongrid-edge-installer.exe"` | 下载到当前用户临时目录 |
+| `(New-Object Net.WebClient).DownloadFile($u,$f)` | 同步下载；**PowerShell 2.0 兼容**（Server 2008 R2 默认只有 PS 2.0，没有 `Invoke-WebRequest`） |
+| `& $f @a` | 以调用运算符执行安装器；参数放在 `$a` 数组里，避免 `--` 被解析成运算符 |
+| `--manager-url https://<manager>` | 安装器用它拉 `manifest.json`、各制品，以及 token 模式下的 enrollment |
+| `--access-key/--secret-key` | 单设备凭据；必须成对，不能与 `--enrollment-token` 混用 |
+| `--server-edge-addr <host>:40012` | Frontier 隧道地址，写入服务的 `ONGRID_EDGE_CLOUD_ADDR` |
+| 未传 `--variant` | 默认 `auto`：`10.0 build >= 14393` → `windows-amd64`，`6.1 build >= 7601` → `legacy-windows-amd64` |
+
+#### 安装器执行步骤
+
+1. **解析并校验参数**：`--manager-url` 与 `--server-edge-addr` 必填；URL 只允许 http（仅回环）/https。
+2. **拉取清单**：`GET <manager-url>/edge/windows/manifest.json`。
+3. **选择变体**：按 `RtlGetVersion` 得到的 NT 版本，或显式 `--variant modern|legacy`。
+4. **校验并下载**：按 manifest 的 `path` 逐个下载到 `C:\ProgramData\ongrid-edge\download-*`，逐个校验 SHA-256（失败即删除并中止）。
+5. **加固目录**：安装根、插件目录、数据目录、升级暂存目录先收紧 ACL（SYSTEM + Administrators，禁止继承），再落文件。
+6. **准备凭据**：无 token 时直接用 CLI 凭据；有 token 时先调 `/internal/edge/enroll` 换取每设备凭据。
+7. **停止旧服务**：重装时先停 `ongrid-edge`，避免文件锁。
+8. **落盘**：按 manifest 的 `dest` + `install_as` 写入 `bin\`、`plugins\`（例如 `ongrid-edge-supervisor-windows-amd64.exe` → `bin\ongrid-edge-supervisor.exe`）。
+9. **调用 supervisor**：把凭据写入 ACL 受限的临时 JSON，执行 `supervisor.exe --install --config-file <json>`。
+10. **服务安装**：supervisor 用 DPAPI 加密 secret 到 `secrets.enc`，`sc.exe create` 服务（LocalSystem、auto），写环境变量、配置恢复策略与 Defender 排除，启动服务。
+11. **删除临时配置**：含明文 secret 的 JSON 在成功或失败后都会删除。
+12. **等待就绪**：轮询 `C:\ProgramData\ongrid-edge\health.json`，超时或失败返回非零退出码。
+
+#### 落盘结果
+
+| 内容 | 路径 |
+| --- | --- |
+| 主程序 | `C:\Program Files\ongrid-edge\bin\` |
+| 插件 | `C:\Program Files\ongrid-edge\plugins\` |
+| 凭据 | `C:\ProgramData\ongrid-edge\secrets.enc`（DPAPI）+ 服务 `Environment` |
+| 状态/日志 | `C:\ProgramData\ongrid-edge\{health.json,supervisor.log,worker-*.log,upgrade\}` |
+| 服务 | `ongrid-edge`（LocalSystem，auto start） |
+
+#### PowerShell 参数解析注意
+
+`& $f --manager-url ...` 在部分 PowerShell / ISE 会话里会把 `--` 当成运算符，报 `Unexpected token '--manager-url' in expression or statement`。改用参数数组 splatting 可稳定传递：
+
+```powershell
+$installArgs = @(
+  '--manager-url', 'https://<manager>',
+  '--access-key', '<ACCESS_KEY>',
+  '--secret-key', '<SECRET_KEY>',
+  '--server-edge-addr', '<manager>:40012',
+  '--tls-insecure'
+)
+& $f @installArgs
+```
+
+#### 注意事项
+
+- **必须以管理员身份运行 PowerShell**：安装器要写 Program Files、操作 SCM；没有提权预检，权限不足会在落盘/`sc.exe` 阶段失败。
+- **`localhost` 只适用于 Manager 本机安装**；装到其他 Windows 主机时改成 Manager 的可达地址。
+- **自签证书是最大坑**：`WebClient` 下载发生在 `--tls-insecure` 生效之前，因此该参数**救不了下载阶段**。自签 Manager 需要把证书导入目标机受信任存储，或先设置 TLS 1.2 并信任证书；否则会报 `Could not create SSL/TLS secure channel`。
+- **2008 R2 额外前置**：启用 TLS 1.2（`[Net.ServicePointManager]::SecurityProtocol` 或注册表/Schannel 配置），并安装 SHA-2 代码签名支持补丁（KB3033929）；PowerShell 2.0 下只能用 `Net.WebClient`。
+- **重装前先停服务**：Windows 会锁住正在运行的 exe；脚本本身会停服务，但如果 worker 残留，需要先 `taskkill /IM ongrid-edge-worker.exe /F`。
+- **凭据以命令行参数传入**：会进入 PowerShell 历史；批量场景优先 `--enrollment-token`。
+- **常见错误**：`manifest.json` 404（Windows 附件未发布或目录为空）、`verify dir ... (unrestricted access)`（ACL 校验失败）、`CryptUnprotectData` 失败（DPAPI 加密作用域/身份问题）、`sc.exe create` 1073（服务已存在）。
 
 ## 7. 目录布局
 

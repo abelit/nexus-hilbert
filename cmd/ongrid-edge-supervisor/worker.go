@@ -52,6 +52,7 @@ func runWorkerOnly(log *slog.Logger) error {
 		edgedirs.StageDir, edgedirs.BinDir,
 		log, &windowsProcessController{},
 	)
+	m.SetPluginDir(pluginBinDir())
 	return superviseWorker(ctx, log, m)
 }
 

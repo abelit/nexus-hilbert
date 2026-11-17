@@ -43,6 +43,9 @@ var destBaseWhitelist = []string{
 	"windows_exporter.exe",
 	"promtail.exe",
 	"otelcol-contrib.exe",
+	"mysqld_exporter.exe",
+	"postgres_exporter.exe",
+	"redis_exporter.exe",
 }
 
 // destBasePattern 是文件名段字符白名单（一律拒绝，不做宽容清洗）。
@@ -79,6 +82,32 @@ func IsProtectedSystemImage(name string) bool {
 	return false
 }
 
+// DestRoots 是 bundle 条目允许落盘的两个受管根。binDir 存放 supervisor /
+// worker；pluginDir 存放 exporter 子进程。两者必须都是安装目录下的固定
+// 子目录（Windows: C:\Program Files\ongrid-edge\{bin,plugins}）。
+type DestRoots struct {
+	BinDir    string
+	PluginDir string
+}
+
+// isPluginDest 报告 basename 是否属于插件载荷。插件只能落到 PluginDir，
+// 不能借白名单写入 bin；反之 supervisor/worker 也只能落到 BinDir。
+func isPluginDest(base string) bool {
+	for _, name := range []string{
+		"windows_exporter.exe",
+		"promtail.exe",
+		"otelcol-contrib.exe",
+		"mysqld_exporter.exe",
+		"postgres_exporter.exe",
+		"redis_exporter.exe",
+	} {
+		if strings.EqualFold(base, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateAllEntries 校验全部 manifest 条目（all-or-nothing，遇首错即返回）。
 // Machine.Apply 在 ParseManifest 之后、任何 kill/swap 之前调用 — 校验失败时
 // 零磁盘变动、零进程终止。
@@ -86,6 +115,12 @@ func IsProtectedSystemImage(name string) bool {
 // context 约定：入口处 ctx.Err guard（对称 ApplyBundle
 // 的入口取消检查）；进入逐条校验后不中断（与后续 swap 的原子语义衔接）。
 func ValidateAllEntries(ctx context.Context, binDir, incomingDir string, entries []ManifestEntry) error {
+	return ValidateAllEntriesWithRoots(ctx, DestRoots{BinDir: binDir}, incomingDir, entries)
+}
+
+// ValidateAllEntriesWithRoots is the Windows-capable form: plugin payloads
+// are validated against PluginDir instead of BinDir.
+func ValidateAllEntriesWithRoots(ctx context.Context, roots DestRoots, incomingDir string, entries []ManifestEntry) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -96,7 +131,7 @@ func ValidateAllEntries(ctx context.Context, binDir, incomingDir string, entries
 		if err := validateSrc(incomingDir, e.Src); err != nil {
 			return fmt.Errorf("entry src %s: %w", e.Src, err)
 		}
-		if err := validateDest(binDir, e.Dest); err != nil {
+		if err := validateDest(roots, e.Dest); err != nil {
 			return fmt.Errorf("entry dest %s: %w", e.Dest, err)
 		}
 	}
@@ -118,8 +153,9 @@ func validateMode(mode string) error {
 	return fmt.Errorf("mode %q not in whitelist (allowed: 0755/0644/empty)", mode)
 }
 
-// validateDest 三重校验。
-func validateDest(binDir, dest string) error {
+// validateDest 三重校验。插件 basename 只能落到 PluginDir，其余条目只能
+// 落到 BinDir——白名单与目标根一一对应，不给跨目录写入留口子。
+func validateDest(roots DestRoots, dest string) error {
 	base := destBase(dest)
 	if !destBasePattern.MatchString(base) {
 		return fmt.Errorf("dest base %q fails filename pattern (rejects ADS colon/trailing dot/8.3 short name)", base)
@@ -127,9 +163,16 @@ func validateDest(binDir, dest string) error {
 	if !destBaseAllowed(base) {
 		return fmt.Errorf("dest base %q not in whitelist", base)
 	}
+	root := roots.BinDir
+	if isPluginDest(base) {
+		root = roots.PluginDir
+		if root == "" {
+			return fmt.Errorf("dest base %q requires a plugin directory, which is not configured", base)
+		}
+	}
 	// 父目录 canonical（dest 文件可能不存在（首装），对父目录做 EvalSymlinks —
 	// 父目录必须存在且解析后仍在受管根内，junction/symlink 逃逸在此被拒）
-	if err := ensureWithinDir(binDir, filepath.Dir(dest)); err != nil {
+	if err := ensureWithinDir(root, filepath.Dir(dest)); err != nil {
 		return fmt.Errorf("dest dir: %w", err)
 	}
 	return nil

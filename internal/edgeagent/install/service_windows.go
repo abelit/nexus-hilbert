@@ -102,6 +102,15 @@ func (sc *SCServiceController) ConfigureRecovery() error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("sc.exe failure: %w (output: %s)", err, out)
 	}
+	// SERVICE_CONFIG_FAILURE_ACTIONS_FLAG. Default 0 only runs recovery when
+	// the process dies without reaching SERVICE_STOPPED; the Go svc wrapper
+	// reports SERVICE_STOPPED with Win32ExitCode=1 for a supervisor
+	// self-swap, so without this flag SCM leaves the service stopped after a
+	// bundle upgrade.
+	flagCmd := exec.Command(exe, "failureflag", sc.name, "1")
+	if out, err := flagCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("sc.exe failureflag: %w (output: %s)", err, out)
+	}
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	edgehostfiles "github.com/ongridio/ongrid/internal/edgeagent/host_files"
+	edgepowershell "github.com/ongridio/ongrid/internal/edgeagent/powershell"
 	edgerestartservice "github.com/ongridio/ongrid/internal/edgeagent/restart_service"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -28,4 +29,5 @@ func registerEdgeCapabilities(client tunnel.Client, log *slog.Logger) {
 	if err := edgerestartservice.Register(client, log); err != nil {
 		log.Warn("restart_service register failed; capability disabled", slog.Any("err", err))
 	}
+	edgepowershell.Register(client, log)
 }

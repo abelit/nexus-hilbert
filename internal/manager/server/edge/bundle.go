@@ -112,7 +112,7 @@ func (r *FileBundleResolver) CurrentBundles() (BundleCatalog, error) {
 		return BundleCatalog{}, errors.New("manager version unknown; cannot inspect bundles")
 	}
 	catalog := BundleCatalog{ManagerVersion: version}
-	for _, arch := range []string{"linux-amd64", "linux-arm64"} {
+	for _, arch := range supportedBundleArches {
 		catalog.Items = append(catalog.Items, r.inspectBundle(arch, version))
 	}
 	return catalog, nil
@@ -170,13 +170,18 @@ func readBundleSHA(path string) (string, error) {
 	return strings.ToLower(value), nil
 }
 
+// supportedBundleArches is the full upgrade-bundle matrix. Windows uses the
+// same naming as the install artifacts: windows-amd64 for Windows 10 / Server
+// 2016+, legacy-windows-amd64 for Server 2008 R2 SP1.
+var supportedBundleArches = []string{
+	"linux-amd64", "linux-arm64", "windows-amd64", "legacy-windows-amd64",
+}
+
 func knownArch(a string) bool {
-	switch a {
-	case "linux-amd64":
-		return true
-	case "linux-arm64":
-		return true
-	default:
-		return false
+	for _, arch := range supportedBundleArches {
+		if a == arch {
+			return true
+		}
 	}
+	return false
 }

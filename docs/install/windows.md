@@ -4,6 +4,8 @@
 
 构建矩阵、组件获取、发布附件与两平台安装布局的完整对照见 [Edge 构建、组件分发与安装布局](../design/edge-build-and-distribution.md)。
 
+一行 PowerShell 安装脚本（下载器 + 安装器流程、落盘位置、自签证书与 2008 R2 注意事项）的逐行解析见 [Edge 编译、打包与目录落盘指南 §6.6](../guides/edge-build-and-packaging.md)。
+
 ## 1. 支持矩阵
 
 | 变体 | 系统 | 架构 | 工具链 | 能力 |
@@ -250,6 +252,16 @@ sc.exe query ongrid-edge
 - 所有制品下载都校验 SHA-256。安装器不做 Authenticode 签名校验；生产发布应使用 Authenticode 签名，并在 2008 R2 上先安装 SHA-2 补丁，否则 Windows 加载器可能拒绝运行已签名的二进制。
 - 安装目录 ACL 为 SYSTEM + Administrators，禁止继承；`secrets.enc` 使用 DPAPI `CRYPTPROTECT_LOCAL_MACHINE`。
 - 安装器不把 token/secret 写入日志；临时配置文件在 supervisor 返回后删除。批量部署仍应控制 enrollment token 的分发范围，并定期轮换。
-- Legacy 不提供 bash、WebSSH、抓包、K8s、OBI/autoapm/profiles。不要把 Windows Edge 当作通用远程 shell 使用。
+- Legacy 不提供 bash、WebSSH、抓包、K8s、OBI/autoapm/profiles。不要把 Windows Edge 当作通用远程 shell 使用；Windows 的交互能力是只读 PowerShell 命令与 VNC/RDP 桌面转发，见[远程访问设计](../design/windows-remote-access.md)。
 - `restart_service` 只允许白名单内的服务；Manager 和 Edge 双侧校验。不要为了排障把白名单扩大到业务关键服务集合之外。
 - 防火墙只需允许出站到 Manager HTTPS 和 Frontier 地址；Edge 不要求入站监听（插件指标端口按插件配置单独评估）。
+
+## 11. 远程访问（PowerShell / VNC / RDP）
+
+Windows Edge 不提供 WebSSH。可用的远程能力及安全边界见[Windows Edge 远程访问：PowerShell、VNC 与 RDP](../design/windows-remote-access.md)：
+
+- **PowerShell**：设备详情“命令”标签页，`device:shell` 权限，只读命令白名单（`get-*`、`test-*` 等），15 秒单命令超时。
+- **VNC**：设备列表/详情中的“远程桌面”入口。需要目标机自行安装 VNC Server 并监听 `127.0.0.1:5900`；Edge 只转发环回端口，禁止把 5900 暴露到网络。
+- **RDP**：设备列表/详情中的“RDP 桌面”入口，基于 IronRDP（WASM）+ Manager 的 RDCleanPath 代理。需要目标机启用远程桌面（`fDenyTSConnections=0`），登录账号加入 `Remote Desktop Users`；密码由浏览器通过 CredSSP/NLA 直接发往设备。
+- **文件传输**：RDP 页面的“文件”面板使用独立设备文件通道，文件写入 `C:\ProgramData\ongrid-edge\transfer`（Linux 为 `/var/lib/ongrid-edge/transfer`），单文件上限 2 GiB；不依赖 RDP 剪贴板，可在远端资源管理器中直接打开该目录。
+- **文件管理**：设备操作中的“文件管理”可浏览任意路径，下载文件和目录（tar.gz），在可写根内上传、新建目录和重命名；可写根可在 Manager 的「设置 → 全局配置 → 设备文件管理」中配置（保存后写入 `system_settings`，优先于环境变量），也可继续使用部署环境变量 `ONGRID_DEVICE_FILE_ROOTS` 作为未保存时的默认值。单文件上传上限可在「设置 → 全局配置 → 上传大小限制」中调整（1 MiB–8 GiB，默认 8 GiB）。详见[设备文件管理](../design/device-file-manager.md)。

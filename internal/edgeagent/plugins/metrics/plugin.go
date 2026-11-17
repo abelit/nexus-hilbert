@@ -2,7 +2,8 @@
 //
 // Unlike the `logs` and `traces` (otelcol) plugins, this one
 // runs in-process inside ongrid-edge. It periodically scrapes a local
-// HTTP /metrics endpoint (default: node_exporter on localhost:9100),
+// HTTP /metrics endpoint (default: the host exporter on localhost:9102;
+// Linux also scrapes process_exporter on localhost:9256),
 // parses the Prometheus text format, and pushes the open-set samples to
 // the manager via the existing `push_prom_samples` tunnel RPC. No
 // subprocess to manage, no remote_write client to embed.
@@ -22,7 +23,7 @@
 //
 // Spec keys (set via the manager UI's Edge → Plugins → metrics → Spec):
 //
-//	target_url : string (default "http://127.0.0.1:9100/metrics")
+//	target_url : string (default platform URLs: :9102, plus :9256 on Linux)
 //	scrape_interval : duration string (default "15s")
 //	scrape_timeout : duration string (default "5s")
 //	tls_insecure : bool (default false; only relevant if target_url is https)
@@ -31,7 +32,7 @@
 //
 // The plugin name on the wire (push_prom_samples.source) is "metrics:<host>:<port>"
 // so multiple metrics plugins (future) stay distinguishable. For the
-// default target this resolves to "metrics:127.0.0.1:9100".
+// default target this resolves to "metrics:127.0.0.1:9102".
 package metrics
 
 import (

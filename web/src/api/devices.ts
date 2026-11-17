@@ -236,3 +236,26 @@ export function testNewNetworkSNMP(input: NetworkPollingInput) {
 export function createNetworkSNMP(input: NetworkPollingInput) {
   return request<NetworkDeviceDetail>('POST', '/network-devices', input);
 }
+
+export type PowershellExecResult = {
+  output: string;
+  exit_code: number;
+  duration_ms: number;
+  allowed: boolean;
+  reason?: string;
+};
+
+// runPowershell executes a read-only PowerShell command on a Windows host.
+// The edge enforces the cmdlet allowlist; the manager rejects non-Windows
+// devices and applies RBAC before calling the tunnel.
+export function runPowershell(
+  deviceId: number | string,
+  command: string,
+  timeoutSeconds = 15,
+): Promise<PowershellExecResult> {
+  return request<PowershellExecResult>(
+    'POST',
+    `/devices/${encodeURIComponent(String(deviceId))}/powershell`,
+    { command, timeout_seconds: timeoutSeconds },
+  );
+}

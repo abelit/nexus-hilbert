@@ -294,7 +294,22 @@ Windows 插件二进制命名：
 - `hostmetrics` 的默认监听地址和指标前缀按 Windows exporter 适配；
 - 不支持的插件在 Manager 侧显示为不可用，不静默失败。
 
-#### 7.4.1 插件二进制版本与打包
+#### 7.4.1 运行时形态与抓取目标
+
+- `windows_exporter` 是 `ongrid-edge-worker.exe` 的**子进程**，不是 Windows 服务：命令行是
+  `"C:\Program Files\ongrid-edge\plugins\windows_exporter.exe" --web.listen-address=:9102`，
+  `services.msc` 里只有 `ongrid-edge` 一个服务。查看状态应使用 `Get-Process windows_exporter`
+  或 `Get-CimInstance Win32_Process -Filter "Name='windows_exporter.exe'"`。
+- `metrics` 插件的默认抓取目标按平台区分：Windows 只有 `http://127.0.0.1:9102/metrics`；
+  Linux/Darwin 额外包含 `http://127.0.0.1:9256/metrics`（process_exporter）。Windows 上
+  `procmetrics` 不注册，因此不再尝试 9256，避免持续的 `scrape failed` 告警。
+- Manager 为新建 Edge 写入的 `metrics` 默认 spec 是 `{}`，由 edge 按平台填充默认目标；
+  旧的 `{"target":"http://127.0.0.1:9100/metrics"}` 键不会被 metrics 插件识别。
+- `logs`/`traces` 在未配置 Loki/Tempo endpoint 时不会启动 otelcol，metrics 插件对其
+  `127.0.0.1:9464` 应用指标的抓取会记录 `connection refused` 警告；这属于插件配置未完成，
+  不影响 `windows_exporter` 与 `windows_*` 指标上报。
+
+#### 7.4.2 插件二进制版本与打包
 
 Windows 插件二进制随 `VERSION` 作为版本化 Release 附件发布，不进入不可变的 Linux 依赖归档。版本固定在 `Makefile`：
 

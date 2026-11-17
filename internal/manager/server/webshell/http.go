@@ -54,13 +54,28 @@ type Streamer interface {
 	OpenStream(ctx context.Context, edgeID uint64) (io.ReadWriteCloser, error)
 }
 
+// Caller is the narrow request/response tunnel surface used by the
+// non-interactive PowerShell capability. *managersvcfb.Client satisfies it.
+type Caller interface {
+	Call(ctx context.Context, edgeID uint64, method string, body []byte) ([]byte, error)
+}
+
 // DeviceRepo just resolves device existence + ensures the caller
 // targets a real device id.
 type DeviceRepo = devicebiz.Repo
 
+// WriteRootsFunc returns the manager-configured writable roots for the device
+// file manager. The Edge still enforces the final path check.
+type WriteRootsFunc func(ctx context.Context) []string
+
+// MaxUploadBytesFunc returns the configured single-file upload cap for the
+// device file manager. The Edge keeps its own hard cap.
+type MaxUploadBytesFunc func(ctx context.Context) int64
+
 // Handler bundles dependencies. *Handler is constructed once at boot.
 type Handler struct {
 	streamer Streamer
+	caller   Caller
 	router   *bizwebshell.Router
 	audit    bizwebshell.Recorder
 	access   *bizwebshell.Access
@@ -70,12 +85,14 @@ type Handler struct {
 	log      *slog.Logger
 	upgrader websocket.Upgrader
 	mu       sync.Mutex
-	tickets  map[string]shellTicket
-	failures map[string]authFailures
+	tickets          map[string]shellTicket
+	failures         map[string]authFailures
+	writeRoots       WriteRootsFunc
+	maxUploadBytesFn MaxUploadBytesFunc
 }
 
 // NewHandler builds the HTTP handler.
-func NewHandler(streamer Streamer, router *bizwebshell.Router, audit bizwebshell.Recorder, access *bizwebshell.Access,
+func NewHandler(streamer Streamer, caller Caller, router *bizwebshell.Router, audit bizwebshell.Recorder, access *bizwebshell.Access,
 	devices DeviceRepo, edges edgebiz.Repo, log *slog.Logger,
 ) *Handler {
 	if log == nil {
@@ -83,6 +100,7 @@ func NewHandler(streamer Streamer, router *bizwebshell.Router, audit bizwebshell
 	}
 	return &Handler{
 		streamer: streamer,
+		caller:   caller,
 		router:   router,
 		audit:    audit,
 		access:   access,
@@ -102,6 +120,12 @@ func NewHandler(streamer Streamer, router *bizwebshell.Router, audit bizwebshell
 
 // SetAuthz wires the casbin middleware post-construction.
 func (h *Handler) SetAuthz(a AuthzMW) { h.authz = a }
+
+// SetWriteRoots wires the device-file write-root provider post-construction.
+func (h *Handler) SetWriteRoots(fn WriteRootsFunc) { h.writeRoots = fn }
+
+// SetMaxUploadBytes wires the device-file upload-limit provider post-construction.
+func (h *Handler) SetMaxUploadBytes(fn MaxUploadBytesFunc) { h.maxUploadBytesFn = fn }
 
 // MaxSessionsPerUser caps how many concurrent shells one user may have.
 const MaxSessionsPerUser = 5
@@ -128,6 +152,22 @@ func (h *Handler) Register(r chi.Router) {
 		mw = h.authz.Require("device:shell", "exec")
 	}
 	r.With(mw).Post("/v1/devices/{device_id}/shell/tickets", h.issueTicket)
+	r.With(mw).Post("/v1/devices/{device_id}/powershell", h.powershellExec)
+	r.With(mw).Post("/v1/devices/{device_id}/vnc/tickets", h.vncTicket)
+	r.With(mw).Post("/v1/devices/{device_id}/rdp/tickets", h.rdpTicket)
+	fmMW := passthrough
+	if h.authz != nil {
+		fmMW = h.authz.Require("device:files", "exec")
+	}
+	r.With(fmMW).Get("/v1/devices/{device_id}/fm/roots", h.fmRoots)
+	r.With(fmMW).Get("/v1/devices/{device_id}/fm/list", h.fmList)
+	r.With(fmMW).Get("/v1/devices/{device_id}/fm/download", h.fmDownload)
+	r.With(fmMW).Post("/v1/devices/{device_id}/fm/upload", h.fmUpload)
+	r.With(fmMW).Post("/v1/devices/{device_id}/fm/mkdir", h.fmMkdir)
+	r.With(fmMW).Post("/v1/devices/{device_id}/fm/rename", h.fmRename)
+	r.With(mw).Get("/v1/devices/{device_id}/files", h.listFiles)
+	r.With(mw).Post("/v1/devices/{device_id}/files", h.uploadFile)
+	r.With(mw).Get("/v1/devices/{device_id}/files/{name}", h.downloadFile)
 	r.With(mw).Get("/v1/devices/{device_id}/shell/credentials", h.listCredentials)
 	r.With(mw).Delete("/v1/devices/{device_id}/shell/credentials/{credential_id}", h.deleteCredential)
 	r.With(mw).Delete("/v1/devices/{device_id}/shell/known-hosts/{port}", h.deleteKnownHost)
@@ -149,6 +189,125 @@ func (h *Handler) Register(r chi.Router) {
 // strings and SSH passwords in WebSocket frames are intentionally rejected.
 func (h *Handler) RegisterPublic(r chi.Router) {
 	r.Get("/v1/devices/{device_id}/shell", h.openShell)
+	r.Get("/v1/devices/{device_id}/vnc", h.openVNC)
+	r.Get("/v1/devices/{device_id}/rdp", h.openRDP)
+}
+
+// vncTicket mints a one-time ticket for a Windows VNC session. The ticket
+// is bound to the user/device/IP and expires in 30s; no VNC password is
+// stored because the RFB server asks the client directly.
+func (h *Handler) vncTicket(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := tenantctx.From(r.Context())
+	if !ok {
+		writeErr(w, errs.ErrUnauthorized)
+		return
+	}
+	deviceID, err := parseUintParam(r, "device_id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	device, err := h.devices.Get(r.Context(), deviceID)
+	if err != nil {
+		writeErr(w, fmt.Errorf("resolve device: %w", err))
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(device.OS), "windows") {
+		writeErr(w, fmt.Errorf("%w: VNC is only available on Windows devices", errs.ErrInvalid))
+		return
+	}
+	edge, err := h.onlineEdge(r.Context(), deviceID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	token, expiresAt, err := h.mintTicket(shellTicket{
+		Kind: "vnc", UserID: tenant.UserID, DeviceID: deviceID, EdgeID: edge.ID,
+		Port: 5900, ClientIP: clientIP(r),
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	h.log.Info("vnc ticket issued",
+		slog.Uint64("device_id", deviceID),
+		slog.Uint64("edge_id", edge.ID),
+		slog.Uint64("user_id", tenant.UserID),
+	)
+	writeJSON(w, http.StatusOK, map[string]any{"ticket": token, "expires_at": expiresAt})
+}
+
+// openVNC bridges a browser WebSocket to a VNC server on the Windows edge.
+// The first bytes on the tunnel stream are the loopback target preface;
+// the edge consumes it and forwards the raw RFB traffic.
+func (h *Handler) openVNC(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "websocket origin not allowed", http.StatusForbidden)
+		return
+	}
+	deviceID, err := parseUintParam(r, "device_id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	ticket, ok := h.consumeTicket(r.URL.Query().Get("ticket"), deviceID, clientIP(r))
+	if !ok || ticket.Kind != "vnc" {
+		http.Error(w, "invalid or expired VNC ticket", http.StatusUnauthorized)
+		return
+	}
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		h.log.Warn("vnc: upgrade", slog.Any("err", err))
+		return
+	}
+	defer conn.Close()
+
+	stream, err := h.streamer.OpenStream(r.Context(), ticket.EdgeID)
+	if err != nil {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("open VNC stream: "+err.Error()))
+		return
+	}
+	if _, err := stream.Write([]byte("ONGRID-TARGET 127.0.0.1:5900\n")); err != nil {
+		_ = stream.Close()
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("write VNC preface: "+err.Error()))
+		return
+	}
+	h.log.Info("vnc session started",
+		slog.Uint64("device_id", deviceID),
+		slog.Uint64("edge_id", ticket.EdgeID),
+		slog.Uint64("user_id", ticket.UserID),
+	)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 32<<10)
+		for {
+			n, readErr := stream.Read(buf)
+			if n > 0 {
+				if writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	conn.SetReadLimit(1 << 20)
+	for {
+		_, data, readErr := conn.ReadMessage()
+		if readErr != nil {
+			break
+		}
+		if _, writeErr := stream.Write(data); writeErr != nil {
+			break
+		}
+	}
+	_ = stream.Close()
+	<-done
+	h.log.Info("vnc session ended", slog.Uint64("device_id", deviceID), slog.Uint64("user_id", ticket.UserID))
 }
 
 func passthrough(next http.Handler) http.Handler { return next }
@@ -162,6 +321,7 @@ type openMsg struct {
 }
 
 type shellTicket struct {
+	Kind            string
 	UserID          uint64
 	DeviceID        uint64
 	EdgeID          uint64
@@ -256,6 +416,7 @@ func (h *Handler) issueTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token, expiresAt, err := h.mintTicket(shellTicket{
+		Kind:   "shell",
 		UserID: tenant.UserID, DeviceID: deviceID, EdgeID: edge.ID,
 		SSHUser: in.SSHUser, Password: in.SSHPass, Port: in.SSHPort,
 		CredentialID: credentialID, SaveCredential: in.SaveCredential, AcceptedHostKey: in.AcceptHostKey,
@@ -341,7 +502,7 @@ func (h *Handler) openShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ticket, ok := h.consumeTicket(r.URL.Query().Get("ticket"), deviceID, clientIP(r))
-	if !ok {
+	if !ok || (ticket.Kind != "" && ticket.Kind != "shell") {
 		http.Error(w, "invalid or expired shell ticket", http.StatusUnauthorized)
 		return
 	}
@@ -906,6 +1067,73 @@ func parseUintParam(r *http.Request, name string) (uint64, error) {
 		return 0, errors.Join(errs.ErrInvalid, err)
 	}
 	return v, nil
+}
+
+// powershellExec runs a read-only PowerShell command on a Windows edge.
+// The edge enforces the cmdlet allowlist; the manager enforces RBAC and
+// refuses non-Windows devices before any tunnel call.
+func (h *Handler) powershellExec(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := tenantctx.From(r.Context())
+	if !ok {
+		writeErr(w, errs.ErrUnauthorized)
+		return
+	}
+	if h.caller == nil {
+		writeErr(w, errs.ErrNotWiredYet)
+		return
+	}
+	deviceID, err := parseUintParam(r, "device_id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	device, err := h.devices.Get(r.Context(), deviceID)
+	if err != nil {
+		writeErr(w, fmt.Errorf("resolve device: %w", err))
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(device.OS), "windows") {
+		writeErr(w, fmt.Errorf("%w: powershell is only available on Windows devices", errs.ErrInvalid))
+		return
+	}
+	edge, err := h.onlineEdge(r.Context(), deviceID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in struct {
+		Command        string `json:"command"`
+		TimeoutSeconds int    `json:"timeout_seconds"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	in.Command = strings.TrimSpace(in.Command)
+	if in.Command == "" {
+		writeErr(w, fmt.Errorf("%w: command is required", errs.ErrInvalid))
+		return
+	}
+	body, err := json.Marshal(tunnel.PowershellExecRequest{Command: in.Command, TimeoutSeconds: in.TimeoutSeconds})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	respBody, err := h.caller.Call(r.Context(), edge.ID, tunnel.MethodPowershellExec, body)
+	if err != nil {
+		writeErr(w, fmt.Errorf("powershell exec: %w", err))
+		return
+	}
+	h.log.Info("powershell exec",
+		slog.Uint64("device_id", deviceID),
+		slog.Uint64("edge_id", edge.ID),
+		slog.Uint64("user_id", tenant.UserID),
+		slog.String("command", in.Command),
+	)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(respBody)
 }
 
 func (h *Handler) onlineEdge(ctx context.Context, deviceID uint64) (*edgemodel.Edge, error) {

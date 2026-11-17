@@ -361,6 +361,11 @@ build-edge-windows-legacy-amd64: ## [release] edge windows/amd64 legacy supervis
 # The installer is a separate Go 1.20 module so it can run on 2008 R2. Release
 # it as ongrid-edge-windows-amd64-<version>-installer.exe and stage it at the
 # fixed UI URL windows/ongrid-edge-installer.exe.
+.PHONY: build-edge-windows-bundles
+build-edge-windows-bundles: build-edge-windows-amd64 build-edge-windows-legacy-amd64 ## [release] 生成 Windows modern/legacy 整包升级 bundle 到 bin/
+	bash dist/build-edge-bundle-windows.sh bin $(VERSION) windows-amd64
+	bash dist/build-edge-bundle-windows.sh bin $(VERSION) legacy-windows-amd64
+
 .PHONY: build-edge-windows-installer
 build-edge-windows-installer: ## [release] edge windows/amd64 installer bootstrap (Go 1.20)
 	@mkdir -p $(BIN_DIR)/windows-amd64

@@ -58,6 +58,46 @@ func TestResolveTargetFromSSHIdentification(t *testing.T) {
 	}
 }
 
+func TestResolveTargetConsumesONGRIDTargetPreface(t *testing.T) {
+	// The Manager writes this preface for VNC/RDP sessions because Frontier
+	// v1.2.x drops stream metadata. It must be consumed, not forwarded.
+	wire := "ONGRID-TARGET 127.0.0.1:5900\n" + "RFB 003.008\n"
+	stream := &memoryStream{reader: bytes.NewBufferString(wire)}
+	target, replay, err := resolveTarget(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "127.0.0.1:5900" {
+		t.Fatalf("target = %q, want 127.0.0.1:5900", target)
+	}
+	got, err := io.ReadAll(replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "RFB 003.008\n" {
+		t.Fatalf("replayed stream = %q, want the RFB greeting only", got)
+	}
+}
+
+func TestPrefaceTargetsAreValidatedAfterParsing(t *testing.T) {
+	// parseTargetPreface keeps the raw value; handleStream then validates it
+	// before dialing so a bad preface fails closed instead of reaching a
+	// non-loopback host or port outside the platform allowlist.
+	for _, wire := range []string{
+		"ONGRID-TARGET 10.0.0.2:5900\nRFB 003.008\n",
+		"ONGRID-TARGET 127.0.0.1:0\nRFB 003.008\n",
+	} {
+		stream := &memoryStream{reader: bytes.NewBufferString(wire)}
+		target, _, err := resolveTarget(stream)
+		if err != nil {
+			t.Fatalf("resolveTarget(%q): %v", wire, err)
+		}
+		if err := validateTarget(target); err == nil {
+			t.Fatalf("preface target %q was accepted", target)
+		}
+	}
+}
+
 type memoryStream struct {
 	reader io.Reader
 	meta   []byte

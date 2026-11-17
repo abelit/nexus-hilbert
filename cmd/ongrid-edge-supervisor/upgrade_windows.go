@@ -20,8 +20,12 @@ import (
 )
 
 // upgradeWatchTimeout 是 swap 后等待新 worker register_edge 成功的窗口。
-// 超过此时间 healthy_marker 仍未匹配 → rollback（对称 Linux 180s watchdog）。
-const upgradeWatchTimeout = 180 * time.Second
+// 超过此时间 healthy_marker 仍未匹配 → rollback。
+//
+// 10 分钟：Manager 在处理整包升级请求期间可能短暂无法响应 worker 的
+// register_edge（大 bundle 下载/应用），实测出现过 3-4 分钟的注册重试；
+// 180s 会在 worker 即将注册成功前误触发回滚。
+const upgradeWatchTimeout = 600 * time.Second
 
 // upgradePollInterval 是 Machine.HealthPoll 轮询 IsUpgradeHealthy 的间隔
 // （HealthPoll redesign：HealthCheck → HealthPoll，仅 polling 不再持 timer）。

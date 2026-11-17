@@ -14,6 +14,9 @@ const ChatThreadPage = lazy(() => import('@/pages/ChatThread'));
 const EdgesPage = lazy(() => import('@/pages/Edges'));
 const EdgeDetailPage = lazy(() => import('@/pages/EdgeDetail'));
 const DeviceShellPage = lazy(() => import('@/pages/DeviceShell'));
+const DeviceVNCPage = lazy(() => import('@/pages/DeviceVNC'));
+const DeviceRDPPage = lazy(() => import('@/pages/DeviceRDP'));
+const DeviceFilesPage = lazy(() => import('@/pages/DeviceFiles'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const MonitorPage = lazy(() => import('@/pages/Monitor'));
 const LogsPage = lazy(() => import('@/pages/Logs'));
@@ -129,6 +132,12 @@ export default function App() {
         {/* WebSSH: deviceId is the Prom-label device_id, not the edge.id.
             See DeviceShell.tsx for the rationale. */}
         <Route path="/devices/:deviceId/shell" element={<DeviceShellPage />} />
+        {/* VNC: Windows-only remote desktop bridged over the edge tunnel. */}
+        <Route path="/devices/:deviceId/vnc" element={<DeviceVNCPage />} />
+        {/* RDP: IronRDP WASM + RDCleanPath proxy over the edge tunnel. */}
+        <Route path="/devices/:deviceId/rdp" element={<DeviceRDPPage />} />
+        {/* Managed file manager: browse any path, writes limited to configured roots. */}
+        <Route path="/devices/:deviceId/files" element={<DeviceFilesPage />} />
         <Route path="/monitor" element={<MonitorPage />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/apm" element={<ApmPage />} />

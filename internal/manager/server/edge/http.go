@@ -758,17 +758,69 @@ func (h *Handler) packageArchForEdge(ctx context.Context, edgeID uint64) (string
 	if device == nil {
 		return "", fmt.Errorf("%w: host device %d is unavailable", errs.ErrInvalid, *edge.DeviceID)
 	}
-	if osName := strings.ToLower(strings.TrimSpace(device.OS)); osName != "" && osName != "linux" {
+
+	return bundleArchForDevice(device)
+}
+
+// bundleArchForDevice maps a host device to the upgrade-bundle architecture.
+// Linux keeps the historical amd64/arm64 names; Windows selects modern vs
+// legacy (2008 R2) from the kernel build so the Manager resolves the right
+// bundle without operator input.
+func bundleArchForDevice(device *devicemodel.Device) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(device.OS)) {
+	case "", "linux":
+		switch strings.ToLower(strings.TrimSpace(device.Arch)) {
+		case "amd64", "x86_64", "x64", "linux-amd64", "linux/amd64":
+			return "linux-amd64", nil
+		case "arm64", "aarch64", "linux-arm64", "linux/arm64":
+			return "linux-arm64", nil
+		default:
+			return "", fmt.Errorf("%w: unsupported device architecture %q", errs.ErrInvalid, device.Arch)
+		}
+	case "windows":
+		switch strings.ToLower(strings.TrimSpace(device.Arch)) {
+		case "amd64", "x86_64", "x64", "windows-amd64":
+		default:
+			return "", fmt.Errorf("%w: unsupported Windows architecture %q", errs.ErrInvalid, device.Arch)
+		}
+		major, minor, build, ok := parseOSBuild(device.KernelVersion)
+		if !ok {
+			major, minor, build, ok = parseOSBuild(device.OSVersion)
+		}
+		if !ok {
+			return "", fmt.Errorf("%w: cannot determine Windows version (kernel_version %q)", errs.ErrInvalid, device.KernelVersion)
+		}
+		switch {
+		case major >= 10 && build >= 14393:
+			return "windows-amd64", nil
+		case major == 6 && minor == 1 && build >= 7601:
+			return "legacy-windows-amd64", nil
+		default:
+			return "", fmt.Errorf("%w: unsupported Windows version %d.%d build %d", errs.ErrInvalid, major, minor, build)
+		}
+	default:
 		return "", fmt.Errorf("%w: unsupported device OS %q", errs.ErrInvalid, device.OS)
 	}
-	switch strings.ToLower(strings.TrimSpace(device.Arch)) {
-	case "amd64", "x86_64", "x64", "linux-amd64", "linux/amd64":
-		return "linux-amd64", nil
-	case "arm64", "aarch64", "linux-arm64", "linux/arm64":
-		return "linux-arm64", nil
-	default:
-		return "", fmt.Errorf("%w: unsupported device architecture %q", errs.ErrInvalid, device.Arch)
+}
+
+// parseOSBuild extracts major.minor.build from strings such as
+// "10.0.14393.1884 Build 14393.1884" or "6.1.7601".
+func parseOSBuild(raw string) (uint32, uint32, uint32, bool) {
+	fields := strings.Fields(strings.TrimSpace(raw))
+	if len(fields) == 0 {
+		return 0, 0, 0, false
 	}
+	parts := strings.Split(fields[0], ".")
+	if len(parts) < 3 {
+		return 0, 0, 0, false
+	}
+	major, err1 := strconv.ParseUint(parts[0], 10, 32)
+	minor, err2 := strconv.ParseUint(parts[1], 10, 32)
+	build, err3 := strconv.ParseUint(parts[2], 10, 32)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return 0, 0, 0, false
+	}
+	return uint32(major), uint32(minor), uint32(build), true
 }
 
 // --------- batch fleet operations ---------

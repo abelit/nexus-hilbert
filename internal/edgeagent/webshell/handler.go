@@ -133,22 +133,42 @@ func resolveTarget(stream tunnel.StreamConn) (string, tunnel.StreamConn, error) 
 	}
 
 	// Frontier v1.2.4 does not copy stream Meta across its service-to-edge
-	// bridge. SSH writes its identification line first, so carry the requested
-	// loopback port there and replay the line unchanged to sshd.
+	// bridge. Two preface formats are accepted:
+	//   ONGRID-TARGET 127.0.0.1:<port>  (consumed; used by VNC/RDP)
+	//   SSH-...                          (replayed unchanged to sshd)
 	reader := bufio.NewReaderSize(stream, 257)
 	line, err := reader.ReadSlice('\n')
 	if err != nil {
-		return "", stream, fmt.Errorf("read SSH identification: %w", err)
+		return "", stream, fmt.Errorf("read stream preface: %w", err)
+	}
+	text := string(line)
+	if target, ok := parseTargetPreface(text); ok {
+		// The preface is control data for this forwarder; do not forward it.
+		return target, &replayStream{StreamConn: stream, reader: reader}, nil
 	}
 	replay := &replayStream{
 		StreamConn: stream,
 		reader:     io.MultiReader(bytes.NewReader(bytes.Clone(line)), reader),
 	}
-	port, ok := tunnel.ParseWebshellSSHClientVersion(string(line))
+	port, ok := tunnel.ParseWebshellSSHClientVersion(text)
 	if !ok {
 		return "127.0.0.1:22", replay, nil
 	}
 	return net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), replay, nil
+}
+
+// parseTargetPreface parses the "ONGRID-TARGET 127.0.0.1:<port>" control line
+// used by non-SSH forwards (VNC/RDP). The line is not forwarded to the target.
+func parseTargetPreface(line string) (string, bool) {
+	const prefix = "ONGRID-TARGET "
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	target := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if target == "" {
+		return "", false
+	}
+	return target, true
 }
 
 type replayStream struct {
@@ -170,6 +190,9 @@ func validateTarget(target string) error {
 	port, err := strconv.ParseUint(rawPort, 10, 16)
 	if err != nil || port == 0 {
 		return errors.New("invalid port")
+	}
+	if !allowedPort(uint16(port)) {
+		return fmt.Errorf("port %d is not allowed on this platform", port)
 	}
 	return nil
 }

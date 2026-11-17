@@ -11,6 +11,7 @@ import {
 } from '@/lib/installAddresses';
 import { loadTopologyClusters } from "@/lib/deviceClusters";
 import { selectHostEdgesByDevice } from '@/lib/edgeSelection';
+import { supportsRDP, supportsVNC, supportsWebSSH } from '@/lib/deviceCapabilities';
 import { Label, Input, Radio } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -38,6 +39,9 @@ import {
   Check,
   ExternalLink,
   TerminalSquare,
+  MonitorPlay,
+  MonitorDot,
+  FolderOpen,
   ShieldCheck,
   Network,
   HardDrive,
@@ -459,9 +463,14 @@ export default function EdgesPage() {
           ),
         );
       }
+      // Same-version reinstall is normally skipped; force it so operators can
+      // re-apply a rebuilt bundle without bumping the release version.
+      const forceReinstall =
+        String(e.agent_version ?? '').trim() === String(managerVersion).trim();
       const job = await createEdgeUpgradeJob({
         edge_ids: [e.id],
         target_version: managerVersion,
+        force_reinstall: forceReinstall,
       });
       setToast({
         kind: "ok",
@@ -994,6 +1003,8 @@ export default function EdgesPage() {
                             </Button>
                             {isAdmin && <Button size="sm" variant="subtle" onClick={() => setSnmpDevice(d)}>{tr("配置 SNMP", "Configure SNMP")}</Button>}
                             <RowMenu
+                              device={d}
+                              canMutate={canMutate}
                               onRename={canMutate ? () => setRenameTarget(d) : undefined}
                               onViewTopology={() =>
                                 navigate(
@@ -1199,6 +1210,8 @@ export default function EdgesPage() {
                               </Button>
                               {isAdmin && <Button size="sm" variant="subtle" onClick={() => setSnmpDevice(d)}>{tr("配置 SNMP", "Configure SNMP")}</Button>}
                               <RowMenu
+                                device={d}
+                                canMutate={canMutate}
                                 onRename={canMutate ? () => setRenameTarget(d) : undefined}
                                 onViewTopology={() =>
                                   navigate(
@@ -1230,6 +1243,8 @@ export default function EdgesPage() {
                               </Button></Hint>
                               <ShellButton device={d} canMutate={canMutate} />
                               <RowMenu
+                                device={d}
+                                canMutate={canMutate}
                                 onRename={canMutate ? () => setRenameTarget(d) : undefined}
                                 onAssignRoles={managedByK8s ? undefined : () => setRolesEditTarget(d)}
                                 onViewTopology={() =>
@@ -2096,12 +2111,15 @@ function ShellButton({
 }) {
   const { tr } = useI18n();
   const displayName = device.name || device.hostname || `#${device.id}`;
-  const disabled = !canMutate || !device.online;
+  const websshSupported = supportsWebSSH(device.os);
+  const disabled = !canMutate || !device.online || !websshSupported;
   const reason = !canMutate
     ? tr("只读账号不能进入终端", "Viewer accounts cannot open the terminal")
     : !device.online
       ? tr("设备未上线", "Device offline")
-      : "";
+      : !websshSupported
+        ? tr("Windows 设备暂不支持终端（WebSSH）", "Terminal (WebSSH) is not supported on Windows devices")
+        : "";
   const href = `/devices/${encodeURIComponent(String(device.id))}/shell`;
   if (disabled) {
     return (
@@ -2137,6 +2155,8 @@ function ShellButton({
 }
 
 function RowMenu({
+  device,
+  canMutate,
   onRename,
   onAssignRoles,
   onViewTopology,
@@ -2148,6 +2168,8 @@ function RowMenu({
   onUpgradePackage,
   upgradePackageBusy,
 }: {
+  device: DeviceRow;
+  canMutate: boolean;
   onRename?: () => void;
   onAssignRoles?: () => void;
   onViewTopology(): void;
@@ -2203,6 +2225,84 @@ function RowMenu({
           >
             <ExternalLink size={13} /> {tr("查看拓扑", "View topology")}
           </DropdownMenuItem>
+          <Hint content={tr("在线设备可浏览任意目录，写入仅限可写根", "Browse any path on an online device; writes are limited to writable roots")}>
+            <DropdownMenuItem
+              disabled={!canMutate || !device.online}
+              onClick={() => {
+                if (!canMutate || !device.online) return;
+                setOpen(false);
+                window.open(
+                  `/devices/${encodeURIComponent(String(device.id))}/files`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                canMutate && device.online
+                  ? "text-zinc-200 hover:bg-zinc-800"
+                  : "cursor-not-allowed text-zinc-600",
+              )}
+            >
+              <FolderOpen size={13} /> {tr("文件管理", "File manager")}
+            </DropdownMenuItem>
+          </Hint>
+          {(supportsRDP(device.os) || supportsVNC(device.os)) && (
+            <>
+              <div className="my-1 border-t border-zinc-800" />
+              <div className="px-3 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                {tr("远程访问", "Remote access")}
+              </div>
+              {supportsRDP(device.os) && (
+                <Hint content={remoteAccessReason(tr, canMutate, device.online)}>
+                  <DropdownMenuItem
+                    disabled={!canMutate || !device.online}
+                    onClick={() => {
+                      if (!canMutate || !device.online) return;
+                      setOpen(false);
+                      window.open(
+                        `/devices/${encodeURIComponent(String(device.id))}/rdp`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      );
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                      canMutate && device.online
+                        ? "text-zinc-200 hover:bg-zinc-800"
+                        : "cursor-not-allowed text-zinc-600",
+                    )}
+                  >
+                    <MonitorDot size={13} /> {tr("RDP 桌面", "RDP desktop")}
+                  </DropdownMenuItem>
+                </Hint>
+              )}
+              {supportsVNC(device.os) && (
+                <Hint content={remoteAccessReason(tr, canMutate, device.online)}>
+                  <DropdownMenuItem
+                    disabled={!canMutate || !device.online}
+                    onClick={() => {
+                      if (!canMutate || !device.online) return;
+                      setOpen(false);
+                      window.open(
+                        `/devices/${encodeURIComponent(String(device.id))}/vnc`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      );
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                      canMutate && device.online
+                        ? "text-zinc-200 hover:bg-zinc-800"
+                        : "cursor-not-allowed text-zinc-600",
+                    )}
+                  >
+                    <MonitorPlay size={13} /> {tr("VNC 桌面", "VNC desktop")}
+                  </DropdownMenuItem>
+                </Hint>
+              )}
+            </>
+          )}
           {onDeleteDevice && (
             <>
               <Hint content={tr(
@@ -2301,6 +2401,16 @@ function RowMenu({
           )}
     </DropdownMenuContent>
   </DropdownMenu>;
+}
+
+function remoteAccessReason(
+  tr: (zh: string, en: string) => string,
+  canMutate: boolean,
+  online?: boolean,
+): string {
+  if (!canMutate) return tr("只读账号不能进入远程桌面", "Viewer accounts cannot open the remote desktop");
+  if (!online) return tr("设备未上线", "Device offline");
+  return "";
 }
 
 function RenameDeviceModal({

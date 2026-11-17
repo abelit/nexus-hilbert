@@ -242,7 +242,7 @@ server {
 | E-08 | Windows CI（legacy 构建 / Windows 单测） | ⚠️ 部分 | 已有 `ci-windows-legacy.yml`，覆盖范围待补 |
 | E-09 | Windows 安装器提权预检 | ❌ 未完成 | 评审 Important |
 | E-10 | 自签名证书下的 UI 引导 / sidecar | ❌ 未完成 | 评审 Important |
-| E-11 | Windows 指标 target 与指标名对齐 | ❌ 未完成 | 默认仍指向 9100 / `node_*` 命名，评审 Important |
+| E-11 | Windows 指标 target 与指标名对齐 | ⚠️ 部分 | 目标已按平台修正（Windows 仅 9102，Manager 默认 spec 改为 `{}`）；监控面板的 `node_*` 命名映射仍未处理 |
 | E-12 | Manager 升级/重装能力文档对齐 | ⚠️ 部分 | 文档描述强于实现，评审 Important |
 | E-13 | 部署验证覆盖插件链路 | ⚠️ 部分 | 2026-11-13 的 VM 安装使用最小清单，只验证了 supervisor/worker 与注册上线 |
 | E-14 | legacy 产物随源码修复重建 | ✅ 已完成 | 2026-11-13 用 Go 1.20.14 重建 `bin/legacy-windows-amd64`（PE 6.01），含 ACL/DPAPI 修复 |

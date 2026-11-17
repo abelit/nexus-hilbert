@@ -99,8 +99,11 @@ describe('buildInstallCommands', () => {
     expect(commands.linux.command).toContain('--server-edge-addr=ongrid.intra:40012');
     expect(commands.linux.command).not.toContain('--tls-insecure');
     expect(commands.windows.display).toContain("$u='https://ongrid.intra:8443/edge/windows/ongrid-edge-installer.exe'");
-    expect(commands.windows.display).toContain('--manager-url https://ongrid.intra:8443');
-    expect(commands.windows.display).toContain('--access-key AK');
+    expect(commands.windows.display).toContain("'--manager-url','https://ongrid.intra:8443'");
+    expect(commands.windows.display).toContain("'--access-key','AK'");
+    expect(commands.windows.display).toContain('& $f @a');
+    expect(commands.windows.display).toContain('ServerCertificateValidationCallback');
+    expect(commands.windows.command).not.toContain('\n');
   });
 
   it('keeps --tls-insecure for enrollment commands', () => {
@@ -108,7 +111,9 @@ describe('buildInstallCommands', () => {
     expect(commands.linux.command).toContain('--enrollment-token=TOKEN');
     expect(commands.linux.command).toContain('--tls-insecure');
     expect(commands.linux.display).toContain('--server-edge-addr=ongrid.intra:40012');
-    expect(commands.windows.display).toContain('--manager-url https://ongrid.intra:8443');
+    expect(commands.windows.display).toContain("'--manager-url','https://ongrid.intra:8443'");
+    expect(commands.windows.display).toContain("'--enrollment-token','TOKEN'");
+    expect(commands.windows.display).toContain('& $f @a');
   });
 });
 

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -40,14 +41,21 @@ type specView struct {
 	DedupeFilesystemsByDevice bool
 }
 
-// Defaults match the host/proc-metrics plugins' subprocesses
-// (node_exporter on :9102, process_exporter on :9256 — see
-// internal/edgeagent/plugins/hostmetrics, .../procmetrics).
+// Defaults match the host/proc-metrics plugins' subprocesses: the host
+// exporter on :9102 and (Linux only) process_exporter on :9256 — see
+// internal/edgeagent/plugins/hostmetrics and .../procmetrics. Windows has
+// no process_exporter (procmetrics is not registered), so scraping :9256
+// there only produced repeated "connection refused" warnings.
 // Localhost only because all processes live in the same systemd unit
 // on the edge.
-var defaultURLs = []string{
-	"http://127.0.0.1:9102/metrics",
-	"http://127.0.0.1:9256/metrics",
+var defaultURLs = platformDefaultURLs(runtime.GOOS)
+
+func platformDefaultURLs(goos string) []string {
+	urls := []string{"http://127.0.0.1:9102/metrics"}
+	if goos != "windows" {
+		urls = append(urls, "http://127.0.0.1:9256/metrics")
+	}
+	return urls
 }
 
 const (
