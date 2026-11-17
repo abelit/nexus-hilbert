@@ -60,7 +60,13 @@ web/node_modules/
 web/tsconfig.tsbuildinfo
 api/gen/
 /.playwright-cli/
+/.playwright-mcp/
 /output/
+
+# Edge release bundles are build output; distribute via releases, not git
+deploy/edge/*.tar.gz
+deploy/edge/*.tar.gz.sha256
+deploy/edge/*.zip
 
 # Local dev artifacts (deploy/)
 deploy/docker-compose.override.yml
