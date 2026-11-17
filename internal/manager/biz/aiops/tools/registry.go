@@ -4,6 +4,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"github.com/ongridio/ongrid/internal/manager/biz/toolresult"
 	"log/slog"
 	"os"
 	"strconv"
@@ -43,6 +44,7 @@ type ExecuteResult struct {
 // without that signal). alertUC is a narrow interface (AlertUsecase) so
 // tests can inject a fake without standing up the full alert biz repo.
 type Registry struct {
+	results     *toolresult.Usecase
 	skillRunner SkillRunner
 	caller      Caller
 	edges       *edgebiz.Usecase
@@ -456,3 +458,6 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	bag = bag.WithExtra(NewToolSearchTool(bag, r.log))
 	return bag
 }
+
+func (r *Registry) SetToolResults(u *toolresult.Usecase) { r.results = u }
+func (r *Registry) ToolResults() *toolresult.Usecase     { return r.results }

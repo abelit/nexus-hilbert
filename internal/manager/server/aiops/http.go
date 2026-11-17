@@ -162,6 +162,9 @@ func (h *Handler) SetOperationActions(operations OperationReader, execute Operat
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/chat/sessions", h.createSession)
 	r.Get("/v1/chat/sessions", h.listSessions)
+	r.Get("/v1/chat/sessions/{id}/tool-results/{resultID}", h.toolResult)
+	r.Get("/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}", h.toolResult)
+	r.Post("/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}", h.toolResult)
 	r.Post("/v1/chat/sessions/{id}/messages", h.postMessage)
 	r.Post("/v1/chat/sessions/{id}/attachments", h.uploadAttachment)
 	r.Get("/v1/chat/sessions/{id}/attachments/{attachmentID}", h.getAttachment)
@@ -458,6 +461,7 @@ type postMessageResp struct {
 }
 
 type toolExecutionDTO struct {
+	ResultID     string  `json:"result_id,omitempty"`
 	Name         string  `json:"name"`
 	Status       string  `json:"status"`
 	Error        string  `json:"error,omitempty"`
@@ -468,6 +472,7 @@ type toolExecutionDTO struct {
 }
 
 type messageDTO struct {
+	ResultID    string             `json:"result_id,omitempty"`
 	ToolCall    *toolExecutionDTO  `json:"tool_call,omitempty"`
 	ID          string             `json:"id"`
 	Role        string             `json:"role"`
@@ -1349,6 +1354,9 @@ func toMessageDTO(m *model.Message) messageDTO {
 	if m.Content != nil {
 		out.Content = *m.Content
 	}
+	if m.ResultID != nil {
+		out.ResultID = *m.ResultID
+	}
 	if m.ToolCallID != nil {
 		out.ToolCallID = *m.ToolCallID
 	}
@@ -1360,6 +1368,9 @@ func toMessageDTO(m *model.Message) messageDTO {
 	}
 	if tc := m.ToolExecution; tc != nil {
 		x := &toolExecutionDTO{Name: tc.ToolName, Status: tc.Status, ArgumentsRaw: tc.ArgumentsJSON, DeviceID: tc.DeviceID}
+		if tc.ResultID != nil {
+			x.ResultID = *tc.ResultID
+		}
 		if tc.Error != nil {
 			x.Error = *tc.Error
 		}
