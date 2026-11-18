@@ -312,8 +312,17 @@ export function ExternalAlertsPanel() {
                 return (
                   <tr
                     key={String(readPath(item, '_id') ?? index)}
-                    className="cursor-pointer border-b border-zinc-900/70 hover:bg-zinc-900/40"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={tr('查看告警详情', 'View alert detail')}
+                    className="cursor-pointer border-b border-zinc-900/70 hover:bg-zinc-900/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500"
                     onClick={() => setDetail(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setDetail(item);
+                      }
+                    }}
                   >
                     {COLUMNS.map((column) => {
                       const value = text(readPath(item, column.path));
