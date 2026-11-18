@@ -423,6 +423,11 @@ type normalizedConnection struct {
 
 func normalizeConnection(in ConnectionInput, existing *model.Connection) (normalizedConnection, SourceProfile, error) {
 	kind := strings.TrimSpace(in.Kind)
+	if existing != nil && kind != "" && kind != existing.Kind {
+		// Changing kind would orphan the connection's CI mappings, which are
+		// keyed by (kind, connection_id). Create a new connection instead.
+		return normalizedConnection{}, SourceProfile{}, fmt.Errorf("%w: connection kind cannot change", errs.ErrInvalid)
+	}
 	if kind == "" && existing != nil {
 		kind = existing.Kind
 	}

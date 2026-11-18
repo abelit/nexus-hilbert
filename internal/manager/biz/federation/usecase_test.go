@@ -232,3 +232,22 @@ func TestConnectionHealthSkipsDisabled(t *testing.T) {
 		t.Fatalf("health = %+v", rows)
 	}
 }
+
+func TestUpdateConnectionRejectsKindChange(t *testing.T) {
+	uc, _ := newUsecase(t, fakeCrypto{}, &fakeQuerier{})
+	ctx := context.Background()
+	view, err := uc.CreateConnection(ctx, biz.ConnectionInput{
+		Kind: model.KindExternalAlert, Name: "primary",
+		BaseURL: "http://morse.invalid", APIPath: "/api/v1/alerts",
+	}, 1)
+	if err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	_, err = uc.UpdateConnection(ctx, view.ID, biz.ConnectionInput{
+		Kind: model.KindITSMTicket, Name: "primary",
+		BaseURL: "http://morse.invalid", APIPath: "/api/v1/alerts",
+	})
+	if !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("kind change err = %v", err)
+	}
+}
