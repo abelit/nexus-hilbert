@@ -406,3 +406,21 @@ func TestFieldPathsRequireAdmin(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
 	}
 }
+
+func TestListTicketsIsReadableAndConfigured(t *testing.T) {
+	router, service, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	if _, err := service.CreateConnection(context.Background(), biz.ConnectionInput{
+		Kind: model.KindITSMTicket, Name: "itsm",
+		BaseURL: "http://itsm.invalid", APIPath: "/api/v1/webhook/dingtalk/database/incidents",
+	}, 1); err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	rec := do(t, router, http.MethodGet, "/v1/federation/tickets?days=30&status=RUNNING", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	got := decodeBody[biz.ListResult](t, rec)
+	if !got.Configured || got.Kind != model.KindITSMTicket || got.Total != 1 {
+		t.Fatalf("result = %+v", got)
+	}
+}

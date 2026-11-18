@@ -86,5 +86,8 @@
   {"method":"POST","path":"/v1/federation/center-filters/preview","reason":"Preview substitutes the administrator's identity against a live upstream; keep it in the console."},
   {"method":"GET","path":"/v1/federation/columns","reason":"Federated display-column configuration is console-only."},
   {"method":"PUT","path":"/v1/federation/columns","reason":"Federated display-column configuration is console-only."},
-  {"method":"POST","path":"/v1/federation/field-paths","reason":"Field discovery scans upstream records that may carry personal data; paths only, console-only."}
+  {"method":"POST","path":"/v1/federation/field-paths","reason":"Field discovery scans upstream records that may carry personal data; paths only, console-only."},
+  {"method":"GET","path":"/v1/federation/tickets","reason":"Federated ITSM ticket reads use the interactive operator's identity lens and a configured upstream; not a stable external API operation."},
+  {"method":"GET","path":"/v1/federation/tickets/my","reason":"The per-viewer ITSM lens substitutes the interactive operator's IAM identity; external MCP has no equivalent binding."},
+  {"method":"GET","path":"/v1/federation/tickets/stats","reason":"Federated ticket stats fan out live upstream count queries; keep them in the interactive console."}
 ]

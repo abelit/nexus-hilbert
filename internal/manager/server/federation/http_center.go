@@ -31,6 +31,8 @@ func (h *Handler) registerCenter(r chi.Router) {
 	r.Post("/v1/federation/field-paths", h.fieldPaths)
 	r.Get("/v1/federation/alerts/my", h.listMyAlerts)
 	r.Get("/v1/federation/alerts/stats", h.alertStats)
+	r.Get("/v1/federation/tickets/my", h.listMyTickets)
+	r.Get("/v1/federation/tickets/stats", h.ticketStats)
 }
 
 type ruleDTO struct {
@@ -315,6 +317,56 @@ func (h *Handler) alertStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats, err := h.svc.Stats(r.Context(), model.KindExternalAlert, strings.TrimSpace(r.URL.Query().Get("scope")), req, caller.UserID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func (h *Handler) listTickets(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireCaller(w, r); !ok {
+		return
+	}
+	req, ok := parseListRequest(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.svc.ListItems(r.Context(), model.KindITSMTicket, req)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) listMyTickets(w http.ResponseWriter, r *http.Request) {
+	caller, ok := requireCaller(w, r)
+	if !ok {
+		return
+	}
+	req, ok := parseListRequest(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.svc.ListMine(r.Context(), model.KindITSMTicket, strings.TrimSpace(r.URL.Query().Get("scope")), req, caller.UserID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) ticketStats(w http.ResponseWriter, r *http.Request) {
+	caller, ok := requireCaller(w, r)
+	if !ok {
+		return
+	}
+	req, ok := parseListRequest(w, r)
+	if !ok {
+		return
+	}
+	stats, err := h.svc.Stats(r.Context(), model.KindITSMTicket, strings.TrimSpace(r.URL.Query().Get("scope")), req, caller.UserID)
 	if err != nil {
 		writeErr(w, err)
 		return

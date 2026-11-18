@@ -199,3 +199,61 @@ func TestPreviewFilterUnboundDoesNotQuery(t *testing.T) {
 		t.Fatalf("unbound preview queried: %v", querier.got)
 	}
 }
+
+func createTicketConnection(t *testing.T, uc *biz.Usecase) {
+	t.Helper()
+	if _, err := uc.CreateConnection(context.Background(), biz.ConnectionInput{
+		Kind: model.KindITSMTicket, Name: "itsm",
+		BaseURL: "http://itsm.invalid", APIPath: "/api/v1/webhook/dingtalk/database/incidents",
+	}, 1); err != nil {
+		t.Fatalf("CreateConnection ticket: %v", err)
+	}
+}
+
+func TestListItemsTicketUsesFilterGrammarAndCap(t *testing.T) {
+	querier := &fakeQuerier{}
+	uc, _ := newUsecase(t, fakeCrypto{}, querier)
+	createTicketConnection(t, uc)
+	if _, err := uc.ListItems(context.Background(), model.KindITSMTicket, biz.ListRequest{
+		Status: "RUNNING", Keyword: "disk", PageSize: 9999,
+	}); err != nil {
+		t.Fatalf("ListItems: %v", err)
+	}
+	if querier.got.PageSize != 100 {
+		t.Fatalf("page size = %d", querier.got.PageSize)
+	}
+	if querier.got.Table != "" {
+		t.Fatalf("ticket table = %q", querier.got.Table)
+	}
+	want := map[string]bool{
+		"form_data.instanceStatus:eq:RUNNING": false,
+		"form_data.title:regex:disk":          false,
+	}
+	for _, filter := range querier.got.Filters {
+		if _, ok := want[filter]; ok {
+			want[filter] = true
+		}
+	}
+	for filter, found := range want {
+		if !found {
+			t.Fatalf("filter %q missing from %v", filter, querier.got.Filters)
+		}
+	}
+}
+
+func TestStatsTicketUsesTicketStatuses(t *testing.T) {
+	uc, _ := newUsecase(t, fakeCrypto{}, &fakeQuerier{})
+	createTicketConnection(t, uc)
+	stats, err := uc.Stats(context.Background(), model.KindITSMTicket, "", biz.ListRequest{Days: 30}, 1)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	for _, status := range []string{"RUNNING", "ERROR", "COMPLETED", "TERMINATED"} {
+		if _, ok := stats.ByStatus[status]; !ok {
+			t.Fatalf("status %q missing from %+v", status, stats.ByStatus)
+		}
+	}
+	if len(stats.BySeverity) != 0 {
+		t.Fatalf("ticket stats must not have severity facets: %+v", stats.BySeverity)
+	}
+}
