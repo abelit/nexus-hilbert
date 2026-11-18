@@ -257,3 +257,70 @@ func TestStatsTicketUsesTicketStatuses(t *testing.T) {
 		t.Fatalf("ticket stats must not have severity facets: %+v", stats.BySeverity)
 	}
 }
+
+func TestFleetListCache(t *testing.T) {
+	querier := &fakeQuerier{}
+	uc, _ := newUsecase(t, fakeCrypto{}, querier)
+	createAlertConnection(t, uc)
+	ctx := context.Background()
+	req := biz.ListRequest{Status: "firing", Page: 1, PageSize: 50}
+	if _, err := uc.ListItems(ctx, model.KindExternalAlert, req); err != nil {
+		t.Fatalf("ListItems: %v", err)
+	}
+	if _, err := uc.ListItems(ctx, model.KindExternalAlert, req); err != nil {
+		t.Fatalf("ListItems cached: %v", err)
+	}
+	if got := querier.callCount(); got != 1 {
+		t.Fatalf("fleet cache calls = %d, want 1", got)
+	}
+	req.Status = "resolved"
+	if _, err := uc.ListItems(ctx, model.KindExternalAlert, req); err != nil {
+		t.Fatalf("ListItems new filter: %v", err)
+	}
+	if got := querier.callCount(); got != 2 {
+		t.Fatalf("new filter calls = %d, want 2", got)
+	}
+}
+
+func TestFleetStatsCache(t *testing.T) {
+	querier := &fakeQuerier{}
+	uc, _ := newUsecase(t, fakeCrypto{}, querier)
+	createAlertConnection(t, uc)
+	ctx := context.Background()
+	if _, err := uc.Stats(ctx, model.KindExternalAlert, "", biz.ListRequest{Days: 7}, 1); err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	first := querier.callCount()
+	if first == 0 {
+		t.Fatal("expected stats queries")
+	}
+	if _, err := uc.Stats(ctx, model.KindExternalAlert, "", biz.ListRequest{Days: 7}, 1); err != nil {
+		t.Fatalf("Stats cached: %v", err)
+	}
+	if got := querier.callCount(); got != first {
+		t.Fatalf("stats cache calls = %d, want %d", got, first)
+	}
+}
+
+func TestListMineIsNotCached(t *testing.T) {
+	querier := &fakeQuerier{}
+	uc, _ := newUsecase(t, fakeCrypto{}, querier)
+	createAlertConnection(t, uc)
+	ctx := context.Background()
+	if _, err := uc.SaveFilter(ctx, model.KindExternalAlert, biz.FilterInput{
+		Key: "mine", Name: "Mine", Usage: biz.UsageFilter, Enabled: ptr(true),
+		And: []biz.Rule{{Field: "status", Op: "eq", ValueType: biz.ValueTypeFixed, Values: []string{"firing"}}},
+	}, ""); err != nil {
+		t.Fatalf("SaveFilter: %v", err)
+	}
+	req := biz.ListRequest{Page: 1, PageSize: 50}
+	if _, err := uc.ListMine(ctx, model.KindExternalAlert, "mine", req, 7); err != nil {
+		t.Fatalf("ListMine: %v", err)
+	}
+	if _, err := uc.ListMine(ctx, model.KindExternalAlert, "mine", req, 7); err != nil {
+		t.Fatalf("ListMine second: %v", err)
+	}
+	if got := querier.callCount(); got != 2 {
+		t.Fatalf("personal lens calls = %d, want 2 (never cached)", got)
+	}
+}

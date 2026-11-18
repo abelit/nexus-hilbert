@@ -111,6 +111,7 @@ type Usecase struct {
 	crypto     Crypto
 	identities ViewerIdentityResolver
 	cmdb       CMDBReader
+	cache      *ttlCache
 	log        *slog.Logger
 }
 
@@ -118,7 +119,7 @@ func NewUsecase(repo Repository, querier SourceQuerier, crypto Crypto, log *slog
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Usecase{repo: repo, querier: querier, crypto: crypto, log: log}
+	return &Usecase{repo: repo, querier: querier, crypto: crypto, cache: newTTLCache(), log: log}
 }
 
 func (u *Usecase) CreateConnection(ctx context.Context, in ConnectionInput, callerID uint64) (*ConnectionView, error) {
@@ -246,6 +247,7 @@ func (u *Usecase) TestConnection(ctx context.Context, in ConnectionInput) error 
 		creds = *normalized.Auth
 	}
 	return u.querier.Probe(ctx, ProbeConfig{
+		Kind:           normalized.Kind,
 		BaseURL:        normalized.BaseURL,
 		APIPath:        normalized.APIPath,
 		Method:         normalized.Method,
@@ -270,6 +272,7 @@ func (u *Usecase) TestSavedConnection(ctx context.Context, id uint64) error {
 	fixed, _ := parseFixed(row.FixedParamsJSON)
 	profile, _ := Profile(row.Kind)
 	return u.querier.Probe(ctx, ProbeConfig{
+		Kind:           row.Kind,
 		BaseURL:        row.BaseURL,
 		APIPath:        row.APIPath,
 		Method:         row.Method,
@@ -337,6 +340,17 @@ func (u *Usecase) ListItems(ctx context.Context, kind string, req ListRequest) (
 	}
 	filters := buildListFilters(profile, req)
 
+	// Fleet queries are shared across viewers, so a short TTL absorbs
+	// repeated page loads and badge polls. The per-viewer lens is a
+	// different method and is never cached.
+	cacheKey := fmt.Sprintf("list|%s|%d|%s|%s|%d|%d|%d|%s|%s|%s",
+		kind, conn.ID, req.StartDate, req.EndDate, days, page, size, req.Status, req.Severity, req.Keyword)
+	if cached, ok := u.cache.get(cacheKey); ok {
+		if result, ok := cached.(*ListResult); ok {
+			return result, nil
+		}
+	}
+
 	got, err := u.querier.Query(ctx, conn, QueryRequest{
 		Table:     profile.DefaultTable,
 		StartDate: req.StartDate,
@@ -349,7 +363,7 @@ func (u *Usecase) ListItems(ctx context.Context, kind string, req ListRequest) (
 	if err != nil {
 		return nil, err
 	}
-	return &ListResult{
+	result := &ListResult{
 		Kind:       kind,
 		Configured: true,
 		Table:      got.Table,
@@ -360,7 +374,9 @@ func (u *Usecase) ListItems(ctx context.Context, kind string, req ListRequest) (
 		Pages:      got.Pages,
 		Items:      got.Items,
 		Filters:    got.Filters,
-	}, nil
+	}
+	u.cache.set(cacheKey, result, 15*time.Second)
+	return result, nil
 }
 
 func (u *Usecase) pickConnection(ctx context.Context, kind string, id uint64) (*model.Connection, error) {

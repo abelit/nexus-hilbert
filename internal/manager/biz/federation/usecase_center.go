@@ -286,6 +286,18 @@ func (u *Usecase) Stats(ctx context.Context, kind, scope string, req ListRequest
 	}
 	out.Configured = true
 
+	// Fleet stats are shared; the per-viewer scope is not cached.
+	cacheKey := ""
+	if scope == "" {
+		cacheKey = fmt.Sprintf("stats|%s|%d|%s|%s|%d",
+			kind, conn.ID, req.StartDate, req.EndDate, out.WindowDays)
+		if cached, ok := u.cache.get(cacheKey); ok {
+			if result, ok := cached.(*StatsResult); ok {
+				return result, nil
+			}
+		}
+	}
+
 	var extraAnd, extraOr []string
 	if scope != "" {
 		filter, err := u.scopeFilter(ctx, kind, scope)
@@ -341,6 +353,9 @@ func (u *Usecase) Stats(ctx context.Context, kind, scope string, req ListRequest
 	}
 	for i, severity := range severitiesFor(kind) {
 		out.BySeverity[severity] = results[1+len(statusesFor(kind))+i]
+	}
+	if cacheKey != "" {
+		u.cache.set(cacheKey, out, 60*time.Second)
 	}
 	return out, nil
 }

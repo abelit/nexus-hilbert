@@ -39,15 +39,23 @@ func (f fakeCrypto) Decrypt(cipher string) (string, error) {
 func (f fakeCrypto) Weak() bool { return f.weak }
 
 type fakeQuerier struct {
-	mu   sync.Mutex
-	got  biz.QueryRequest
-	page *biz.QueryPage
-	err  error
+	mu    sync.Mutex
+	calls int
+	got   biz.QueryRequest
+	page  *biz.QueryPage
+	err   error
+}
+
+func (f *fakeQuerier) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
 }
 
 func (f *fakeQuerier) Query(_ context.Context, _ *model.Connection, req biz.QueryRequest) (*biz.QueryPage, error) {
 	f.mu.Lock()
 	f.got = req
+	f.calls++
 	f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err

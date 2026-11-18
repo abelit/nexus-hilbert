@@ -51,6 +51,7 @@ type QueryPage struct {
 
 // ProbeConfig describes an unsaved or saved connection for a health probe.
 type ProbeConfig struct {
+	Kind           string
 	BaseURL        string
 	APIPath        string
 	Method         string

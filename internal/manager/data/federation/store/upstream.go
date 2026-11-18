@@ -11,6 +11,7 @@ import (
 	biz "github.com/ongridio/ongrid/internal/manager/biz/federation"
 	model "github.com/ongridio/ongrid/internal/manager/model/federation"
 	"github.com/ongridio/ongrid/internal/pkg/fedclient"
+	prommetrics "github.com/ongridio/ongrid/internal/pkg/prom"
 	"github.com/ongridio/ongrid/internal/pkg/secretbox"
 )
 
@@ -27,6 +28,7 @@ func (u *Upstream) Query(ctx context.Context, conn *model.Connection, req biz.Qu
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
 	page, err := client.Query(ctx, fedclient.Query{
 		Table:     req.Table,
 		StartDate: req.StartDate,
@@ -37,6 +39,7 @@ func (u *Upstream) Query(ctx context.Context, conn *model.Connection, req biz.Qu
 		Page:      req.Page,
 		PageSize:  req.PageSize,
 	})
+	recordUpstream(conn.Kind, start, err)
 	if err != nil {
 		return nil, wrapUpstream(err)
 	}
@@ -67,10 +70,33 @@ func (u *Upstream) Probe(ctx context.Context, cfg biz.ProbeConfig) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", biz.ErrUpstream, err)
 	}
-	if err := client.Probe(ctx); err != nil {
-		return wrapUpstream(err)
+	start := time.Now()
+	probeErr := client.Probe(ctx)
+	kind := cfg.Kind
+	if kind == "" {
+		kind = "probe"
+	}
+	recordUpstream(kind, start, probeErr)
+	if probeErr != nil {
+		return wrapUpstream(probeErr)
 	}
 	return nil
+}
+
+func recordUpstream(kind string, start time.Time, err error) {
+	if kind == "" {
+		kind = "unknown"
+	}
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	if prommetrics.FederationUpstreamRequestsTotal != nil {
+		prommetrics.FederationUpstreamRequestsTotal.WithLabelValues(kind, outcome).Inc()
+	}
+	if prommetrics.FederationUpstreamLatency != nil {
+		prommetrics.FederationUpstreamLatency.WithLabelValues(kind).Observe(time.Since(start).Seconds())
+	}
 }
 
 func clientForConnection(conn *model.Connection) (*fedclient.Client, error) {

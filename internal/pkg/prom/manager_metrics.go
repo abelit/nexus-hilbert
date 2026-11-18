@@ -140,6 +140,15 @@ var (
 	// this gauge; values pegged at the cap mean operators should
 	// either bump the cap or expect skipped rows on new fires.
 	InvestigatorInflight prometheus.Gauge
+
+	// FederationUpstreamRequestsTotal counts read-only queries/probes to a
+	// federated external alert/ITSM source. Labels stay low cardinality:
+	// kind = external_alert | itsm_ticket | probe; outcome = ok | error.
+	FederationUpstreamRequestsTotal *prometheus.CounterVec
+
+	// FederationUpstreamLatency observes the same calls. The kind label is
+	// the bounded source kind; no connection id or upstream URL.
+	FederationUpstreamLatency *prometheus.HistogramVec
 )
 
 // alertEvaluatorBuckets are the histogram buckets for AlertEvaluatorLatency.
@@ -285,6 +294,21 @@ func RegisterManagerMetrics(reg *prometheus.Registry, log *slog.Logger) {
 		Name: "ongrid_investigator_inflight",
 		Help: "Live RCA investigator workers; capped at investigator.Config.MaxConcurrent.",
 	})
+	federationReqs := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "federation_upstream_requests_total",
+			Help: "Read-only external alert/ITSM source calls, by source kind and outcome (ok|error).",
+		},
+		[]string{"kind", "outcome"},
+	)
+	federationLatency := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "federation_upstream_query_duration_seconds",
+			Help:    "External alert/ITSM source call latency, by source kind.",
+			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+		},
+		[]string{"kind"},
+	)
 
 	HTTPRequestsTotal = registerOrExistingCounterVec2(registerer, httpReqs, log, "ongrid_http_requests_total")
 	HTTPRequestDuration = registerOrExistingHistogramVec(registerer, httpDur, log)
@@ -299,6 +323,8 @@ func RegisterManagerMetrics(reg *prometheus.Registry, log *slog.Logger) {
 	AlertEvalTicksTotal = registerOrExistingCounterVec2(registerer, alertTicks, log, "ongrid_alert_eval_ticks_total")
 	EdgeConnections = registerOrExistingGaugeVec(registerer, edgeConns, log)
 	InvestigatorInflight = registerOrExistingGauge(registerer, investigatorInflight, log, "ongrid_investigator_inflight")
+	FederationUpstreamRequestsTotal = registerOrExistingCounterVec2(registerer, federationReqs, log, "federation_upstream_requests_total")
+	FederationUpstreamLatency = registerOrExistingHistogramVec(registerer, federationLatency, log)
 
 	// Go runtime + process collectors give us goroutines / heap / GC / fd
 	// for free. Idempotent — ignore AlreadyRegisteredError so a second
