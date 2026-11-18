@@ -75,5 +75,16 @@
   {"method":"DELETE","path":"/v1/federation/connections/{id}","reason":"Federated-source connections stay in the trusted administrator console."},
   {"method":"POST","path":"/v1/federation/connections/{id}/test","reason":"Federated-source probes use stored upstream credentials; stay in the trusted administrator console."},
   {"method":"GET","path":"/v1/federation/connections/{id}/reveal","reason":"Authentication, credential disclosure, and approval decisions stay in the trusted console."},
-  {"method":"GET","path":"/v1/federation/alerts","reason":"Federated alert reads use the interactive operator's identity lens and a configured upstream; not a stable external API operation."}
+  {"method":"GET","path":"/v1/federation/alerts","reason":"Federated alert reads use the interactive operator's identity lens and a configured upstream; not a stable external API operation."},
+  {"method":"GET","path":"/v1/federation/alerts/my","reason":"The per-viewer lens substitutes the interactive operator's IAM identity; external MCP has no equivalent binding."},
+  {"method":"GET","path":"/v1/federation/alerts/stats","reason":"Federated stats fan out live upstream count queries; keep them in the interactive console."},
+  {"method":"GET","path":"/v1/federation/center-filters","reason":"Federated-source filter configuration stays in the trusted administrator console."},
+  {"method":"POST","path":"/v1/federation/center-filters","reason":"Federated-source filter configuration stays in the trusted administrator console."},
+  {"method":"GET","path":"/v1/federation/center-filters/summaries","reason":"Federated-source scope metadata is console-only; external MCP uses the native alert tools."},
+  {"method":"PUT","path":"/v1/federation/center-filters/{key}","reason":"Federated-source filter configuration stays in the trusted administrator console."},
+  {"method":"DELETE","path":"/v1/federation/center-filters/{key}","reason":"Federated-source filter configuration stays in the trusted administrator console."},
+  {"method":"POST","path":"/v1/federation/center-filters/preview","reason":"Preview substitutes the administrator's identity against a live upstream; keep it in the console."},
+  {"method":"GET","path":"/v1/federation/columns","reason":"Federated display-column configuration is console-only."},
+  {"method":"PUT","path":"/v1/federation/columns","reason":"Federated display-column configuration is console-only."},
+  {"method":"POST","path":"/v1/federation/field-paths","reason":"Field discovery scans upstream records that may carry personal data; paths only, console-only."}
 ]

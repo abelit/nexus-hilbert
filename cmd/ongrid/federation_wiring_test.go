@@ -22,7 +22,7 @@ func TestFederationWiringRegistersRoutes(t *testing.T) {
 	if err := federationdata.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	mod := bootstrapFederation(slog.New(slog.NewTextHandler(io.Discard, nil)), &storageModule{db: db})
+	mod := bootstrapFederation(slog.New(slog.NewTextHandler(io.Discard, nil)), &storageModule{db: db}, &iamModule{})
 	if mod == nil || mod.handler == nil {
 		t.Fatal("bootstrapFederation returned no handler")
 	}

@@ -64,6 +64,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/federation/connections/{id}/test", h.testSavedConnection)
 	r.Get("/v1/federation/connections/{id}/reveal", h.reveal)
 	r.Get("/v1/federation/alerts", h.listAlerts)
+	h.registerCenter(r)
 }
 
 type authInput struct {

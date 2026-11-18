@@ -87,7 +87,7 @@ func run() (runErr error) {
 	models := bootstrapModels(rootCtx, cfg, log, reg, settings)
 	devices := bootstrapDevices(rootCtx, cfg, log, storage, iam, settings)
 	alerts := bootstrapAlerts(rootCtx, cfg, log, storage)
-	federation := bootstrapFederation(log, storage)
+	federation := bootstrapFederation(log, storage, iam)
 	telemetry, err := bootstrapTelemetry(rootCtx, cfg, log, storage, settings, models, devices, alerts)
 	if err != nil {
 		return err

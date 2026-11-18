@@ -26,10 +26,11 @@ func (secretboxCrypto) Encrypt(plain string) (string, error) { return secretbox.
 func (secretboxCrypto) Decrypt(cipher string) (string, error) { return secretbox.Decrypt(cipher) }
 func (secretboxCrypto) Weak() bool                           { return secretbox.KeyIsWeak() }
 
-func bootstrapFederation(log *slog.Logger, storage *storageModule) *federationModule {
+func bootstrapFederation(log *slog.Logger, storage *storageModule, iam *iamModule) *federationModule {
 	logger := log.With(slog.String("comp", "federation"))
 	repo := federationdata.NewRepo(storage.db)
 	uc := federationbiz.NewUsecase(repo, federationdata.NewUpstream(), secretboxCrypto{}, logger)
+	uc.SetIdentityResolver(iamIdentityResolver{users: iam.userUC})
 	return &federationModule{
 		handler: federationserver.NewHandler(federationservice.New(uc), logger),
 	}

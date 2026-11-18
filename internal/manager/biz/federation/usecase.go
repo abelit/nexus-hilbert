@@ -101,13 +101,16 @@ type ListResult struct {
 	Pages      int               `json:"pages"`
 	Items      []json.RawMessage `json:"items"`
 	Filters    json.RawMessage   `json:"filters,omitempty"`
+	Scope      string            `json:"scope,omitempty"`
+	Identity   string            `json:"identity,omitempty"`
 }
 
 type Usecase struct {
-	repo    Repository
-	querier SourceQuerier
-	crypto  Crypto
-	log     *slog.Logger
+	repo       Repository
+	querier    SourceQuerier
+	crypto     Crypto
+	identities ViewerIdentityResolver
+	log        *slog.Logger
 }
 
 func NewUsecase(repo Repository, querier SourceQuerier, crypto Crypto, log *slog.Logger) *Usecase {

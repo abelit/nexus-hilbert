@@ -61,7 +61,7 @@ var identityOps = map[string]bool{
 }
 
 var identitySources = map[string]bool{
-	"email": true, "phone": true, "dingtalk_userid": true,
+	"email": true, "phone": true, "dingtalk_userid": true, "username": true,
 }
 
 const (

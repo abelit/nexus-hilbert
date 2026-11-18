@@ -282,3 +282,127 @@ func TestDeleteConnectionConflictWithoutCascade(t *testing.T) {
 		t.Fatalf("cascade status = %d body=%s", rec.Code, rec.Body)
 	}
 }
+
+type testIdentities map[string][]string
+
+func (t testIdentities) Resolve(context.Context, uint64) (map[string][]string, error) {
+	return map[string][]string(t), nil
+}
+
+func saveIdentityFilter(t *testing.T, service *svc.Service, key string) {
+	t.Helper()
+	if _, err := service.SaveFilter(context.Background(), model.KindExternalAlert, biz.FilterInput{
+		Key: key, Name: key, Usage: biz.UsageBoth, Enabled: boolPtr(true),
+		And: []biz.Rule{
+			{Field: "owner", Op: "eq", ValueType: biz.ValueTypeIdentity, Identity: "email"},
+			{Field: "status", Op: "eq", ValueType: biz.ValueTypeFixed, Values: []string{"firing"}},
+		},
+	}, ""); err != nil {
+		t.Fatalf("SaveFilter: %v", err)
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func TestCenterFilterWritesRequireAdminAndSummariesAreReadable(t *testing.T) {
+	router, service, _ := newTestRouter(t, "admin", testCrypto{}, &testQuerier{})
+	saveIdentityFilter(t, service, "mine")
+
+	userRouter, _, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	// The user router has its own empty DB; summaries are still a valid read.
+	rec := do(t, userRouter, http.MethodGet, "/v1/federation/center-filters/summaries?kind=external_alert", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("summaries status = %d body=%s", rec.Code, rec.Body)
+	}
+	rec = do(t, userRouter, http.MethodPost, "/v1/federation/center-filters?kind=external_alert", map[string]any{
+		"key": "x", "name": "X", "usage": "filter",
+		"and": []map[string]any{{"field": "status", "op": "eq", "value_type": "fixed", "values": []string{"firing"}}},
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("write status = %d body=%s", rec.Code, rec.Body)
+	}
+
+	rec = do(t, router, http.MethodGet, "/v1/federation/center-filters/summaries?kind=external_alert", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin summaries status = %d body=%s", rec.Code, rec.Body)
+	}
+	got := decodeBody[struct {
+		Items []biz.FilterSummary `json:"items"`
+	}](t, rec)
+	if len(got.Items) != 1 || got.Items[0].Key != "mine" || !got.Items[0].IdentityRequired {
+		t.Fatalf("summaries = %+v", got)
+	}
+}
+
+func TestColumnsAreReadableByUser(t *testing.T) {
+	router, _, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	rec := do(t, router, http.MethodGet, "/v1/federation/columns?kind=external_alert", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	got := decodeBody[struct {
+		Items []map[string]any `json:"items"`
+	}](t, rec)
+	if len(got.Items) == 0 {
+		t.Fatalf("body = %s", rec.Body)
+	}
+}
+
+func TestMyAlertsUnboundWhenNoIdentity(t *testing.T) {
+	router, service, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	saveIdentityFilter(t, service, "mine")
+	rec := do(t, router, http.MethodGet, "/v1/federation/alerts/my?scope=mine", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	got := decodeBody[biz.ListResult](t, rec)
+	if got.Identity != "unbound" || got.Reason != "unbound" {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestMyAlertsBoundWithIdentity(t *testing.T) {
+	router, service, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	if _, err := service.CreateConnection(context.Background(), biz.ConnectionInput{
+		Kind: model.KindExternalAlert, Name: "primary",
+		BaseURL: "http://morse.invalid", APIPath: "/api/v1/alerts",
+	}, 1); err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	saveIdentityFilter(t, service, "mine")
+	service.SetIdentityResolver(testIdentities{"email": {"a@b"}})
+	rec := do(t, router, http.MethodGet, "/v1/federation/alerts/my?scope=mine", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	got := decodeBody[biz.ListResult](t, rec)
+	if got.Identity != "bound" || got.Scope != "mine" {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestAlertStats(t *testing.T) {
+	router, service, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	if _, err := service.CreateConnection(context.Background(), biz.ConnectionInput{
+		Kind: model.KindExternalAlert, Name: "primary",
+		BaseURL: "http://morse.invalid", APIPath: "/api/v1/alerts",
+	}, 1); err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	rec := do(t, router, http.MethodGet, "/v1/federation/alerts/stats?days=7", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	got := decodeBody[biz.StatsResult](t, rec)
+	if !got.Configured || got.Total == nil || *got.Total != 1 {
+		t.Fatalf("stats = %+v", got)
+	}
+}
+
+func TestFieldPathsRequireAdmin(t *testing.T) {
+	userRouter, _, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	rec := do(t, userRouter, http.MethodPost, "/v1/federation/field-paths?kind=external_alert", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+}
