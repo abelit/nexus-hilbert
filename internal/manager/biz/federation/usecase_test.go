@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -38,13 +39,16 @@ func (f fakeCrypto) Decrypt(cipher string) (string, error) {
 func (f fakeCrypto) Weak() bool { return f.weak }
 
 type fakeQuerier struct {
+	mu   sync.Mutex
 	got  biz.QueryRequest
 	page *biz.QueryPage
 	err  error
 }
 
 func (f *fakeQuerier) Query(_ context.Context, _ *model.Connection, req biz.QueryRequest) (*biz.QueryPage, error) {
+	f.mu.Lock()
 	f.got = req
+	f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
