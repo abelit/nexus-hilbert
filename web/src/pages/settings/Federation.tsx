@@ -106,8 +106,8 @@ function formFrom(connection: Connection): FormState {
   };
 }
 
-function toInput(kind: FederationKind, form: FormState): ConnectionInput {
-  const credentialsTyped = Boolean(form.token || form.password || form.username);
+function toInput(kind: FederationKind, form: FormState, includeAuth = true): ConnectionInput {
+  const credentialsTyped = includeAuth && Boolean(form.token || form.password || form.username);
   return {
     kind,
     name: form.name.trim(),
@@ -367,11 +367,21 @@ function ConnectionDialog({
   const [form, setForm] = useState<FormState>(initial);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  // Editing prefills the non-secret username; only a field the operator
+  // actually touches may replace the stored credential set.
+  const [credentialsTouched, setCredentialsTouched] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+    setErr(null);
+    setOk(null);
+  }
+
+  function setCredential(key: 'token' | 'username' | 'password', value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    setCredentialsTouched(true);
     setErr(null);
     setOk(null);
   }
@@ -386,10 +396,10 @@ function ConnectionDialog({
     setErr(null);
     setOk(null);
     try {
-      if (connection && !form.token && !form.password && !form.username) {
+      if (connection && !credentialsTouched) {
         await testSavedConnection(connection.id);
       } else {
-        await testConnection(toInput(kind, form));
+        await testConnection(toInput(kind, form, true));
       }
       setOk(tr('连接测试通过', 'Connection test passed'));
     } catch (e) {
@@ -403,7 +413,7 @@ function ConnectionDialog({
     setSaving(true);
     setErr(null);
     try {
-      const input = toInput(kind, form);
+      const input = toInput(kind, form, !connection || credentialsTouched);
       if (connection) await updateConnection(connection.id, input);
       else await createConnection(input);
       await onSaved();
@@ -464,18 +474,18 @@ function ConnectionDialog({
         {form.auth_type === 'bearer' && (
           <div>
             <Label htmlFor="fed-token">{tr('Token', 'Token')}</Label>
-            <Input id="fed-token" type="password" placeholder={authHint} value={form.token} onChange={(e) => set('token', e.target.value)} autoComplete="new-password" />
+            <Input id="fed-token" type="password" placeholder={authHint} value={form.token} onChange={(e) => setCredential('token', e.target.value)} autoComplete="new-password" />
           </div>
         )}
         {form.auth_type === 'basic' && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label htmlFor="fed-user">{tr('用户名', 'Username')}</Label>
-              <Input id="fed-user" value={form.username} onChange={(e) => set('username', e.target.value)} autoComplete="off" />
+              <Input id="fed-user" value={form.username} onChange={(e) => setCredential('username', e.target.value)} autoComplete="off" />
             </div>
             <div>
               <Label htmlFor="fed-pass">{tr('密码', 'Password')}</Label>
-              <Input id="fed-pass" type="password" placeholder={authHint} value={form.password} onChange={(e) => set('password', e.target.value)} autoComplete="new-password" />
+              <Input id="fed-pass" type="password" placeholder={authHint} value={form.password} onChange={(e) => setCredential('password', e.target.value)} autoComplete="new-password" />
             </div>
           </div>
         )}

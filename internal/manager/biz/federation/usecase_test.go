@@ -131,7 +131,7 @@ func TestUpdateConnectionKeepsCredentialWhenAuthOmitted(t *testing.T) {
 	if _, err := uc.UpdateConnection(ctx, view.ID, biz.ConnectionInput{
 		Kind: model.KindExternalAlert, Name: "primary-renamed",
 		BaseURL: "http://morse.invalid", APIPath: "/api/v1/alerts",
-		AuthType: "bearer",
+		// AuthType and Auth deliberately omitted: both must be preserved.
 	}); err != nil {
 		t.Fatalf("UpdateConnection: %v", err)
 	}
@@ -203,5 +203,30 @@ func TestConnectionValidationRejectsBadEndpoint(t *testing.T) {
 		if _, err := uc.CreateConnection(context.Background(), in, 1); !errors.Is(err, errs.ErrInvalid) {
 			t.Fatalf("input %+v err = %v", in, err)
 		}
+	}
+}
+
+func TestConnectionHealthSkipsDisabled(t *testing.T) {
+	uc, _ := newUsecase(t, fakeCrypto{}, &fakeQuerier{})
+	ctx := context.Background()
+	if _, err := uc.CreateConnection(ctx, biz.ConnectionInput{
+		Kind: model.KindExternalAlert, Name: "on",
+		BaseURL: "http://morse.invalid", APIPath: "/api/v1/alerts",
+	}, 1); err != nil {
+		t.Fatalf("CreateConnection on: %v", err)
+	}
+	if _, err := uc.CreateConnection(ctx, biz.ConnectionInput{
+		Kind: model.KindExternalAlert, Name: "off",
+		BaseURL: "http://morse.invalid", APIPath: "/api/v1/alerts",
+		Enabled: ptr(false),
+	}, 1); err != nil {
+		t.Fatalf("CreateConnection off: %v", err)
+	}
+	rows, err := uc.ConnectionHealth(ctx, model.KindExternalAlert)
+	if err != nil {
+		t.Fatalf("ConnectionHealth: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Name != "on" || !rows[0].OK {
+		t.Fatalf("health = %+v", rows)
 	}
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ExternalLink, RefreshCw, Siren } from 'lucide-react';
 
@@ -104,8 +104,11 @@ export function ExternalAlertsPanel() {
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(0);
   const [detail, setDetail] = useState<ExternalItem | null>(null);
+  // A late response must not overwrite a newer filter/page result.
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const res: ExternalList = await listExternalAlerts({
@@ -116,16 +119,17 @@ export function ExternalAlertsPanel() {
         page: page + 1,
         page_size: PAGE_SIZE,
       });
+      if (seq !== requestSeq.current) return;
       setItems(res.items ?? []);
       setTotal(res.total ?? 0);
       setConfigured(res.configured);
       setReason(res.reason);
       setErr(null);
     } catch (e) {
-      if ((e as Error).name === 'AbortError') return;
+      if (seq !== requestSeq.current || (e as Error).name === 'AbortError') return;
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [days, status, severity, keyword, page]);
 

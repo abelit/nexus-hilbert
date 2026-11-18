@@ -291,12 +291,12 @@ func (u *Usecase) ConnectionHealth(ctx context.Context, kind string) ([]HealthRo
 	out := make([]HealthRow, 0, len(rows))
 	for i := range rows {
 		row := &rows[i]
-		health := HealthRow{ID: row.ID, Name: row.Name}
 		if !row.Enabled {
-			health.Error = "disabled"
-			out = append(out, health)
+			// Disabled is a configuration choice, not an unhealthy upstream.
+			// The connections table renders "—" for a missing health row.
 			continue
 		}
+		health := HealthRow{ID: row.ID, Name: row.Name}
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout(row.TimeoutSeconds))
 		err := u.TestSavedConnection(probeCtx, row.ID)
 		cancel()
@@ -453,7 +453,13 @@ func normalizeConnection(in ConnectionInput, existing *model.Connection) (normal
 	}
 	authType := strings.ToLower(strings.TrimSpace(in.AuthType))
 	if authType == "" {
-		authType = "none"
+		// An update that omits auth_type must keep the stored scheme, not
+		// silently become "none" and clear the credential.
+		if existing != nil && existing.AuthType != "" {
+			authType = existing.AuthType
+		} else {
+			authType = "none"
+		}
 	}
 	hasStoredCredential := existing != nil && existing.AuthCipher != ""
 	switch authType {

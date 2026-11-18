@@ -99,7 +99,7 @@ type Connection struct {
 	DefaultPageSize int       `gorm:"column:default_page_size;not null;default:50"`
 	TimeoutSeconds  int       `gorm:"column:timeout_seconds;not null;default:15"`
 	IsDefault       bool      `gorm:"column:is_default;not null;default:false;index:idx_fed_conn_kind_default,priority:2"`
-	Enabled         bool      `gorm:"column:enabled;not null;default:true;index:idx_fed_conn_kind_default,priority:1"`
+	Enabled         bool      `gorm:"column:enabled;not null;index:idx_fed_conn_kind_default,priority:1"`
 	Remark          string    `gorm:"column:remark;size:512;not null;default:''"`
 	CreatedBy       uint64    `gorm:"column:created_by;not null;default:0"`
 	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"`
@@ -115,7 +115,7 @@ type CIMapping struct {
 	CITypeID         uint64    `gorm:"column:ci_type_id;not null;uniqueIndex:uniq_fed_map_kind_type_conn,priority:2;index:idx_fed_map_kind_type,priority:2"`
 	ConnectionID     uint64    `gorm:"column:connection_id;not null;uniqueIndex:uniq_fed_map_kind_type_conn,priority:3"`
 	FieldMappingJSON string    `gorm:"column:field_mapping_json;type:text;not null"`
-	Enabled          bool      `gorm:"column:enabled;not null;default:true;index:idx_fed_map_kind_type,priority:3"`
+	Enabled          bool      `gorm:"column:enabled;not null;index:idx_fed_map_kind_type,priority:3"`
 	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt        time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
@@ -132,7 +132,7 @@ type CenterFilter struct {
 	Usage        string    `gorm:"column:usage;size:8;not null;default:'filter'"`
 	AndRulesJSON string    `gorm:"column:and_rules_json;type:text;not null"`
 	OrRulesJSON  string    `gorm:"column:or_rules_json;type:text;not null"`
-	Enabled      bool      `gorm:"column:enabled;not null;default:true;index:idx_fed_filter_kind_pos,priority:2"`
+	Enabled      bool      `gorm:"column:enabled;not null;index:idx_fed_filter_kind_pos,priority:2"`
 	Position     int       `gorm:"column:position;not null;default:0;index:idx_fed_filter_kind_pos,priority:3"`
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"`
@@ -151,7 +151,7 @@ type DisplayColumn struct {
 	Render     string    `gorm:"column:render;size:16;not null;default:'text'"`
 	LabelZH    string    `gorm:"column:label_zh;size:128;not null;default:''"`
 	LabelEN    string    `gorm:"column:label_en;size:128;not null;default:''"`
-	Visible    bool      `gorm:"column:visible;not null;default:true"`
+	Visible    bool      `gorm:"column:visible;not null"`
 	Position   int       `gorm:"column:position;not null;default:0;index:idx_fed_col_kind_pos,priority:2"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime"`
