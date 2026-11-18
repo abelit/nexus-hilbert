@@ -23,7 +23,7 @@ type httpModule struct {
 	metricsServer *httpserver.Server
 }
 
-func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, iam *iamModule, settings *settingsModule, devices *devicesModule, telemetry *telemetryModule, tunnel *tunnelModule, aiops *aiopsModule, runtime *runtimeModule, imbridge *imbridgeModule, automation *automationModule, system *systemModule, extensions *extensionsModule, external *externalMCPModule, federation *federationModule) (*httpModule, error) {
+func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, iam *iamModule, settings *settingsModule, devices *devicesModule, telemetry *telemetryModule, tunnel *tunnelModule, aiops *aiopsModule, runtime *runtimeModule, imbridge *imbridgeModule, automation *automationModule, system *systemModule, extensions *extensionsModule, external *externalMCPModule, federation *federationModule, ciobs *ciobsModule) (*httpModule, error) {
 	promProxySvc := managersvcprom.New(iam.signer)
 	// Wire the cloud-Prom query client into the proxy handler so the
 	// SPA's Monitor page can issue range queries through the same
@@ -81,6 +81,7 @@ func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Regi
 		runtime.aiopsHandler.Register(protected)
 		system.alertHandler.Register(protected)
 		federation.handler.Register(protected)
+		ciobs.handler.Register(protected)
 		system.systemHealthHandler.Register(protected)
 		system.systemUpgradeHandler.Register(protected)
 		imbridge.imbridgeHandler.RegisterProtected(protected)

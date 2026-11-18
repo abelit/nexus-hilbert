@@ -98,5 +98,12 @@
   {"method":"GET","path":"/v1/federation/ci-types","reason":"CMDB model metadata is used by the federated-source settings editor; console-only."},
   {"method":"GET","path":"/v1/federation/ci-types/{typeId}/mapping","reason":"Mapping presence is a console tab-visibility check, not an external API operation."},
   {"method":"GET","path":"/v1/federation/ci/{ciId}/alerts","reason":"Per-CI federated alert reads require a caller JWT to resolve the CI and a configured upstream; not a stable external API."},
-  {"method":"GET","path":"/v1/federation/ci/{ciId}/tickets","reason":"Per-CI federated ticket reads require a caller JWT to resolve the CI and a configured upstream; not a stable external API."}
+  {"method":"GET","path":"/v1/federation/ci/{ciId}/tickets","reason":"Per-CI federated ticket reads require a caller JWT to resolve the CI and a configured upstream; not a stable external API."},
+  {"method":"GET","path":"/v1/observability/ci-links","reason":"CI monitoring links bind CI types to the global Grafana/Prometheus integrations; console-only configuration."},
+  {"method":"PUT","path":"/v1/observability/ci-links/{provider}/{typeId}","reason":"CI monitoring links bind CI types to the global Grafana/Prometheus integrations; console-only configuration."},
+  {"method":"DELETE","path":"/v1/observability/ci-links/{provider}/{typeId}","reason":"CI monitoring links bind CI types to the global Grafana/Prometheus integrations; console-only configuration."},
+  {"method":"POST","path":"/v1/observability/ci-links/preview","reason":"CI monitoring preview resolves a real CI and may query the live Prometheus server; console-only."},
+  {"method":"GET","path":"/v1/observability/ci-types/{typeId}/linkage","reason":"Linkage is a console tab-visibility check, not an external API operation."},
+  {"method":"GET","path":"/v1/observability/ci/{ciId}/grafana","reason":"Grafana drill-down links are browser interactions, not external API operations."},
+  {"method":"GET","path":"/v1/observability/ci/{ciId}/alerts","reason":"Per-CI Prometheus alert reads require the caller's identity to resolve the CI; not a stable external API."}
 ]

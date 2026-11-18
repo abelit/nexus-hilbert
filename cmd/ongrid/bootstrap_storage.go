@@ -15,6 +15,7 @@ import (
 	managerbizskill "github.com/ongridio/ongrid/internal/manager/biz/skill"
 	manageraiopsdata "github.com/ongridio/ongrid/internal/manager/data/aiops/store"
 	manageralertdata "github.com/ongridio/ongrid/internal/manager/data/alert/store"
+	managerciobsdata "github.com/ongridio/ongrid/internal/manager/data/ciobs/store"
 	managerapprovaldata "github.com/ongridio/ongrid/internal/manager/data/approval/store"
 	manageraudtdata "github.com/ongridio/ongrid/internal/manager/data/audit/store"
 	managerdevicedata "github.com/ongridio/ongrid/internal/manager/data/device/store"
@@ -65,6 +66,7 @@ func bootstrapStorage(rootCtx context.Context, cfg *config.Config, log *slog.Log
 		iamdatamembership.Migrate,
 		manageralertdata.Migrate,
 		managerfederationdata.Migrate,
+		managerciobsdata.Migrate,
 		managerdevicedata.Migrate,
 		manageredgedata.Migrate,
 		managerk8sdata.Migrate,

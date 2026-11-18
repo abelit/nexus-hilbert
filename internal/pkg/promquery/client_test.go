@@ -120,3 +120,34 @@ func TestClient_QueryRange_EndBeforeStart(t *testing.T) {
 		t.Errorf("expected error for end<=start")
 	}
 }
+
+func TestClient_Alerts(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":[{"labels":{"alertname":"DiskFull","device_id":"7"},"annotations":{"summary":"disk"},"state":"firing","activeAt":"2026-01-01T00:00:00Z","value":"1"}]}`))
+	}))
+	defer srv.Close()
+
+	alerts, err := New(srv.URL, slog.Default()).Alerts(context.Background())
+	if err != nil {
+		t.Fatalf("Alerts: %v", err)
+	}
+	if gotPath != "/api/v1/alerts" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if len(alerts) != 1 || alerts[0].Labels["alertname"] != "DiskFull" || alerts[0].State != "firing" {
+		t.Fatalf("alerts = %+v", alerts)
+	}
+}
+
+func TestClient_AlertsNonSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"error","error":"boom"}`))
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, slog.Default()).Alerts(context.Background()); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err = %v", err)
+	}
+}

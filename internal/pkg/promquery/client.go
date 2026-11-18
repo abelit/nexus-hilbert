@@ -119,6 +119,58 @@ func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Ti
 	return c.do(ctx, "/api/v1/query_range", q)
 }
 
+// Alert is one Prometheus active alert. The label/annotation maps stay raw:
+// rules managed outside ongrid may carry any labels.
+type Alert struct {
+	Labels      map[string]string `json:"labels"`
+	Annotations map[string]string `json:"annotations"`
+	State       string            `json:"state"`
+	ActiveAt    time.Time         `json:"activeAt"`
+	Value       string            `json:"value"`
+}
+
+// Alerts returns the Prometheus server's active alerts. It uses the same
+// resolver and HTTP client as Query, so the global auth/TLS settings apply.
+func (c *Client) Alerts(ctx context.Context) ([]Alert, error) {
+	base, rerr := c.base.ResolveBaseURL(ctx)
+	if rerr != nil {
+		return nil, fmt.Errorf("promquery: resolve baseURL: %w", rerr)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/alerts", nil)
+	if err != nil {
+		return nil, fmt.Errorf("promquery: build alerts request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "ongrid-promquery/0.1")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("promquery: alerts: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("promquery: read alerts body: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("promquery: alerts returned %d: %s", resp.StatusCode, string(body))
+	}
+	var env struct {
+		Status string  `json:"status"`
+		Data   []Alert `json:"data"`
+		Error  string  `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, fmt.Errorf("promquery: decode alerts: %w", err)
+	}
+	if env.Status != "success" {
+		return nil, fmt.Errorf("promquery: alerts status=%s error=%s", env.Status, env.Error)
+	}
+	if env.Data == nil {
+		return []Alert{}, nil
+	}
+	return env.Data, nil
+}
+
 // do builds the GET, decodes the wire envelope, and returns the InstantResult.
 func (c *Client) do(ctx context.Context, path string, q url.Values) (*InstantResult, error) {
 	base, rerr := c.base.ResolveBaseURL(ctx)
