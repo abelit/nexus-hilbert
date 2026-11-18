@@ -20,6 +20,8 @@ import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
+import { ColumnsCard } from '@/pages/federation/settings/ColumnsCard';
+import { FiltersCard } from '@/pages/federation/settings/FiltersCard';
 import {
   connectionHealth,
   createConnection,
@@ -151,7 +153,11 @@ export default function FederationSettings() {
         </TabsList>
         {KINDS.map((item) => (
           <TabsContent key={item.value} value={item.value}>
-            <ConnectionsCard kind={item.value} />
+            <div className="space-y-4">
+              <ConnectionsCard kind={item.value} />
+              <FiltersCard kind={item.value} />
+              <ColumnsCard kind={item.value} />
+            </div>
           </TabsContent>
         ))}
       </Tabs>

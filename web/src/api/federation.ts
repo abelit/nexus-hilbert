@@ -68,6 +68,8 @@ export type ExternalList = {
   page_size: number;
   pages: number;
   items: ExternalItem[];
+  scope?: string;
+  identity?: 'bound' | 'unbound' | string;
 };
 
 export function listSourceProfiles() {
@@ -128,6 +130,7 @@ export type ExternalListParams = {
   page?: number;
   page_size?: number;
   connection_id?: number;
+  scope?: string;
 };
 
 function query(params: ExternalListParams): string {
@@ -148,3 +151,149 @@ export function listExternalAlerts(params: ExternalListParams, signal?: AbortSig
     signal ? { signal } : undefined,
   );
 }
+
+export type RuleValueType = 'identity' | 'fixed';
+export type Rule = {
+  field: string;
+  op: string;
+  value_type: RuleValueType;
+  identity?: string;
+  values?: string[];
+};
+
+export type FilterSummary = {
+  key: string;
+  name: string;
+  usage: 'filter' | 'badge' | 'both';
+  identity_required: boolean;
+};
+
+export type CenterFilter = {
+  key: string;
+  name: string;
+  usage: FilterSummary['usage'];
+  enabled: boolean;
+  and: Rule[];
+  or: Rule[];
+  position: number;
+};
+
+export type FilterInput = Omit<CenterFilter, 'enabled'> & { enabled?: boolean };
+
+export type DisplayColumn = {
+  key: string;
+  kind: 'builtin' | 'custom';
+  path?: string;
+  render?: 'text' | 'time' | 'badge' | 'link';
+  label_zh?: string;
+  label_en?: string;
+  visible: boolean;
+  position: number;
+};
+
+export type FederationStats = {
+  kind: FederationKind;
+  configured: boolean;
+  reason?: string;
+  total: number | null;
+  by_status?: Record<string, number | null>;
+  by_severity?: Record<string, number | null>;
+  window_days: number;
+};
+
+export type FieldPath = { path: string; count: number };
+
+export type FilterPreview = {
+  and: string[];
+  or: string[];
+  matched: number;
+  reason?: string;
+};
+
+export function listFilterSummaries(kind: FederationKind) {
+  return request<{ items: FilterSummary[]; total: number }>(
+    'GET',
+    `/federation/center-filters/summaries?kind=${encodeURIComponent(kind)}`,
+  );
+}
+
+export function listFilters(kind: FederationKind) {
+  return request<{ items: CenterFilter[]; total: number }>(
+    'GET',
+    `/federation/center-filters?kind=${encodeURIComponent(kind)}`,
+  );
+}
+
+export function saveFilter(kind: FederationKind, input: FilterInput, key?: string) {
+  const body = { ...input, enabled: input.enabled ?? true };
+  if (key) {
+    return request<CenterFilter>(
+      'PUT',
+      `/federation/center-filters/${encodeURIComponent(key)}?kind=${encodeURIComponent(kind)}`,
+      body,
+    );
+  }
+  return request<CenterFilter>(
+    'POST',
+    `/federation/center-filters?kind=${encodeURIComponent(kind)}`,
+    body,
+  );
+}
+
+export function deleteFilter(kind: FederationKind, key: string) {
+  return request<void>(
+    'DELETE',
+    `/federation/center-filters/${encodeURIComponent(key)}?kind=${encodeURIComponent(kind)}`,
+  );
+}
+
+export function previewFilter(kind: FederationKind, input: FilterInput) {
+  return request<FilterPreview>(
+    'POST',
+    `/federation/center-filters/preview?kind=${encodeURIComponent(kind)}`,
+    { ...input, enabled: input.enabled ?? true },
+  );
+}
+
+export function getColumns(kind: FederationKind) {
+  return request<{ items: DisplayColumn[]; total: number }>(
+    'GET',
+    `/federation/columns?kind=${encodeURIComponent(kind)}`,
+  );
+}
+
+export function saveColumns(kind: FederationKind, columns: DisplayColumn[]) {
+  return request<{ items: DisplayColumn[]; total: number }>(
+    'PUT',
+    `/federation/columns?kind=${encodeURIComponent(kind)}`,
+    columns,
+  );
+}
+
+export function listFieldPaths(kind: FederationKind, connectionId?: number, prefix?: string) {
+  const qs = new URLSearchParams();
+  qs.set('kind', kind);
+  if (connectionId) qs.set('connection_id', String(connectionId));
+  if (prefix) qs.set('prefix', prefix);
+  return request<{ items: FieldPath[]; total: number }>(
+    'POST',
+    `/federation/field-paths?${qs.toString()}`,
+  );
+}
+
+export function listMyAlerts(params: ExternalListParams, scope: string, signal?: AbortSignal) {
+  return request<ExternalList>(
+    'GET',
+    `/federation/alerts/my${query({ ...params, scope })}`,
+    undefined,
+    signal ? { signal } : undefined,
+  );
+}
+
+export function getAlertStats(params: ExternalListParams, scope?: string) {
+  return request<FederationStats>(
+    'GET',
+    `/federation/alerts/stats${query({ ...params, scope: scope || undefined })}`,
+  );
+}
+

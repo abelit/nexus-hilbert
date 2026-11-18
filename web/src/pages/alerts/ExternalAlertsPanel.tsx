@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ExternalLink, RefreshCw, Siren } from 'lucide-react';
+import {
+  AlertTriangle,
+  Download,
+  ExternalLink,
+  RefreshCw,
+  Siren,
+} from 'lucide-react';
 
 import {
   Button,
+  Chip,
   EmptyStateCard,
   Input,
   PageHeader,
   PaginationFooter,
   Select,
-  Chip,
 } from '@/components/ui';
 import { Modal } from '@/components/Modal';
 import { cn } from '@/lib/cn';
@@ -18,12 +24,20 @@ import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
 import { ApiError } from '@/api/client';
 import {
+  getAlertStats,
+  getColumns,
   listExternalAlerts,
+  listFilterSummaries,
+  listMyAlerts,
+  type DisplayColumn,
   type ExternalItem,
-  type ExternalList,
+  type FederationStats,
+  type FilterSummary,
 } from '@/api/federation';
 
 const PAGE_SIZE = 50;
+const EXPORT_PAGE_SIZE = 500;
+const EXPORT_MAX_ROWS = 5000;
 
 const DAY_OPTIONS = [
   { value: '7', label: '7d' },
@@ -44,16 +58,42 @@ const SEVERITY_OPTIONS = [
   { value: 'info', label: 'Info' },
 ];
 
-type Field = { key: string; path: string; zh: string; en: string };
+type Field = {
+  key: string;
+  path: string;
+  zh: string;
+  en: string;
+  render: 'text' | 'time' | 'badge' | 'link';
+};
 
-const COLUMNS: Field[] = [
-  { key: 'severity', path: 'alert.labels.severity', zh: '级别', en: 'Severity' },
-  { key: 'status', path: 'status', zh: '状态', en: 'Status' },
-  { key: 'alertname', path: 'alertname', zh: '告警', en: 'Alert' },
-  { key: 'summary', path: 'annotations.summary', zh: '摘要', en: 'Summary' },
-  { key: 'host', path: 'alert.labels.host', zh: '主机', en: 'Host' },
-  { key: 'fired', path: 'created_at', zh: '触发', en: 'Fired' },
+const BUILTIN_PATHS: Record<string, { path: string; zh: string; en: string }> = {
+  severity: { path: 'alert.labels.severity', zh: '级别', en: 'Severity' },
+  status: { path: 'status', zh: '状态', en: 'Status' },
+  alertname: { path: 'alertname', zh: '告警', en: 'Alert' },
+  summary: { path: 'annotations.summary', zh: '摘要', en: 'Summary' },
+  host: { path: 'alert.labels.host', zh: '主机', en: 'Host' },
+  created: { path: 'created_at', zh: '触发', en: 'Fired' },
+};
+
+const DEFAULT_FIELDS: Field[] = [
+  { key: 'severity', ...BUILTIN_PATHS.severity, render: 'badge' },
+  { key: 'status', ...BUILTIN_PATHS.status, render: 'badge' },
+  { key: 'alertname', ...BUILTIN_PATHS.alertname, render: 'text' },
+  { key: 'summary', ...BUILTIN_PATHS.summary, render: 'text' },
+  { key: 'host', ...BUILTIN_PATHS.host, render: 'text' },
+  { key: 'created', ...BUILTIN_PATHS.created, render: 'time' },
 ];
+
+function fieldFromColumn(column: DisplayColumn): Field {
+  const builtin = BUILTIN_PATHS[column.key];
+  return {
+    key: column.key,
+    path: column.path || builtin?.path || column.key,
+    zh: column.label_zh || builtin?.zh || column.key,
+    en: column.label_en || builtin?.en || column.key,
+    render: column.render ?? 'text',
+  };
+}
 
 function readPath(item: ExternalItem, path: string): unknown {
   let current: unknown = item;
@@ -89,6 +129,40 @@ function severityTone(value: string): 'danger' | 'warning' | 'info' | undefined 
   }
 }
 
+function statusTone(value: string): 'success' | 'danger' | 'warning' | undefined {
+  switch (value.toLowerCase()) {
+    case 'firing':
+    case 'error':
+      return 'danger';
+    case 'resolved':
+    case 'completed':
+      return 'success';
+    case 'running':
+    case 'acknowledged':
+      return 'warning';
+    default:
+      return undefined;
+  }
+}
+
+function safeLink(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function csvCell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function download(name: string, mime: string, content: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export function ExternalAlertsPanel() {
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
@@ -96,34 +170,71 @@ export function ExternalAlertsPanel() {
   const [total, setTotal] = useState(0);
   const [configured, setConfigured] = useState(true);
   const [reason, setReason] = useState<string | undefined>();
+  const [identity, setIdentity] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [days, setDays] = useState('7');
   const [status, setStatus] = useState('');
   const [severity, setSeverity] = useState('');
   const [keyword, setKeyword] = useState('');
+  const [scope, setScope] = useState('');
   const [page, setPage] = useState(0);
   const [detail, setDetail] = useState<ExternalItem | null>(null);
-  // A late response must not overwrite a newer filter/page result.
+  const [summaries, setSummaries] = useState<FilterSummary[]>([]);
+  const [columns, setColumns] = useState<DisplayColumn[]>([]);
+  const [stats, setStats] = useState<FederationStats | null>(null);
   const requestSeq = useRef(0);
+
+  // Metadata is best-effort: a failed columns/summaries fetch must not hide
+  // the alert list behind an error page.
+  useEffect(() => {
+    let live = true;
+    void Promise.all([
+      listFilterSummaries('external_alert').catch(() => ({ items: [] as FilterSummary[], total: 0 })),
+      getColumns('external_alert').catch(() => ({ items: [] as DisplayColumn[], total: 0 })),
+    ]).then(([scopeRows, columnRows]) => {
+      if (!live) return;
+      setSummaries(scopeRows.items ?? []);
+      setColumns(columnRows.items ?? []);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const fields = useMemo<Field[]>(() => {
+    const visible = columns.filter((column) => column.visible);
+    return visible.length > 0 ? visible.map(fieldFromColumn) : DEFAULT_FIELDS;
+  }, [columns]);
 
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;
     setLoading(true);
+    const params = {
+      days: Number(days),
+      status: status || undefined,
+      severity: severity || undefined,
+      keyword: keyword.trim() || undefined,
+      page: page + 1,
+      page_size: PAGE_SIZE,
+    };
     try {
-      const res: ExternalList = await listExternalAlerts({
-        days: Number(days),
-        status: status || undefined,
-        severity: severity || undefined,
-        keyword: keyword.trim() || undefined,
-        page: page + 1,
-        page_size: PAGE_SIZE,
-      });
+      const [res, stat] = await Promise.all([
+        scope
+          ? listMyAlerts(params, scope)
+          : listExternalAlerts(params),
+        getAlertStats(
+          { days: Number(days) },
+          scope || undefined,
+        ).catch(() => null),
+      ]);
       if (seq !== requestSeq.current) return;
       setItems(res.items ?? []);
       setTotal(res.total ?? 0);
       setConfigured(res.configured);
       setReason(res.reason);
+      setIdentity(res.identity);
+      setStats(stat);
       setErr(null);
     } catch (e) {
       if (seq !== requestSeq.current || (e as Error).name === 'AbortError') return;
@@ -131,13 +242,44 @@ export function ExternalAlertsPanel() {
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [days, status, severity, keyword, page]);
+  }, [days, status, severity, keyword, page, scope]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const filtered = Boolean(status || severity || keyword.trim());
+  const scopeSummary = summaries.find((summary) => summary.key === scope);
+  const unbound = identity === 'unbound';
+
+  async function exportRows(format: 'csv' | 'json') {
+    const rows: ExternalItem[] = [];
+    for (let pageIndex = 1; rows.length < EXPORT_MAX_ROWS; pageIndex += 1) {
+      const params = {
+        days: Number(days),
+        status: status || undefined,
+        severity: severity || undefined,
+        keyword: keyword.trim() || undefined,
+        page: pageIndex,
+        page_size: EXPORT_PAGE_SIZE,
+      };
+      const res = scope
+        ? await listMyAlerts(params, scope)
+        : await listExternalAlerts(params);
+      const chunk = res.items ?? [];
+      rows.push(...chunk);
+      if (chunk.length < EXPORT_PAGE_SIZE || rows.length >= res.total) break;
+    }
+    const capped = rows.slice(0, EXPORT_MAX_ROWS);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    if (format === 'json') {
+      download(`external-alerts-${stamp}.json`, 'application/json', JSON.stringify(capped, null, 2));
+      return;
+    }
+    const header = fields.map((field) => csvCell(tr(field.zh, field.en))).join(',');
+    const lines = capped.map((item) => fields.map((field) => csvCell(text(readPath(item, field.path)))).join(','));
+    download(`external-alerts-${stamp}.csv`, 'text/csv;charset=utf-8', '﻿' + [header, ...lines].join('\n'));
+  }
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
@@ -152,7 +294,7 @@ export function ExternalAlertsPanel() {
           'Read-only · sourced from a configured external alert source',
         )}
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {isAdmin && (
               <Link
                 to="/settings/federation"
@@ -161,6 +303,12 @@ export function ExternalAlertsPanel() {
                 <ExternalLink size={12} /> {tr('数据源设置', 'Source settings')}
               </Link>
             )}
+            <Button variant="outline" size="sm" type="button" onClick={() => void exportRows('csv')} disabled={loading || items.length === 0}>
+              <Download size={12} /> CSV
+            </Button>
+            <Button variant="outline" size="sm" type="button" onClick={() => void exportRows('json')} disabled={loading || items.length === 0}>
+              <Download size={12} /> JSON
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -176,6 +324,19 @@ export function ExternalAlertsPanel() {
         }
         extra={
           <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+            <Select
+              label={tr('范围', 'Scope')}
+              value={scope}
+              onValueChange={(next) => {
+                setPage(0);
+                setScope(next);
+              }}
+              options={[
+                { value: '', label: tr('全部', 'All') },
+                ...summaries.map((summary) => ({ value: summary.key, label: summary.name })),
+              ]}
+              className="w-40"
+            />
             <Select
               label={tr('时间范围', 'Time range')}
               value={days}
@@ -227,6 +388,27 @@ export function ExternalAlertsPanel() {
         }
       />
 
+      {stats?.configured && (
+        <div className="mx-6 mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-1.5 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3.5 py-2 text-xs text-zinc-400">
+          <Stat label={tr('总数', 'Total')} value={stats.total} />
+          {Object.entries(stats.by_status ?? {}).map(([key, value]) => (
+            <Stat key={key} label={key} value={value} />
+          ))}
+          {Object.entries(stats.by_severity ?? {}).map(([key, value]) => (
+            <Stat key={key} label={key} value={value} />
+          ))}
+          <span className="ms-auto text-text-faint">
+            {tr(`窗口 ${stats.window_days} 天`, `Window ${stats.window_days}d`)}
+          </span>
+        </div>
+      )}
+
+      {scopeSummary?.identity_required && (
+        <p className="mx-6 mt-2 text-[11px] text-text-faint">
+          {tr('该范围按当前账号的身份字段筛选。', 'This scope filters by the current account identity.')}
+        </p>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         {err && (
           <div className="m-6 flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-3 text-sm text-red-300">
@@ -265,26 +447,44 @@ export function ExternalAlertsPanel() {
           />
         )}
 
+        {!err && !loading && unbound && (
+          <EmptyStateCard
+            className="mx-6 my-4"
+            icon={Siren}
+            title={tr('你的账号未匹配该筛选条件', 'Your account does not match this filter')}
+            hint={tr(
+              '该范围使用了身份字段（如邮箱或手机号），但当前账号没有可匹配的值。',
+              'This scope uses an identity field (email or phone), but the current account has no matching value.',
+            )}
+            action={
+              <Button variant="outline" size="sm" onClick={() => setScope('')}>
+                {tr('查看全部', 'View all')}
+              </Button>
+            }
+          />
+        )}
+
         {!err && loading && (
           <div className="flex h-40 items-center justify-center text-sm text-zinc-500">
             {tr('加载中…', 'Loading…')}
           </div>
         )}
 
-        {!err && !loading && configured && items.length === 0 && (
+        {!err && !loading && configured && !unbound && items.length === 0 && (
           <EmptyStateCard
             className="mx-6 my-4"
             icon={Siren}
             title={tr('没有匹配的外部告警', 'No external alerts match')}
             hint={tr('调整时间范围或筛选条件后重试', 'Adjust the time range or filters')}
             action={
-              filtered ? (
+              filtered || scope ? (
                 <Button
                   onClick={() => {
                     setPage(0);
                     setStatus('');
                     setSeverity('');
                     setKeyword('');
+                    setScope('');
                   }}
                 >
                   {tr('清除筛选', 'Clear filters')}
@@ -294,22 +494,20 @@ export function ExternalAlertsPanel() {
           />
         )}
 
-        {!err && !loading && configured && items.length > 0 && (
+        {!err && !loading && configured && !unbound && items.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-xs">
-            <thead className="sticky top-0 bg-zinc-950 text-left text-[11px] uppercase tracking-wider text-zinc-500">
-              <tr className="border-b border-zinc-800">
-                {COLUMNS.map((column) => (
-                  <th key={column.key} className="px-4 py-2 font-medium">
-                    {tr(column.zh, column.en)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item, index) => {
-                const severityValue = text(readPath(item, 'alert.labels.severity'));
-                return (
+              <thead className="sticky top-0 bg-zinc-950 text-left text-[11px] uppercase tracking-wider text-zinc-500">
+                <tr className="border-b border-zinc-800">
+                  {fields.map((field) => (
+                    <th key={field.key} className="px-4 py-2 font-medium">
+                      {tr(field.zh, field.en)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, index) => (
                   <tr
                     key={String(readPath(item, '_id') ?? index)}
                     role="button"
@@ -324,32 +522,47 @@ export function ExternalAlertsPanel() {
                       }
                     }}
                   >
-                    {COLUMNS.map((column) => {
-                      const value = text(readPath(item, column.path));
-                      if (column.key === 'severity') {
+                    {fields.map((field) => {
+                      const value = text(readPath(item, field.path));
+                      if (field.render === 'badge') {
+                        const tone = field.key === 'status' ? statusTone(value) : severityTone(value);
                         return (
-                          <td key={column.key} className="px-4 py-2">
-                            <Chip tone={severityTone(severityValue)}>{value}</Chip>
+                          <td key={field.key} className="px-4 py-2">
+                            <Chip tone={tone}>{value}</Chip>
                           </td>
                         );
                       }
-                      if (column.key === 'fired') {
+                      if (field.render === 'time') {
                         return (
-                          <td key={column.key} className="px-4 py-2 text-zinc-400">
+                          <td key={field.key} className="px-4 py-2 text-zinc-400">
                             {value === '—' ? value : relativeTime(value)}
                           </td>
                         );
                       }
+                      if (field.render === 'link' && safeLink(value)) {
+                        return (
+                          <td key={field.key} className="max-w-[28rem] truncate px-4 py-2">
+                            <a
+                              href={value}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-indigo-400 hover:underline"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {value}
+                            </a>
+                          </td>
+                        );
+                      }
                       return (
-                        <td key={column.key} className="max-w-[28rem] truncate px-4 py-2">
+                        <td key={field.key} className="max-w-[28rem] truncate px-4 py-2">
                           {value}
                         </td>
                       );
                     })}
                   </tr>
-                );
-              })}
-            </tbody>
+                ))}
+              </tbody>
             </table>
           </div>
         )}
@@ -360,7 +573,7 @@ export function ExternalAlertsPanel() {
           shown={items.length}
           total={total}
           loading={loading}
-          matchLabel={filtered}
+          matchLabel={filtered || Boolean(scope)}
           className="px-6"
           onPageChange={setPage}
         />
@@ -375,10 +588,10 @@ export function ExternalAlertsPanel() {
         >
           <div className="space-y-3">
             <dl className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-              {COLUMNS.map((column) => (
-                <div key={column.key} className="min-w-0">
-                  <dt className="text-zinc-500">{tr(column.zh, column.en)}</dt>
-                  <dd className="break-words text-zinc-200">{text(readPath(detail, column.path))}</dd>
+              {fields.map((field) => (
+                <div key={field.key} className="min-w-0">
+                  <dt className="text-zinc-500">{tr(field.zh, field.en)}</dt>
+                  <dd className="break-words text-zinc-200">{text(readPath(detail, field.path))}</dd>
                 </div>
               ))}
             </dl>
@@ -394,5 +607,16 @@ export function ExternalAlertsPanel() {
         </Modal>
       )}
     </main>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number | null | undefined }) {
+  return (
+    <span className="flex items-baseline gap-1.5">
+      <span className="text-text-muted">{label}</span>
+      <span className="text-sm font-semibold tabular-nums text-text">
+        {value === null || value === undefined ? '—' : value}
+      </span>
+    </span>
   );
 }
