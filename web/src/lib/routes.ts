@@ -11,7 +11,7 @@
 import { tr as trInline } from '@/i18n/locale';
 import { cmdbPaletteRoutes } from '@/cmdb';
 
-export type AppRouteGroup = '主页' | 'Agent' | '知识库' | '基础设施' | 'CMDB' | '监控告警' | '日常' | '设置' | '用户管理';
+export type AppRouteGroup = '主页' | 'Agent' | '知识库' | '基础设施' | 'CMDB' | '监控告警' | '工单管理' | '日常' | '设置' | '用户管理';
 
 export type AppRoute = {
   path: string;
@@ -44,6 +44,7 @@ const ROUTE_DEFS: RouteDef[] = [
   { path: '/traces', zh: '链路', en: 'Traces', keywords: ['traces', 'tracing', 'lianlu'], group: '监控告警' },
   { path: '/alerts', zh: '告警', en: 'Alerts', keywords: ['alerts', 'incidents', 'gaojing'], group: '监控告警' },
   { path: '/alerts/rules', zh: '告警规则', en: 'Alert rules', keywords: ['rules', 'guize'], group: '监控告警' },
+  { path: '/tickets', zh: '工单管理 / 事件中心', en: 'Tickets / Event center', keywords: ['tickets', 'itsm', 'dingtalk', 'gongdan', 'shijian'], group: '工单管理' },
 
   { path: '/settings/integrations', zh: '设置 / 集成', en: 'Settings / Integrations', keywords: ['settings', 'integrations', 'shezhi'], group: '设置' },
   { path: '/settings/federation', zh: '设置 / 外部数据源', en: 'Settings / Federated sources', keywords: ['federation', 'morse', 'itsm', 'dingtalk', 'gaojing', 'gongdan'], group: '设置' },

@@ -25,6 +25,7 @@ import {
   Waypoints,
   Route,
   Siren,
+  Ticket,
   Wrench,
   Hammer,
   BookOpen,
@@ -414,6 +415,15 @@ export function Sidebar() {
             { key: 'logs', to: '/logs', icon: FileText, label: tr('日志', 'Logs') },
             { key: 'traces', to: '/traces', icon: Waypoints, label: tr('链路', 'Traces') },
             { key: 'alerts', to: '/alerts', icon: Siren, label: tr('告警', 'Alerts'), badge: incidentOpen },
+          ]}
+        />
+
+        <CollapsibleSection
+          storageKey="tickets"
+          title={tr('工单管理', 'Ticket management')}
+          defaultOpen={false}
+          items={[
+            { key: 'tickets', to: '/tickets', icon: Ticket, label: tr('事件中心', 'Event center') },
           ]}
         />
 

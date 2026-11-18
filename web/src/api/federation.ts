@@ -297,3 +297,28 @@ export function getAlertStats(params: ExternalListParams, scope?: string) {
   );
 }
 
+export function listTickets(params: ExternalListParams, signal?: AbortSignal) {
+  return request<ExternalList>(
+    'GET',
+    `/federation/tickets${query(params)}`,
+    undefined,
+    signal ? { signal } : undefined,
+  );
+}
+
+export function listMyTickets(params: ExternalListParams, scope: string, signal?: AbortSignal) {
+  return request<ExternalList>(
+    'GET',
+    `/federation/tickets/my${query({ ...params, scope })}`,
+    undefined,
+    signal ? { signal } : undefined,
+  );
+}
+
+export function getTicketStats(params: ExternalListParams, scope?: string) {
+  return request<FederationStats>(
+    'GET',
+    `/federation/tickets/stats${query({ ...params, scope: scope || undefined })}`,
+  );
+}
+
