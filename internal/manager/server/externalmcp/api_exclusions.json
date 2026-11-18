@@ -64,5 +64,16 @@
   {"method":"DELETE","path":"/v1/im/bindings/{id}","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
   {"method":"GET","path":"/v1/chat/sessions/{id}/tool-results/{resultID}","reason":"Saved tool evidence is scoped to an authenticated chat session; external MCP has no session capability."},
   {"method":"GET","path":"/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}","reason":"Saved tool evidence is scoped to an authenticated chat session; external MCP has no session capability."},
-  {"method":"POST","path":"/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}","reason":"Saved tool evidence is scoped to an authenticated chat session; external MCP has no session capability."}
+  {"method":"POST","path":"/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}","reason":"Saved tool evidence is scoped to an authenticated chat session; external MCP has no session capability."},
+  {"method":"GET","path":"/v1/federation/sources","reason":"Federated-source configuration stays in the trusted administrator console."},
+  {"method":"GET","path":"/v1/federation/connections","reason":"Federated-source connections and credential presence stay in the trusted administrator console."},
+  {"method":"POST","path":"/v1/federation/connections","reason":"Federated-source connections carry upstream credentials; configuration stays in the trusted administrator console."},
+  {"method":"GET","path":"/v1/federation/connections/health","reason":"Federated-source health probes disclose upstream endpoints; stay in the trusted administrator console."},
+  {"method":"POST","path":"/v1/federation/connections/test","reason":"Federated-source probes use administrator-entered credentials; stay in the trusted administrator console."},
+  {"method":"GET","path":"/v1/federation/connections/{id}","reason":"Federated-source connections stay in the trusted administrator console."},
+  {"method":"PUT","path":"/v1/federation/connections/{id}","reason":"Federated-source connections carry upstream credentials; configuration stays in the trusted administrator console."},
+  {"method":"DELETE","path":"/v1/federation/connections/{id}","reason":"Federated-source connections stay in the trusted administrator console."},
+  {"method":"POST","path":"/v1/federation/connections/{id}/test","reason":"Federated-source probes use stored upstream credentials; stay in the trusted administrator console."},
+  {"method":"GET","path":"/v1/federation/connections/{id}/reveal","reason":"Authentication, credential disclosure, and approval decisions stay in the trusted console."},
+  {"method":"GET","path":"/v1/federation/alerts","reason":"Federated alert reads use the interactive operator's identity lens and a configured upstream; not a stable external API operation."}
 ]
