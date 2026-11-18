@@ -89,5 +89,14 @@
   {"method":"POST","path":"/v1/federation/field-paths","reason":"Field discovery scans upstream records that may carry personal data; paths only, console-only."},
   {"method":"GET","path":"/v1/federation/tickets","reason":"Federated ITSM ticket reads use the interactive operator's identity lens and a configured upstream; not a stable external API operation."},
   {"method":"GET","path":"/v1/federation/tickets/my","reason":"The per-viewer ITSM lens substitutes the interactive operator's IAM identity; external MCP has no equivalent binding."},
-  {"method":"GET","path":"/v1/federation/tickets/stats","reason":"Federated ticket stats fan out live upstream count queries; keep them in the interactive console."}
+  {"method":"GET","path":"/v1/federation/tickets/stats","reason":"Federated ticket stats fan out live upstream count queries; keep them in the interactive console."},
+  {"method":"GET","path":"/v1/federation/mappings","reason":"Federated CI mappings carry upstream connection ids; configuration stays in the trusted administrator console."},
+  {"method":"POST","path":"/v1/federation/mappings","reason":"Federated CI mappings carry upstream connection ids; configuration stays in the trusted administrator console."},
+  {"method":"PUT","path":"/v1/federation/mappings/{id}","reason":"Federated CI mappings carry upstream connection ids; configuration stays in the trusted administrator console."},
+  {"method":"DELETE","path":"/v1/federation/mappings/{id}","reason":"Federated CI mappings carry upstream connection ids; configuration stays in the trusted administrator console."},
+  {"method":"POST","path":"/v1/federation/mappings/preview","reason":"Mapping preview resolves a real CI's attributes and queries a live upstream; console-only."},
+  {"method":"GET","path":"/v1/federation/ci-types","reason":"CMDB model metadata is used by the federated-source settings editor; console-only."},
+  {"method":"GET","path":"/v1/federation/ci-types/{typeId}/mapping","reason":"Mapping presence is a console tab-visibility check, not an external API operation."},
+  {"method":"GET","path":"/v1/federation/ci/{ciId}/alerts","reason":"Per-CI federated alert reads require a caller JWT to resolve the CI and a configured upstream; not a stable external API."},
+  {"method":"GET","path":"/v1/federation/ci/{ciId}/tickets","reason":"Per-CI federated ticket reads require a caller JWT to resolve the CI and a configured upstream; not a stable external API."}
 ]

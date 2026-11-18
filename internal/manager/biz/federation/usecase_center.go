@@ -123,7 +123,7 @@ func (u *Usecase) SaveFilter(ctx context.Context, kind string, in FilterInput, k
 	}
 	normalized, err := ValidateFilter(in, keyFromPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
 	}
 	if normalized.Enabled && (normalized.Usage == UsageBadge || normalized.Usage == UsageBoth) {
 		count, err := u.repo.CountBadgeFilters(ctx, kind, normalized.Key)
@@ -194,7 +194,7 @@ func (u *Usecase) ReplaceColumns(ctx context.Context, kind string, in []DisplayC
 	}
 	normalized, err := ValidateColumns(in)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
 	}
 	for i := range normalized {
 		normalized[i].Kind = kind
@@ -386,7 +386,7 @@ func (u *Usecase) PreviewFilter(ctx context.Context, kind string, in FilterInput
 	}
 	normalized, err := ValidateFilter(in, "")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
 	}
 	filter := Filter{Key: normalized.Key, Name: normalized.Name, Usage: normalized.Usage, Enabled: normalized.Enabled, And: normalized.And, Or: normalized.Or}
 	identities, err := u.resolveIdentities(ctx, userID)

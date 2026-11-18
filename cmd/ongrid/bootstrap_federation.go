@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	federationbiz "github.com/ongridio/ongrid/internal/manager/biz/federation"
+	cmdbclient "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/cmdb"
 	federationdata "github.com/ongridio/ongrid/internal/manager/data/federation/store"
 	federationserver "github.com/ongridio/ongrid/internal/manager/server/federation"
 	federationservice "github.com/ongridio/ongrid/internal/manager/service/federation"
@@ -26,11 +27,12 @@ func (secretboxCrypto) Encrypt(plain string) (string, error) { return secretbox.
 func (secretboxCrypto) Decrypt(cipher string) (string, error) { return secretbox.Decrypt(cipher) }
 func (secretboxCrypto) Weak() bool                           { return secretbox.KeyIsWeak() }
 
-func bootstrapFederation(log *slog.Logger, storage *storageModule, iam *iamModule) *federationModule {
+func bootstrapFederation(log *slog.Logger, storage *storageModule, iam *iamModule, cmdbClient *cmdbclient.Client) *federationModule {
 	logger := log.With(slog.String("comp", "federation"))
 	repo := federationdata.NewRepo(storage.db)
 	uc := federationbiz.NewUsecase(repo, federationdata.NewUpstream(), secretboxCrypto{}, logger)
 	uc.SetIdentityResolver(iamIdentityResolver{users: iam.userUC})
+	uc.SetCMDBReader(cmdbFederationReader{client: cmdbClient})
 	return &federationModule{
 		handler: federationserver.NewHandler(federationservice.New(uc), logger),
 	}

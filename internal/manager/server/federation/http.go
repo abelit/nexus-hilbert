@@ -66,6 +66,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/federation/alerts", h.listAlerts)
 	r.Get("/v1/federation/tickets", h.listTickets)
 	h.registerCenter(r)
+	h.registerCI(r)
 }
 
 type authInput struct {
@@ -454,6 +455,9 @@ func writeErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, biz.ErrWeakSecret):
 		status = http.StatusBadRequest
 		code = "secret-key-weak"
+	case errors.Is(err, biz.ErrCMDBUnavailable):
+		status = http.StatusServiceUnavailable
+		code = "cmdb-unavailable"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

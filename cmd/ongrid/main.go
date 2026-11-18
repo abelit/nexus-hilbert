@@ -87,7 +87,6 @@ func run() (runErr error) {
 	models := bootstrapModels(rootCtx, cfg, log, reg, settings)
 	devices := bootstrapDevices(rootCtx, cfg, log, storage, iam, settings)
 	alerts := bootstrapAlerts(rootCtx, cfg, log, storage)
-	federation := bootstrapFederation(log, storage, iam)
 	telemetry, err := bootstrapTelemetry(rootCtx, cfg, log, storage, settings, models, devices, alerts)
 	if err != nil {
 		return err
@@ -102,6 +101,7 @@ func run() (runErr error) {
 	// tools out of the bag. See ADR-037.
 	cmdbClient := newCMDBClient(cfg, iam.signer, log)
 	aiops.toolsReg.SetCMDB(cmdbClient)
+	federation := bootstrapFederation(log, storage, iam, cmdbClient)
 	knowledge := bootstrapKnowledge(rootCtx, cfg, log, storage, settings, telemetry, aiops)
 	runtime := bootstrapRuntime(rootCtx, cfg, log, reg, tracing, models, devices, telemetry, tunnel, aiops, settings)
 	// The form-assist endpoint reads the authoritative model schema through

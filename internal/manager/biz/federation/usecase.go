@@ -110,6 +110,7 @@ type Usecase struct {
 	querier    SourceQuerier
 	crypto     Crypto
 	identities ViewerIdentityResolver
+	cmdb       CMDBReader
 	log        *slog.Logger
 }
 

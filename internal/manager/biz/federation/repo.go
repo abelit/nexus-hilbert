@@ -88,6 +88,29 @@ type Repository interface {
 	ReplaceColumns(ctx context.Context, kind string, columns []model.DisplayColumn) error
 }
 
+// CMDBType is the narrow projection of a CMDB model needed by the settings
+// selector.
+type CMDBType struct {
+	ID    uint64
+	Name  string
+	Alias string
+}
+
+// CMDBInstance is the narrow projection of one CI. Values is keyed by
+// attribute name (the CMDB API's default ret_key).
+type CMDBInstance struct {
+	ID     uint64
+	TypeID uint64
+	Values map[string]any
+}
+
+// CMDBReader resolves CI data without importing internal/cmdb. cmd/ongrid
+// implements it over the caller-authenticated CMDB HTTP client.
+type CMDBReader interface {
+	GetInstance(ctx context.Context, id uint64) (*CMDBInstance, error)
+	ListCITypes(ctx context.Context) ([]CMDBType, error)
+}
+
 // SourceQuerier performs the read-only upstream calls. Implementations must
 // use conn.AuthCipher, never a plaintext credential.
 type SourceQuerier interface {

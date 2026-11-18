@@ -424,3 +424,59 @@ func TestListTicketsIsReadableAndConfigured(t *testing.T) {
 		t.Fatalf("result = %+v", got)
 	}
 }
+
+func TestMappingWritesRequireAdminAndStatusIsReadable(t *testing.T) {
+	adminRouter, service, _ := newTestRouter(t, "admin", testCrypto{}, &testQuerier{})
+	conn, err := service.CreateConnection(context.Background(), biz.ConnectionInput{
+		Kind: model.KindExternalAlert, Name: "primary",
+		BaseURL: "http://morse.invalid", APIPath: "/api/v1/alerts",
+	}, 1)
+	if err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	body := map[string]any{
+		"ci_type_id": 3, "connection_id": conn.ID,
+		"field_mapping": []map[string]any{{"source_field": "host", "op": "eq", "map_type": "field", "value": "hostname"}},
+	}
+	rec := do(t, adminRouter, http.MethodPost, "/v1/federation/mappings?kind=external_alert", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", rec.Code, rec.Body)
+	}
+
+	userRouter, _, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	rec = do(t, userRouter, http.MethodPost, "/v1/federation/mappings?kind=external_alert", body)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("user write status = %d body=%s", rec.Code, rec.Body)
+	}
+	rec = do(t, adminRouter, http.MethodGet, "/v1/federation/ci-types/3/mapping?kind=external_alert", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status status = %d body=%s", rec.Code, rec.Body)
+	}
+	status := decodeBody[biz.MappingStatus](t, rec)
+	if !status.Configured || !status.HasMapping {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestCMDBUnavailableIs503(t *testing.T) {
+	router, _, _ := newTestRouter(t, "admin", testCrypto{}, &testQuerier{})
+	rec := do(t, router, http.MethodGet, "/v1/federation/ci-types", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	if decodeBody[map[string]string](t, rec)["code"] != "cmdb-unavailable" {
+		t.Fatalf("body = %s", rec.Body)
+	}
+}
+
+func TestCIScopedReadsDegradeWithoutCMDB(t *testing.T) {
+	router, _, _ := newTestRouter(t, "user", testCrypto{}, &testQuerier{})
+	rec := do(t, router, http.MethodGet, "/v1/federation/ci/7/alerts", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	got := decodeBody[biz.CIItemsResult](t, rec)
+	if got.Configured || got.Reason != "cmdb_unavailable" {
+		t.Fatalf("result = %+v", got)
+	}
+}
