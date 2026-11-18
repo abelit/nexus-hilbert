@@ -22,19 +22,23 @@ export function CIMonitoringTab({ ciID }: { ciID: number }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const [g, p] = await Promise.all([
-        getCIGrafana(ciID),
-        getCIPromAlerts(ciID),
-      ]);
-      setGrafana(g);
-      setProm(p);
+    // One provider failing must not hide the other: Prometheus can be down
+    // while the Grafana deep link is still useful.
+    const [gResult, pResult] = await Promise.allSettled([
+      getCIGrafana(ciID),
+      getCIPromAlerts(ciID),
+    ]);
+    const g = gResult.status === 'fulfilled' ? gResult.value : null;
+    const p = pResult.status === 'fulfilled' ? pResult.value : null;
+    setGrafana(g);
+    setProm(p);
+    if (!g && !p) {
+      const reason = gResult.status === 'rejected' ? gResult.reason : pResult.status === 'rejected' ? pResult.reason : null;
+      setErr(reason instanceof ApiError ? reason.message : (reason as Error)?.message || 'Could not load monitoring');
+    } else {
       setErr(null);
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : (e as Error).message);
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   }, [ciID]);
 
   useEffect(() => {
