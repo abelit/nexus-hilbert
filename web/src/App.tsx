@@ -64,6 +64,7 @@ const SettingsNotifications = lazy(() => import('@/pages/settings/Notifications'
 const SettingsChannels = lazy(() => import('@/pages/settings/Channels'));
 const SettingsIntegrations = lazy(() => import('@/pages/settings/Integrations'));
 const SettingsFederation = lazy(() => import('@/pages/settings/Federation'));
+const SettingsCIMonitoring = lazy(() => import('@/pages/settings/CIMonitoring'));
 const SettingsGeneral = lazy(() => import('@/pages/settings/General'));
 const SettingsFileStorage = lazy(() => import('@/pages/settings/FileStorage'));
 const SettingsFilePreview = lazy(() => import('@/pages/settings/FilePreview'));
@@ -219,6 +220,7 @@ export default function App() {
           <Route path="channels" element={<SettingsChannels />} />
           <Route path="integrations" element={<SettingsIntegrations />} />
           <Route path="federation" element={<SettingsFederation />} />
+          <Route path="ci-monitoring" element={<SettingsCIMonitoring />} />
           <Route path="general" element={<SettingsGeneral />} />
           <Route path="file-storage" element={<SettingsFileStorage />} />
           <Route path="file-preview" element={<SettingsFilePreview />} />

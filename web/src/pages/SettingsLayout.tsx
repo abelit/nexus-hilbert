@@ -42,6 +42,7 @@ const RAIL_ITEMS: RailItem[] = [
   { to: 'upgrade', icon: UploadCloud, labelZh: '升级', labelEn: 'Upgrade', hintZh: '检测版本 / 复制命令', hintEn: 'Check version / copy command' },
   { to: 'integrations', icon: Plug, labelZh: '集成', labelEn: 'Integrations', hintZh: 'Prometheus / Grafana 等外部系统', hintEn: 'External systems — Prometheus / Grafana / etc.' },
   { to: 'federation', icon: Cable, labelZh: '外部数据源', labelEn: 'Federated sources', hintZh: '只读接入 morse 告警 / 钉钉 ITSM 工单', hintEn: 'Read-only nexus-morse alerts / DingTalk ITSM tickets' },
+  { to: 'ci-monitoring', icon: MonitorPlay, labelZh: 'CI 监控', labelEn: 'CI monitoring', hintZh: 'CI 类型 → 全局 Grafana / Prometheus', hintEn: 'CI type → global Grafana / Prometheus' },
   { to: 'general', icon: SlidersHorizontal, labelZh: '全局配置', labelEn: 'Global', hintZh: '平台级基础能力开关', hintEn: 'Platform-wide capability controls' },
   { to: 'file-storage', icon: HardDrive, labelZh: '文件存储', labelEn: 'File storage', hintZh: '附件本地卷 / S3 兼容存储', hintEn: 'Attachments — local volume / S3-compatible storage' },
   { to: 'file-preview', icon: MonitorPlay, labelZh: '文件预览', labelEn: 'File preview', hintZh: 'kkFileView 在线预览服务', hintEn: 'kkFileView online preview service' },

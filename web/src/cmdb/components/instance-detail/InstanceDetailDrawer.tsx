@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Clock3, Copy, Fingerprint, Hash, History, Info, Network, Pencil, Share2, Siren, Ticket, UserRound, X, Zap } from 'lucide-react';
+import { BookOpen, Clock3, Copy, Fingerprint, Hash, History, Info, MonitorPlay, Network, Pencil, Share2, Siren, Ticket, UserRound, X, Zap } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
@@ -29,7 +29,9 @@ import { cmdbKnowledgeItem } from '../../lib/knowledge-card';
 import { InstanceHistory } from './InstanceHistory';
 import { InstanceOverview } from './InstanceOverview';
 import { FederatedCITab } from './FederatedCITab';
+import { CIMonitoringTab } from './CIMonitoringTab';
 import { getMappingStatus } from '@/api/federation';
+import { getCILinkage } from '@/api/ciMonitoring';
 import { InstanceTopology } from './InstanceTopology';
 import { InstanceTriggers } from './InstanceTriggers';
 
@@ -46,7 +48,7 @@ import { InstanceTriggers } from './InstanceTriggers';
 // upstream on every drawer open would be a promise with no data behind it, so
 // visibility comes from the mapping-status endpoint.
 
-type TabKey = 'overview' | 'topology' | 'alerts' | 'tickets' | 'history' | 'triggers';
+type TabKey = 'overview' | 'topology' | 'alerts' | 'tickets' | 'monitoring' | 'history' | 'triggers';
 
 // A topology node opened from the drawer becomes the drawer's new subject.
 // Cantor switched the whole detail panel to the double-clicked CI and kept the
@@ -116,7 +118,7 @@ export function InstanceDetailDrawer({
   );
 
   const [tab, setTab] = useState<TabKey>(initialTab);
-  const [federationTabs, setFederationTabs] = useState({ alerts: false, tickets: false });
+  const [federationTabs, setFederationTabs] = useState({ alerts: false, tickets: false, monitoring: false });
   // Tab visibility is a mapping decision, not a probe of the upstream. Both
   // lookups are best-effort: an unreachable CMDB hides the tabs rather than
   // failing the drawer.
@@ -125,11 +127,13 @@ export function InstanceDetailDrawer({
     void Promise.all([
       getMappingStatus('external_alert', Number(model.id)).catch(() => null),
       getMappingStatus('itsm_ticket', Number(model.id)).catch(() => null),
-    ]).then(([alerts, tickets]) => {
+      getCILinkage(Number(model.id)).catch(() => null),
+    ]).then(([alerts, tickets, linkage]) => {
       if (!live) return;
       setFederationTabs({
         alerts: Boolean(alerts?.has_mapping),
         tickets: Boolean(tickets?.has_mapping),
+        monitoring: Boolean(linkage?.grafana || linkage?.prometheus),
       });
     });
     return () => {
@@ -518,6 +522,12 @@ export function InstanceDetailDrawer({
                 {tr('事件', 'Events')}
               </TabsTrigger>
             )}
+            {federationTabs.monitoring && (
+              <TabsTrigger value="monitoring">
+                <MonitorPlay size={14} aria-hidden="true" />
+                {tr('监控', 'Monitoring')}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="history">
               <History size={14} aria-hidden="true" />
               {tr('变更历史', 'History')}
@@ -572,6 +582,9 @@ export function InstanceDetailDrawer({
         </TabsContent>
         <TabsContent value="tickets" className="mt-4">
           {tab === 'tickets' && <FederatedCITab kind="tickets" ciID={subject.id} />}
+        </TabsContent>
+        <TabsContent value="monitoring" className="mt-4">
+          {tab === 'monitoring' && <CIMonitoringTab ciID={subject.id} />}
         </TabsContent>
         <TabsContent value="history" className="mt-4">
           {tab === 'history' && (
