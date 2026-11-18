@@ -295,7 +295,8 @@ export function ExternalAlertsPanel() {
         )}
 
         {!err && !loading && configured && items.length > 0 && (
-          <table className="w-full text-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-xs">
             <thead className="sticky top-0 bg-zinc-950 text-left text-[11px] uppercase tracking-wider text-zinc-500">
               <tr className="border-b border-zinc-800">
                 {COLUMNS.map((column) => (
@@ -340,7 +341,8 @@ export function ExternalAlertsPanel() {
                 );
               })}
             </tbody>
-          </table>
+            </table>
+          </div>
         )}
 
         <PaginationFooter
