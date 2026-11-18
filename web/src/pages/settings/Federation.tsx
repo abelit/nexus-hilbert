@@ -200,8 +200,12 @@ function ConnectionsCard({ kind }: { kind: FederationKind }) {
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         if (await confirmAction(tr('该连接仍被 CI 映射引用。级联删除连接及其映射？', 'This connection is still referenced by CI mappings. Delete it and its mappings?'))) {
-          await deleteConnection(row.id, true);
-          await load();
+          try {
+            await deleteConnection(row.id, true);
+            await load();
+          } catch (cascadeErr) {
+            await alertAction(cascadeErr instanceof ApiError ? cascadeErr.message : (cascadeErr as Error).message);
+          }
         }
       } else {
         await alertAction(e instanceof ApiError ? e.message : (e as Error).message);
@@ -487,6 +491,12 @@ function ConnectionDialog({
               <Label htmlFor="fed-pass">{tr('密码', 'Password')}</Label>
               <Input id="fed-pass" type="password" placeholder={authHint} value={form.password} onChange={(e) => setCredential('password', e.target.value)} autoComplete="new-password" />
             </div>
+            <p className="text-[11px] text-text-faint sm:col-span-2">
+              {tr(
+                '整组凭据留空会保留原值；填写任一字段会整组替换，因此修改用户名时请同时填写密码。',
+                'Leaving the whole credential group blank keeps it; entering any field replaces the group, so fill the password when changing the username.',
+              )}
+            </p>
           </div>
         )}
 
