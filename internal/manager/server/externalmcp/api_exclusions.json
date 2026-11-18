@@ -105,5 +105,12 @@
   {"method":"POST","path":"/v1/observability/ci-links/preview","reason":"CI monitoring preview resolves a real CI and may query the live Prometheus server; console-only."},
   {"method":"GET","path":"/v1/observability/ci-types/{typeId}/linkage","reason":"Linkage is a console tab-visibility check, not an external API operation."},
   {"method":"GET","path":"/v1/observability/ci/{ciId}/grafana","reason":"Grafana drill-down links are browser interactions, not external API operations."},
-  {"method":"GET","path":"/v1/observability/ci/{ciId}/alerts","reason":"Per-CI Prometheus alert reads require the caller's identity to resolve the CI; not a stable external API."}
+  {"method":"GET","path":"/v1/observability/ci/{ciId}/alerts","reason":"Per-CI Prometheus alert reads require the caller's identity to resolve the CI; not a stable external API."},
+  {"method":"GET","path":"/v1/observability/monitoring-connections","reason":"CI monitoring connections carry external Grafana/Prometheus credentials; console-only configuration."},
+  {"method":"POST","path":"/v1/observability/monitoring-connections","reason":"CI monitoring connections carry external Grafana/Prometheus credentials; console-only configuration."},
+  {"method":"GET","path":"/v1/observability/monitoring-connections/health","reason":"Connection health probes disclose external endpoints; console-only."},
+  {"method":"POST","path":"/v1/observability/monitoring-connections/test","reason":"Connection probes use administrator-entered credentials; console-only."},
+  {"method":"PUT","path":"/v1/observability/monitoring-connections/{id}","reason":"CI monitoring connections carry external Grafana/Prometheus credentials; console-only configuration."},
+  {"method":"DELETE","path":"/v1/observability/monitoring-connections/{id}","reason":"CI monitoring connections carry external Grafana/Prometheus credentials; console-only configuration."},
+  {"method":"POST","path":"/v1/observability/monitoring-connections/{id}/test","reason":"Connection probes use stored external credentials; console-only."}
 ]

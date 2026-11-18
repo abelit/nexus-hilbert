@@ -28,7 +28,11 @@ Prometheus 设置，以及两套「历史设置」。迁移评估发现：
    的 `/tickets`。不新增第二套告警页。
 4. **不迁移 Cantor 的 Grafana / Prometheus 设置**。继续使用 Settings → 集成 的全局连接；
    新增 `ci_monitoring_links` 仅保存「CI 类型 → Grafana 仪表盘 UID / Prometheus 标签」映射，
-   **不保存 URL 或凭据**。不实现 Grafana 反向代理，也不实现多连接。
+   连接地址与凭据在 `ci_monitoring_connections`（内部连接不落表）。不实现 Grafana 反向代理，
+   也不在全局集成上做多连接。
+   CI 监控连接支持 **内部**（平台全局集成，只读投影，不落表）与 **外部**（管理员命名的
+   Grafana/Prometheus，独立地址与 secretbox 加密凭据，支持 test/health）；链接通过可空
+   `connection_id` 选择，0 表示内部。外部连接同样不做反向代理。
 5. **CI 解析走调用方 JWT**。`cmd/ongrid` 用现有 CMDB HTTP 客户端实现 `CMDBReader`；后台 RCA /
    工作流没有调用者时继续 fail-closed，不引入服务账号。CMDB 不可用时，全局中心仍工作，
    CI 页签/映射预览降级为 `cmdb_unavailable`。

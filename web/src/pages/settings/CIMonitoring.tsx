@@ -17,15 +17,25 @@ import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
 import { listCITypes, type CIType } from '@/api/federation';
 import {
+  createMonitoringConnection,
   deleteCILink,
+  deleteMonitoringConnection,
   listCILinks,
+  listMonitoringConnections,
+  monitoringConnectionsHealth,
   previewCILink,
   saveCILink,
+  testMonitoringConnection,
+  testSavedMonitoringConnection,
+  updateMonitoringConnection,
   type CILink,
   type CILinkInput,
   type CIPreview,
+  type ConnectionHealth,
   type LabelMapping,
   type Matcher,
+  type MonitoringConnection,
+  type MonitoringConnectionInput,
   type Provider,
   type VarMapping,
 } from '@/api/ciMonitoring';
@@ -56,9 +66,330 @@ export default function CIMonitoringSettings() {
         </p>
       </div>
       {PROVIDERS.map((provider) => (
-        <LinksCard key={provider.value} provider={provider.value} label={tr(provider.zh, provider.en)} />
+        <div key={provider.value} className="space-y-4">
+          <ConnectionsCard provider={provider.value} label={tr(provider.zh, provider.en)} />
+          <LinksCard provider={provider.value} label={tr(provider.zh, provider.en)} />
+        </div>
       ))}
     </div>
+  );
+}
+
+function ConnectionsCard({ provider, label }: { provider: Provider; label: string }) {
+  const { tr } = useI18n();
+  const { confirmAction, alertAction, dialog } = useDialogs();
+  const [rows, setRows] = useState<MonitoringConnection[]>([]);
+  const [health, setHealth] = useState<Record<number, ConnectionHealth>>({});
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [editing, setEditing] = useState<MonitoringConnection | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [connections, healthRows] = await Promise.all([
+        listMonitoringConnections(provider),
+        monitoringConnectionsHealth(provider).catch(() => ({ items: [] as ConnectionHealth[], total: 0 })),
+      ]);
+      setRows(connections.items ?? []);
+      setHealth(Object.fromEntries((healthRows.items ?? []).map((row) => [row.id, row])));
+      setErr(null);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [provider]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function remove(row: MonitoringConnection) {
+    if (!(await confirmAction(tr(`删除连接「${row.name}」？`, `Delete connection “${row.name}”?`)))) return;
+    try {
+      await deleteMonitoringConnection(row.id);
+      await load();
+    } catch (e) {
+      await alertAction(e instanceof ApiError ? e.message : (e as Error).message);
+    }
+  }
+
+  async function probe(row: MonitoringConnection) {
+    try {
+      if (row.kind === 'internal') {
+        await load();
+        return;
+      }
+      await testSavedMonitoringConnection(row.id);
+      await load();
+    } catch (e) {
+      await alertAction(e instanceof ApiError ? e.message : (e as Error).message);
+    }
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-text">{tr('连接管理', 'Connections')} · {label}</h2>
+          <p className="mt-1 text-xs text-text-muted">
+            {tr('「平台内部」读取 Settings → 集成 的全局配置；外部连接独立保存地址与加密凭据。', '“Platform” reads the global Settings → Integrations value; external connections store their own endpoint and encrypted credentials.')}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" type="button" onClick={() => void load()} disabled={loading}>
+            <RefreshCw size={12} className={loading ? 'animate-spin' : undefined} />
+            {tr('刷新', 'Refresh')}
+          </Button>
+          <Button variant="primary" size="sm" type="button" onClick={() => { setEditing(null); setCreating(true); }}>
+            <Plus size={12} />
+            {tr('新建外部连接', 'New external connection')}
+          </Button>
+        </div>
+      </div>
+
+      {err && <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">{err}</div>}
+
+      {loading ? (
+        <p className="py-6 text-center text-xs text-text-faint">{tr('加载中…', 'Loading…')}</p>
+      ) : (
+        <div className="og-resource-table" data-variant="quiet">
+          <table className="w-full text-xs">
+            <thead>
+              <tr>
+                <th>{tr('名称', 'Name')}</th>
+                <th>{tr('类型', 'Kind')}</th>
+                <th>{tr('地址 / 认证', 'Endpoint / auth')}</th>
+                <th>{tr('启用', 'Enabled')}</th>
+                <th>{tr('健康', 'Health')}</th>
+                <th className="text-right">{tr('操作', 'Actions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const healthRow = health[row.id];
+                return (
+                  <tr key={`${row.kind}-${row.id}`}>
+                    <td className="font-medium text-text">{row.name}</td>
+                    <td>{row.kind === 'internal' ? <Chip tone="info">{tr('平台内部', 'Platform')}</Chip> : <Chip>{tr('外部', 'External')}</Chip>}</td>
+                    <td className="max-w-[26rem] truncate text-text-muted">
+                      {row.kind === 'internal'
+                        ? tr('Settings → 集成', 'Settings → Integrations')
+                        : `${row.base_url ?? ''}${row.auth_type ? ` · ${row.auth_type}` : ''}`}
+                    </td>
+                    <td>{row.enabled ? <Chip tone="success">{tr('启用', 'On')}</Chip> : <Chip>{tr('停用', 'Off')}</Chip>}</td>
+                    <td>
+                      {healthRow ? (
+                        healthRow.ok ? (
+                          <span className="text-emerald-400">{tr('正常', 'OK')}</span>
+                        ) : (
+                          <span className="text-red-300" title={healthRow.error}>{tr('异常', 'Failed')}</span>
+                        )
+                      ) : (
+                        <span className="text-text-faint">—</span>
+                      )}
+                    </td>
+                    <td className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button variant="subtle" size="sm" type="button" onClick={() => void probe(row)}>
+                          {tr('测试', 'Test')}
+                        </Button>
+                        {row.kind === 'external' && (
+                          <>
+                            <Button variant="ghost" size="sm" type="button" aria-label={tr('编辑', 'Edit')} onClick={() => { setCreating(false); setEditing(row); }}>
+                              <Pencil size={12} />
+                            </Button>
+                            <Button variant="dangerGhost" size="sm" type="button" aria-label={tr('删除', 'Delete')} onClick={() => void remove(row)}>
+                              <Trash2 size={12} />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(creating || editing) && (
+        <ConnectionDialog
+          provider={provider}
+          connection={editing}
+          onClose={() => { setCreating(false); setEditing(null); }}
+          onSaved={async () => {
+            setCreating(false);
+            setEditing(null);
+            await load();
+          }}
+        />
+      )}
+      {dialog}
+    </Card>
+  );
+}
+
+function ConnectionDialog({
+  provider,
+  connection,
+  onClose,
+  onSaved,
+}: {
+  provider: Provider;
+  connection: MonitoringConnection | null;
+  onClose(): void;
+  onSaved(): Promise<void>;
+}) {
+  const { tr } = useI18n();
+  const [name, setName] = useState(connection?.name ?? '');
+  const [baseURL, setBaseURL] = useState(connection?.base_url ?? '');
+  const [authType, setAuthType] = useState<'none' | 'bearer' | 'basic'>(
+    (connection?.auth_type as 'none' | 'bearer' | 'basic') ?? 'none',
+  );
+  const [token, setToken] = useState('');
+  const [username, setUsername] = useState(connection?.username ?? '');
+  const [password, setPassword] = useState('');
+  const [tlsInsecure, setTLSInsecure] = useState(connection?.tls_insecure ?? false);
+  const [enabled, setEnabled] = useState(connection?.enabled ?? true);
+  const [remark, setRemark] = useState(connection?.remark ?? '');
+  const [credentialsTouched, setCredentialsTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  const authHint = connection?.token_set || connection?.password_set
+    ? tr('已设置，留空保持不变', 'Set; leave blank to keep')
+    : undefined;
+
+  function input(): MonitoringConnectionInput {
+    const includeAuth = !connection || credentialsTouched;
+    return {
+      name: name.trim(),
+      base_url: baseURL.trim(),
+      auth_type: authType,
+      auth_data: includeAuth && authType !== 'none' ? { token, username, password } : undefined,
+      tls_insecure: tlsInsecure,
+      enabled,
+      remark: remark.trim(),
+    };
+  }
+
+  async function probe() {
+    setTesting(true);
+    setErr(null);
+    setOk(null);
+    try {
+      if (connection && !credentialsTouched) {
+        await testSavedMonitoringConnection(connection.id);
+      } else {
+        await testMonitoringConnection(provider, input());
+      }
+      setOk(tr('连接测试通过', 'Connection test passed'));
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    try {
+      if (connection) await updateMonitoringConnection(provider, connection.id, input());
+      else await createMonitoringConnection(provider, input());
+      await onSaved();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={connection ? tr('编辑外部连接', 'Edit external connection') : tr('新建外部连接', 'New external connection')}
+      size="lg"
+      footer={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" size="sm" type="button" onClick={() => void probe()} disabled={testing || saving}>
+            {testing ? tr('测试中…', 'Testing…') : tr('测试连接', 'Test connection')}
+          </Button>
+          <Button variant="ghost" size="sm" type="button" onClick={onClose} disabled={saving}>
+            {tr('取消', 'Cancel')}
+          </Button>
+          <Button variant="primary" size="sm" type="button" onClick={() => void save()} disabled={saving || testing}>
+            {saving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        {err && <div role="alert" className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">{err}</div>}
+        {ok && <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300">{ok}</div>}
+        <div>
+          <Label htmlFor="ciobs-conn-name">{tr('名称', 'Name')}</Label>
+          <Input id="ciobs-conn-name" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <Label htmlFor="ciobs-conn-url">{tr('Base URL', 'Base URL')}</Label>
+          <Input id="ciobs-conn-url" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} className="font-mono" placeholder={provider === 'grafana' ? 'https://grafana.example.com/grafana' : 'https://prometheus.example.com/prometheus'} />
+        </div>
+        <div>
+          <Label>{tr('认证', 'Auth')}</Label>
+          <Select
+            label={tr('认证', 'Auth')}
+            value={authType}
+            onValueChange={(v) => setAuthType(v as 'none' | 'bearer' | 'basic')}
+            options={[
+              { value: 'none', label: 'None' },
+              { value: 'bearer', label: 'Bearer' },
+              { value: 'basic', label: 'Basic' },
+            ]}
+            className="w-full"
+          />
+        </div>
+        {authType === 'bearer' && (
+          <div>
+            <Label htmlFor="ciobs-conn-token">{tr('Token', 'Token')}</Label>
+            <Input id="ciobs-conn-token" type="password" placeholder={authHint} value={token} onChange={(e) => { setToken(e.target.value); setCredentialsTouched(true); }} autoComplete="new-password" />
+          </div>
+        )}
+        {authType === 'basic' && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="ciobs-conn-user">{tr('用户名', 'Username')}</Label>
+              <Input id="ciobs-conn-user" value={username} onChange={(e) => { setUsername(e.target.value); setCredentialsTouched(true); }} autoComplete="off" />
+            </div>
+            <div>
+              <Label htmlFor="ciobs-conn-pass">{tr('密码', 'Password')}</Label>
+              <Input id="ciobs-conn-pass" type="password" placeholder={authHint} value={password} onChange={(e) => { setPassword(e.target.value); setCredentialsTouched(true); }} autoComplete="new-password" />
+            </div>
+          </div>
+        )}
+        <div>
+          <Label htmlFor="ciobs-conn-remark">{tr('备注', 'Remark')}</Label>
+          <Input id="ciobs-conn-remark" value={remark} onChange={(e) => setRemark(e.target.value)} />
+        </div>
+        <div className="flex flex-wrap items-center gap-5 text-xs text-text-muted">
+          <label className="flex items-center gap-2">
+            <Switch checked={enabled} onCheckedChange={setEnabled} aria-label={tr('启用', 'Enabled')} />
+            {tr('启用', 'Enabled')}
+          </label>
+          <label className="flex items-center gap-2">
+            <Switch checked={tlsInsecure} onCheckedChange={setTLSInsecure} aria-label={tr('跳过 TLS 校验', 'Skip TLS verification')} />
+            {tr('跳过 TLS 校验', 'Skip TLS verification')}
+          </label>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -67,6 +398,7 @@ function LinksCard({ provider, label }: { provider: Provider; label: string }) {
   const { confirmAction, alertAction, dialog } = useDialogs();
   const [rows, setRows] = useState<CILink[]>([]);
   const [ciTypes, setCITypes] = useState<CIType[]>([]);
+  const [connections, setConnections] = useState<MonitoringConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<CILink | null>(null);
@@ -75,12 +407,14 @@ function LinksCard({ provider, label }: { provider: Provider; label: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [links, types] = await Promise.all([
+      const [links, types, conns] = await Promise.all([
         listCILinks(provider),
         listCITypes().catch(() => ({ items: [] as CIType[], total: 0 })),
+        listMonitoringConnections(provider).catch(() => ({ items: [] as MonitoringConnection[], total: 0 })),
       ]);
       setRows(links.items ?? []);
       setCITypes(types.items ?? []);
+      setConnections(conns.items ?? []);
       setErr(null);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
@@ -97,6 +431,8 @@ function LinksCard({ provider, label }: { provider: Provider; label: string }) {
     const found = ciTypes.find((ciType) => ciType.id === id);
     return found ? found.alias || found.name : `#${id}`;
   };
+  const connectionName = (id?: number) =>
+    id ? connections.find((conn) => conn.id === id)?.name ?? `#${id}` : tr('平台内部', 'Platform');
 
   async function remove(link: CILink) {
     if (!(await confirmAction(tr(`删除 ${label} 链接？`, `Delete the ${label} link?`)))) return;
@@ -152,6 +488,7 @@ function LinksCard({ provider, label }: { provider: Provider; label: string }) {
             <thead>
               <tr>
                 <th>{tr('CI 类型', 'CI type')}</th>
+                <th>{tr('连接', 'Connection')}</th>
                 <th>{tr('配置', 'Mapping')}</th>
                 <th>{tr('启用', 'Enabled')}</th>
                 <th className="text-right">{tr('操作', 'Actions')}</th>
@@ -161,6 +498,7 @@ function LinksCard({ provider, label }: { provider: Provider; label: string }) {
               {rows.map((link) => (
                 <tr key={link.ci_type_id}>
                   <td className="text-text">{typeName(link.ci_type_id)}</td>
+                  <td className="text-text-muted">{connectionName(link.connection_id)}</td>
                   <td className="max-w-[28rem] truncate text-text-muted">
                     {provider === 'grafana'
                       ? `${link.dashboard_uid ?? ''}${link.dashboard_slug ? ` / ${link.dashboard_slug}` : ''}`
@@ -189,6 +527,7 @@ function LinksCard({ provider, label }: { provider: Provider; label: string }) {
           provider={provider}
           link={editing}
           ciTypes={ciTypes}
+          connections={connections}
           onClose={() => { setCreating(false); setEditing(null); }}
           onSaved={async () => {
             setCreating(false);
@@ -206,17 +545,20 @@ function LinkDialog({
   provider,
   link,
   ciTypes,
+  connections,
   onClose,
   onSaved,
 }: {
   provider: Provider;
   link: CILink | null;
   ciTypes: CIType[];
+  connections: MonitoringConnection[];
   onClose(): void;
   onSaved(): Promise<void>;
 }) {
   const { tr } = useI18n();
   const [ciTypeID, setCITypeID] = useState(String(link?.ci_type_id ?? ciTypes[0]?.id ?? ''));
+  const [connectionID, setConnectionID] = useState(String(link?.connection_id ?? 0));
   const [enabled, setEnabled] = useState(link?.enabled ?? true);
   const [dashboardUID, setDashboardUID] = useState(link?.dashboard_uid ?? '');
   const [dashboardSlug, setDashboardSlug] = useState(link?.dashboard_slug ?? '');
@@ -231,6 +573,7 @@ function LinkDialog({
 
   const input: CILinkInput = {
     enabled,
+    connection_id: Number(connectionID) || 0,
     dashboard_uid: provider === 'grafana' ? dashboardUID : undefined,
     dashboard_slug: provider === 'grafana' ? dashboardSlug : undefined,
     open_mode: provider === 'grafana' ? openMode : undefined,
@@ -296,7 +639,7 @@ function LinkDialog({
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <Label>{tr('CI 类型', 'CI type')}</Label>
             {ciTypes.length > 0 ? (
@@ -311,6 +654,21 @@ function LinkDialog({
             ) : (
               <Input aria-label={tr('CI 类型 ID', 'CI type ID')} type="number" value={ciTypeID} onChange={(e) => setCITypeID(e.target.value)} />
             )}
+          </div>
+          <div>
+            <Label>{tr('连接', 'Connection')}</Label>
+            <Select
+              label={tr('连接', 'Connection')}
+              value={connectionID}
+              onValueChange={setConnectionID}
+              options={[
+                { value: '0', label: tr('平台内部', 'Platform') },
+                ...connections
+                  .filter((conn) => conn.kind === 'external' && conn.enabled)
+                  .map((conn) => ({ value: String(conn.id), label: conn.name })),
+              ]}
+              className="w-full"
+            />
           </div>
           <div>
             <Label htmlFor="ciobs-preview-ci">{tr('预览用 CI ID', 'CI ID for preview')}</Label>

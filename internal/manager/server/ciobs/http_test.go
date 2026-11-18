@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -34,6 +36,14 @@ type testProm struct{ alerts []promquery.Alert }
 
 func (p testProm) Alerts(context.Context) ([]promquery.Alert, error) { return p.alerts, nil }
 
+type testCrypto struct{}
+
+func (testCrypto) Encrypt(plain string) (string, error) { return "enc:" + plain, nil }
+func (testCrypto) Decrypt(cipher string) (string, error) {
+	return strings.TrimPrefix(cipher, "enc:"), nil
+}
+func (testCrypto) Weak() bool { return false }
+
 func newRouter(t *testing.T, role string) (*chi.Mux, *ciobsservice.Service) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -51,6 +61,7 @@ func newRouter(t *testing.T, role string) (*chi.Mux, *ciobsservice.Service) {
 		}},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
+	uc.SetCrypto(testCrypto{})
 	service := ciobsservice.New(uc)
 	handler := ciobsserver.NewHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	router := chi.NewRouter()
@@ -151,4 +162,58 @@ func TestGrafanaAndPrometheusReads(t *testing.T) {
 	if list.Items[0].CITypeID != 3 {
 		t.Fatalf("ci type = %d", list.Items[0].CITypeID)
 	}
+}
+
+func TestMonitoringConnectionsInternalAndExternal(t *testing.T) {
+	admin, _ := newRouter(t, "admin")
+	rec := do(t, admin, http.MethodGet, "/v1/observability/monitoring-connections?provider=grafana", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", rec.Code, rec.Body)
+	}
+	initial := decode[struct {
+		Items []ciobsbiz.ConnectionView `json:"items"`
+	}](t, rec)
+	if len(initial.Items) != 1 || initial.Items[0].Kind != "internal" || initial.Items[0].ID != 0 {
+		t.Fatalf("initial = %+v", initial)
+	}
+
+	rec = do(t, admin, http.MethodPost, "/v1/observability/monitoring-connections?provider=grafana", map[string]any{
+		"name": "external", "base_url": "https://grafana.example.com/grafana",
+		"auth_type": "bearer", "auth_data": map[string]any{"token": "tok-secret"},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "tok-secret") {
+		t.Fatalf("response leaks token: %s", rec.Body)
+	}
+	created := decode[ciobsbiz.ConnectionView](t, rec)
+	if created.Kind != "external" || !created.TokenSet {
+		t.Fatalf("created = %+v", created)
+	}
+
+	rec = do(t, admin, http.MethodGet, "/v1/observability/monitoring-connections?provider=grafana", nil)
+	rows := decode[struct {
+		Items []ciobsbiz.ConnectionView `json:"items"`
+	}](t, rec)
+	if len(rows.Items) != 2 {
+		t.Fatalf("rows = %+v", rows)
+	}
+
+	user, _ := newRouter(t, "user")
+	rec = do(t, user, http.MethodPost, "/v1/observability/monitoring-connections?provider=grafana", map[string]any{
+		"name": "x", "base_url": "https://x.example.com", "auth_type": "none",
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("user status = %d body=%s", rec.Code, rec.Body)
+	}
+
+	rec = do(t, admin, http.MethodDelete, "/v1/observability/monitoring-connections/"+formatID(created.ID), nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func formatID(id uint64) string {
+	return strconv.FormatUint(id, 10)
 }

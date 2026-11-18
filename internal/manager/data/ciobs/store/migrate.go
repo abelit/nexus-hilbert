@@ -8,5 +8,5 @@ import (
 
 // Migrate registers ci_monitoring_links with GORM AutoMigrate.
 func Migrate(db *gorm.DB) error {
-	return db.AutoMigrate(&model.Link{})
+	return db.AutoMigrate(&model.Connection{}, &model.Link{})
 }

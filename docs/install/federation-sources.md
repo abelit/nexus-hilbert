@@ -24,8 +24,12 @@
      启用徽标的过滤器。
    - 配置 **展示列**：顺序、可见性、自定义字段与渲染方式；至少保留一列可见。
 2. **设置 → CI 监控**
-   - Grafana：CI 类型 → Dashboard UID / slug / 变量映射；深链由浏览器用全局 Grafana 根地址组合。
-   - Prometheus：CI 类型 → 标签映射 + 额外 matcher；只展示匹配的活动告警。
+   - 连接管理：**平台内部**连接只读展示 Settings → 集成 的全局值；可新建 **外部** Grafana /
+     Prometheus 连接（地址、认证、TLS），支持测试与健康检查。外部凭据由 `secretbox` 加密；
+     被 CI 链接引用的连接不能删除（返回 409）。
+   - 链接对话框选择「平台内部」或某个已启用的外部连接。
+   - Grafana：CI 类型 → Dashboard UID / slug / 变量映射；深链由浏览器用所选连接的根地址组合。
+   - Prometheus：CI 类型 → 标签映射 + 额外 matcher；只展示所选连接匹配的活动告警。
    - 「预览」需要一个真实 CI ID；CMDB 不可达时允许直接填写数字 CI 类型 ID。
 3. **使用**
    - `/alerts` →「外部告警」tab：范围、时间窗、状态/级别/关键字、统计、CSV/JSON 导出。

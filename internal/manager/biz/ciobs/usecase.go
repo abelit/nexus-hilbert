@@ -27,6 +27,12 @@ type Repo interface {
 	Get(ctx context.Context, provider string, ciTypeID uint64) (*model.Link, error)
 	Upsert(ctx context.Context, link *model.Link) error
 	Delete(ctx context.Context, provider string, ciTypeID uint64) error
+
+	ListConnections(ctx context.Context, provider string) ([]model.Connection, error)
+	GetConnection(ctx context.Context, id uint64) (*model.Connection, error)
+	CreateConnection(ctx context.Context, conn *model.Connection) error
+	UpdateConnection(ctx context.Context, conn *model.Connection) error
+	DeleteConnection(ctx context.Context, id uint64) error
 }
 
 // CMDBReader reuses the federation projection: one adapter serves both.
@@ -56,6 +62,7 @@ type Matcher struct {
 
 type LinkInput struct {
 	Enabled       *bool          `json:"enabled"`
+	ConnectionID  uint64         `json:"connection_id"`
 	DashboardUID  string         `json:"dashboard_uid"`
 	DashboardSlug string         `json:"dashboard_slug"`
 	OpenMode      string         `json:"open_mode"`
@@ -68,6 +75,7 @@ type LinkView struct {
 	CITypeID      uint64         `json:"ci_type_id"`
 	Provider      string         `json:"provider"`
 	Enabled       bool           `json:"enabled"`
+	ConnectionID  uint64         `json:"connection_id"`
 	DashboardUID  string         `json:"dashboard_uid,omitempty"`
 	DashboardSlug string         `json:"dashboard_slug,omitempty"`
 	OpenMode      string         `json:"open_mode,omitempty"`
@@ -84,6 +92,8 @@ type Linkage struct {
 type GrafanaResult struct {
 	Configured bool              `json:"configured"`
 	Reason     string            `json:"reason,omitempty"`
+	Kind       string            `json:"kind,omitempty"`
+	RootURL    string            `json:"root_url,omitempty"`
 	UID        string            `json:"uid,omitempty"`
 	Slug       string            `json:"slug,omitempty"`
 	OpenMode   string            `json:"open_mode,omitempty"`
@@ -114,10 +124,12 @@ type PreviewResult struct {
 }
 
 type Usecase struct {
-	repo Repo
-	cmdb CMDBReader
-	prom PromAlerts
-	log  *slog.Logger
+	repo        Repo
+	cmdb        CMDBReader
+	prom        PromAlerts
+	crypto      Crypto
+	globalProbe GlobalProbe
+	log         *slog.Logger
 }
 
 func NewUsecase(repo Repo, cmdb CMDBReader, prom PromAlerts, log *slog.Logger) *Usecase {
@@ -126,6 +138,13 @@ func NewUsecase(repo Repo, cmdb CMDBReader, prom PromAlerts, log *slog.Logger) *
 	}
 	return &Usecase{repo: repo, cmdb: cmdb, prom: prom, log: log}
 }
+
+// SetCrypto wires credential encryption. Without it, external connections
+// cannot be created (the API refuses rather than storing plaintext).
+func (u *Usecase) SetCrypto(c Crypto) { u.crypto = c }
+
+// SetGlobalProbe wires the platform's global Grafana/Prometheus health probes.
+func (u *Usecase) SetGlobalProbe(p GlobalProbe) { u.globalProbe = p }
 
 func (u *Usecase) ListLinks(ctx context.Context, provider string) ([]LinkView, error) {
 	if !validProvider(provider) {
@@ -188,8 +207,17 @@ func (u *Usecase) SaveLink(ctx context.Context, provider string, ciTypeID uint64
 	if provider == model.ProviderPrometheus && len(in.LabelMapping) == 0 && len(in.ExtraMatchers) == 0 {
 		return nil, fmt.Errorf("%w: a Prometheus link needs at least one label mapping or matcher", errs.ErrInvalid)
 	}
+	if in.ConnectionID > 0 {
+		conn, err := u.repo.GetConnection(ctx, in.ConnectionID)
+		if err != nil {
+			return nil, err
+		}
+		if conn.Provider != provider || !conn.Enabled {
+			return nil, fmt.Errorf("%w: connection %d is not an enabled %s connection", errs.ErrInvalid, in.ConnectionID, provider)
+		}
+	}
 	row := &model.Link{
-		CITypeID: ciTypeID, Provider: provider, Enabled: enabled,
+		CITypeID: ciTypeID, Provider: provider, Enabled: enabled, ConnectionID: in.ConnectionID,
 		DashboardUID: strings.TrimSpace(in.DashboardUID), DashboardSlug: strings.TrimSpace(in.DashboardSlug),
 		OpenMode: openMode,
 	}
@@ -265,8 +293,19 @@ func (u *Usecase) GrafanaForCI(ctx context.Context, ciID uint64) (*GrafanaResult
 	if err != nil {
 		return nil, err
 	}
+	rootURL := ""
+	kind := model.ConnectionKindInternal
+	if row.ConnectionID > 0 {
+		conn, err := u.resolveConnection(ctx, model.ProviderGrafana, row.ConnectionID)
+		if err != nil {
+			return nil, err
+		}
+		rootURL = conn.BaseURL
+		kind = model.ConnectionKindExternal
+	}
 	return &GrafanaResult{
-		Configured: true, UID: row.DashboardUID, Slug: row.DashboardSlug,
+		Configured: true, Kind: kind, RootURL: rootURL,
+		UID: row.DashboardUID, Slug: row.DashboardSlug,
 		OpenMode: row.OpenMode, Vars: varsFrom(ci, mappings),
 	}, nil
 }
@@ -302,10 +341,19 @@ func (u *Usecase) PromAlertsForCI(ctx context.Context, ciID uint64) (*PromResult
 	if len(matchers) == 0 {
 		return &PromResult{Configured: true, Reason: "no_ci_value", Alerts: []PromAlertView{}}, nil
 	}
-	if u.prom == nil {
-		return &PromResult{Configured: false, Reason: "prometheus_unavailable", Alerts: []PromAlertView{}}, nil
+	var alerts []promquery.Alert
+	if row.ConnectionID > 0 {
+		conn, connErr := u.resolveConnection(ctx, model.ProviderPrometheus, row.ConnectionID)
+		if connErr != nil {
+			return nil, connErr
+		}
+		alerts, err = u.promAlertsForConnection(ctx, conn)
+	} else {
+		if u.prom == nil {
+			return &PromResult{Configured: false, Reason: "prometheus_unavailable", Alerts: []PromAlertView{}}, nil
+		}
+		alerts, err = u.prom.Alerts(ctx)
 	}
-	alerts, err := u.prom.Alerts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUpstream, err)
 	}
@@ -347,11 +395,19 @@ func (u *Usecase) PreviewLink(ctx context.Context, provider string, ciID uint64,
 		out.Reason = "no_ci_value"
 		return out, nil
 	}
-	if u.prom == nil {
+	var alerts []promquery.Alert
+	if in.ConnectionID > 0 {
+		conn, connErr := u.resolveConnection(ctx, model.ProviderPrometheus, in.ConnectionID)
+		if connErr != nil {
+			return nil, connErr
+		}
+		alerts, err = u.promAlertsForConnection(ctx, conn)
+	} else if u.prom == nil {
 		out.Reason = "prometheus_unavailable"
 		return out, nil
+	} else {
+		alerts, err = u.prom.Alerts(ctx)
 	}
-	alerts, err := u.prom.Alerts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUpstream, err)
 	}
@@ -484,6 +540,7 @@ func linkView(row *model.Link) (LinkView, error) {
 	}
 	return LinkView{
 		CITypeID: row.CITypeID, Provider: row.Provider, Enabled: row.Enabled,
+		ConnectionID: row.ConnectionID,
 		DashboardUID: row.DashboardUID, DashboardSlug: row.DashboardSlug, OpenMode: row.OpenMode,
 		VarMapping: vars, LabelMapping: labels, ExtraMatchers: extra,
 	}, nil

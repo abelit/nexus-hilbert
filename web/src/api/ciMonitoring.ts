@@ -10,6 +10,7 @@ export type CILink = {
   ci_type_id: number;
   provider: Provider;
   enabled: boolean;
+  connection_id?: number;
   dashboard_uid?: string;
   dashboard_slug?: string;
   open_mode?: 'link' | 'embed';
@@ -20,6 +21,7 @@ export type CILink = {
 
 export type CILinkInput = {
   enabled?: boolean;
+  connection_id?: number;
   dashboard_uid?: string;
   dashboard_slug?: string;
   open_mode?: 'link' | 'embed';
@@ -28,11 +30,96 @@ export type CILinkInput = {
   extra_matchers?: Matcher[];
 };
 
+export type MonitoringConnection = {
+  id: number;
+  provider: Provider;
+  kind: 'internal' | 'external';
+  name: string;
+  base_url?: string;
+  auth_type: string;
+  token_set: boolean;
+  username?: string;
+  password_set: boolean;
+  tls_insecure: boolean;
+  enabled: boolean;
+  remark?: string;
+};
+
+export type MonitoringConnectionInput = {
+  name: string;
+  base_url: string;
+  auth_type: 'none' | 'bearer' | 'basic';
+  auth_data?: { token?: string; username?: string; password?: string };
+  tls_insecure?: boolean;
+  enabled?: boolean;
+  remark?: string;
+};
+
+export type ConnectionHealth = {
+  id: number;
+  name: string;
+  kind: 'internal' | 'external';
+  ok: boolean;
+  error?: string;
+};
+
+export function listMonitoringConnections(provider: Provider) {
+  return request<{ items: MonitoringConnection[]; total: number }>(
+    'GET',
+    `/observability/monitoring-connections?provider=${provider}`,
+  );
+}
+
+export function createMonitoringConnection(provider: Provider, input: MonitoringConnectionInput) {
+  return request<MonitoringConnection>(
+    'POST',
+    `/observability/monitoring-connections?provider=${provider}`,
+    input,
+  );
+}
+
+export function updateMonitoringConnection(
+  provider: Provider,
+  id: number,
+  input: MonitoringConnectionInput,
+) {
+  return request<MonitoringConnection>(
+    'PUT',
+    `/observability/monitoring-connections/${id}?provider=${provider}`,
+    input,
+  );
+}
+
+export function deleteMonitoringConnection(id: number) {
+  return request<void>('DELETE', `/observability/monitoring-connections/${id}`);
+}
+
+export function testMonitoringConnection(provider: Provider, input: MonitoringConnectionInput) {
+  return request<{ ok: boolean }>(
+    'POST',
+    `/observability/monitoring-connections/test?provider=${provider}`,
+    input,
+  );
+}
+
+export function testSavedMonitoringConnection(id: number) {
+  return request<{ ok: boolean }>('POST', `/observability/monitoring-connections/${id}/test`);
+}
+
+export function monitoringConnectionsHealth(provider: Provider) {
+  return request<{ items: ConnectionHealth[]; total: number }>(
+    'GET',
+    `/observability/monitoring-connections/health?provider=${provider}`,
+  );
+}
+
 export type Linkage = { grafana: boolean; prometheus: boolean };
 
 export type GrafanaCI = {
   configured: boolean;
   reason?: string;
+  kind?: 'internal' | 'external';
+  root_url?: string;
   uid?: string;
   slug?: string;
   open_mode?: 'link' | 'embed';

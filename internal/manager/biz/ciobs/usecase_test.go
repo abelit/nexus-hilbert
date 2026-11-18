@@ -2,10 +2,12 @@ package ciobs_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
-	"log/slog"
 	"io"
+	"log/slog"
+	"strings"
 	"testing"
 
 	ciobsbiz "github.com/ongridio/ongrid/internal/manager/biz/ciobs"
@@ -15,11 +17,32 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
 )
 
+type fakeCrypto struct{ weak bool }
+
+func (f fakeCrypto) Encrypt(plain string) (string, error) {
+	return "enc:" + base64.StdEncoding.EncodeToString([]byte(plain)), nil
+}
+func (f fakeCrypto) Decrypt(cipher string) (string, error) {
+	if !strings.HasPrefix(cipher, "enc:") {
+		return "", errors.New("bad cipher")
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(cipher, "enc:"))
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+func (f fakeCrypto) Weak() bool { return f.weak }
+
 type fakeRepo struct {
-	links map[string]model.Link
+	links  map[string]model.Link
+	conns  map[uint64]model.Connection
+	nextID uint64
 }
 
-func newFakeRepo() *fakeRepo { return &fakeRepo{links: map[string]model.Link{}} }
+func newFakeRepo() *fakeRepo {
+	return &fakeRepo{links: map[string]model.Link{}, conns: map[uint64]model.Connection{}, nextID: 1}
+}
 
 func key(provider string, typeID uint64) string {
 	return fmt.Sprintf("%s/%d", provider, typeID)
@@ -54,6 +77,52 @@ func (f *fakeRepo) Delete(_ context.Context, provider string, typeID uint64) err
 		return fmt.Errorf("%w: link", errs.ErrNotFound)
 	}
 	delete(f.links, k)
+	return nil
+}
+
+func (f *fakeRepo) ListConnections(_ context.Context, provider string) ([]model.Connection, error) {
+	out := []model.Connection{}
+	for _, conn := range f.conns {
+		if conn.Provider == provider {
+			out = append(out, conn)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) GetConnection(_ context.Context, id uint64) (*model.Connection, error) {
+	conn, ok := f.conns[id]
+	if !ok {
+		return nil, fmt.Errorf("%w: connection", errs.ErrNotFound)
+	}
+	return &conn, nil
+}
+
+func (f *fakeRepo) CreateConnection(_ context.Context, conn *model.Connection) error {
+	conn.ID = f.nextID
+	f.nextID++
+	f.conns[conn.ID] = *conn
+	return nil
+}
+
+func (f *fakeRepo) UpdateConnection(_ context.Context, conn *model.Connection) error {
+	if _, ok := f.conns[conn.ID]; !ok {
+		return fmt.Errorf("%w: connection", errs.ErrNotFound)
+	}
+	f.conns[conn.ID] = *conn
+	return nil
+}
+
+func (f *fakeRepo) DeleteConnection(_ context.Context, id uint64) error {
+	for _, link := range f.links {
+		if link.ConnectionID == id {
+			return fmt.Errorf("%w: connection referenced", errs.ErrConflict)
+		}
+	}
+	if _, ok := f.conns[id]; !ok {
+		return fmt.Errorf("%w: connection", errs.ErrNotFound)
+	}
+	delete(f.conns, id)
 	return nil
 }
 
@@ -198,5 +267,106 @@ func TestLinkageAndCMDBUnavailable(t *testing.T) {
 	alerts, err := uc.PromAlertsForCI(context.Background(), 7)
 	if err != nil || alerts.Reason != "cmdb_unavailable" {
 		t.Fatalf("alerts = %+v, %v", alerts, err)
+	}
+}
+
+func TestListConnectionsIncludesInternal(t *testing.T) {
+	uc, _ := newUsecase(t, nil, nil)
+	rows, err := uc.ListConnections(context.Background(), model.ProviderGrafana)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %+v, %v", rows, err)
+	}
+	if rows[0].ID != 0 || rows[0].Kind != model.ConnectionKindInternal || !rows[0].Enabled {
+		t.Fatalf("internal = %+v", rows[0])
+	}
+}
+
+func TestSaveConnectionEncryptsAndMasks(t *testing.T) {
+	uc, repo := newUsecase(t, nil, nil)
+	uc.SetCrypto(fakeCrypto{})
+	view, err := uc.SaveConnection(context.Background(), model.ProviderGrafana, ciobsbiz.ConnectionInput{
+		Provider: model.ProviderGrafana, Name: "external", BaseURL: "https://grafana.example.com/grafana/",
+		AuthType: "bearer", Auth: &ciobsbiz.Credentials{Token: "tok-secret"},
+	}, 0)
+	if err != nil {
+		t.Fatalf("SaveConnection: %v", err)
+	}
+	if view.Kind != model.ConnectionKindExternal || !view.TokenSet || view.PasswordSet {
+		t.Fatalf("view = %+v", view)
+	}
+	if view.BaseURL != "https://grafana.example.com/grafana" {
+		t.Fatalf("base = %q", view.BaseURL)
+	}
+	stored := repo.conns[view.ID]
+	if strings.Contains(stored.AuthCipher, "tok-secret") || stored.AuthCipher == "" {
+		t.Fatalf("cipher = %q", stored.AuthCipher)
+	}
+	rows, _ := uc.ListConnections(context.Background(), model.ProviderGrafana)
+	if len(rows) != 2 || rows[1].Name != "external" {
+		t.Fatalf("list = %+v", rows)
+	}
+}
+
+func TestGrafanaForCIExternalRoot(t *testing.T) {
+	uc, _ := newUsecase(t, &federationbiz.CMDBInstance{ID: 7, TypeID: 3, Values: map[string]any{"hostname": "web-1"}}, nil)
+	uc.SetCrypto(fakeCrypto{})
+	conn, err := uc.SaveConnection(context.Background(), model.ProviderGrafana, ciobsbiz.ConnectionInput{
+		Provider: model.ProviderGrafana, Name: "external", BaseURL: "https://grafana.example.com/grafana",
+		AuthType: "bearer", Auth: &ciobsbiz.Credentials{Token: "tok"},
+	}, 0)
+	if err != nil {
+		t.Fatalf("SaveConnection: %v", err)
+	}
+	if _, err := uc.SaveLink(context.Background(), model.ProviderGrafana, 3, ciobsbiz.LinkInput{
+		ConnectionID: conn.ID, DashboardUID: "dash",
+		VarMapping: []ciobsbiz.VarMapping{{CIAttribute: "hostname", VarName: "device_id"}},
+	}); err != nil {
+		t.Fatalf("SaveLink: %v", err)
+	}
+	got, err := uc.GrafanaForCI(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("GrafanaForCI: %v", err)
+	}
+	if got.Kind != model.ConnectionKindExternal || got.RootURL != "https://grafana.example.com/grafana" || got.Vars["device_id"] != "web-1" {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
+func TestDeleteConnectionRefusesWhenReferenced(t *testing.T) {
+	uc, _ := newUsecase(t, nil, nil)
+	uc.SetCrypto(fakeCrypto{})
+	conn, err := uc.SaveConnection(context.Background(), model.ProviderGrafana, ciobsbiz.ConnectionInput{
+		Provider: model.ProviderGrafana, Name: "external", BaseURL: "https://grafana.example.com",
+		AuthType: "bearer", Auth: &ciobsbiz.Credentials{Token: "tok"},
+	}, 0)
+	if err != nil {
+		t.Fatalf("SaveConnection: %v", err)
+	}
+	if _, err := uc.SaveLink(context.Background(), model.ProviderGrafana, 3, ciobsbiz.LinkInput{
+		ConnectionID: conn.ID, DashboardUID: "dash",
+	}); err != nil {
+		t.Fatalf("SaveLink: %v", err)
+	}
+	if err := uc.DeleteConnection(context.Background(), conn.ID); !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("delete err = %v", err)
+	}
+}
+
+func TestSaveLinkRejectsWrongProviderConnection(t *testing.T) {
+	uc, _ := newUsecase(t, nil, nil)
+	uc.SetCrypto(fakeCrypto{})
+	conn, err := uc.SaveConnection(context.Background(), model.ProviderGrafana, ciobsbiz.ConnectionInput{
+		Provider: model.ProviderGrafana, Name: "external", BaseURL: "https://grafana.example.com",
+		AuthType: "bearer", Auth: &ciobsbiz.Credentials{Token: "tok"},
+	}, 0)
+	if err != nil {
+		t.Fatalf("SaveConnection: %v", err)
+	}
+	_, err = uc.SaveLink(context.Background(), model.ProviderPrometheus, 3, ciobsbiz.LinkInput{
+		ConnectionID: conn.ID,
+		LabelMapping: []ciobsbiz.LabelMapping{{CIAttribute: "hostname", PromLabel: "host"}},
+	})
+	if !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("err = %v", err)
 	}
 }

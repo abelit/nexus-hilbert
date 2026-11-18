@@ -49,7 +49,7 @@ export function CIMonitoringTab({ ciID }: { ciID: number }) {
     if (!grafana?.configured || !grafana.uid) return;
     setOpening(true);
     try {
-      const base = await fetchGrafanaRootURL();
+      const base = grafana.root_url?.trim() || await fetchGrafanaRootURL();
       const params = new URLSearchParams();
       params.set('from', 'now-6h');
       params.set('to', 'now');

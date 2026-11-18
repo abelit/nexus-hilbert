@@ -102,7 +102,7 @@ func run() (runErr error) {
 	cmdbClient := newCMDBClient(cfg, iam.signer, log)
 	aiops.toolsReg.SetCMDB(cmdbClient)
 	federation := bootstrapFederation(log, storage, iam, cmdbClient)
-	ciobs := bootstrapCIObs(log, storage, cmdbClient, telemetry.promQueryClient)
+	ciobs := bootstrapCIObs(log, storage, cmdbClient, telemetry.promQueryClient, settings)
 	knowledge := bootstrapKnowledge(rootCtx, cfg, log, storage, settings, telemetry, aiops)
 	runtime := bootstrapRuntime(rootCtx, cfg, log, reg, tracing, models, devices, telemetry, tunnel, aiops, settings)
 	// The form-assist endpoint reads the authoritative model schema through

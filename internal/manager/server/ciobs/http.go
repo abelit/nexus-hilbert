@@ -55,6 +55,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/observability/ci-types/{typeId}/linkage", h.linkage)
 	r.Get("/v1/observability/ci/{ciId}/grafana", h.ciGrafana)
 	r.Get("/v1/observability/ci/{ciId}/alerts", h.ciPromAlerts)
+	h.registerConnections(r)
 }
 
 func (h *Handler) listLinks(w http.ResponseWriter, r *http.Request) {
