@@ -603,7 +603,7 @@ func severitiesFor(kind string) []string {
 func defaultColumns(kind string) []model.DisplayColumn {
 	if kind == KindITSMTicket {
 		return []model.DisplayColumn{
-			{Kind: kind, ColumnKey: "status", ColumnKind: ColumnKindBuiltin, Render: RenderBadge, Visible: true, Position: 0},
+			{Kind: kind, ColumnKey: "status", ColumnKind: ColumnKindBuiltin, Path: "form_data.instanceStatus", Render: RenderBadge, Visible: true, Position: 0},
 			{Kind: kind, ColumnKey: "title", ColumnKind: ColumnKindBuiltin, Path: "form_data.title", Render: RenderText, Visible: true, Position: 1},
 			{Kind: kind, ColumnKey: "priority", ColumnKind: ColumnKindCustom, Path: "form_data.priority", Render: RenderBadge, LabelZH: "优先级", LabelEN: "Priority", Visible: true, Position: 2},
 			{Kind: kind, ColumnKey: "assignee", ColumnKind: ColumnKindCustom, Path: "form_data.assignee", Render: RenderText, LabelZH: "处理人", LabelEN: "Assignee", Visible: true, Position: 3},
