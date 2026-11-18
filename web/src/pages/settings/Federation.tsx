@@ -22,6 +22,7 @@ import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
 import { ColumnsCard } from '@/pages/federation/settings/ColumnsCard';
 import { FiltersCard } from '@/pages/federation/settings/FiltersCard';
+import { MappingsCard } from '@/pages/federation/settings/MappingsCard';
 import {
   connectionHealth,
   createConnection,
@@ -155,6 +156,7 @@ export default function FederationSettings() {
           <TabsContent key={item.value} value={item.value}>
             <div className="space-y-4">
               <ConnectionsCard kind={item.value} />
+              <MappingsCard kind={item.value} />
               <FiltersCard kind={item.value} />
               <ColumnsCard kind={item.value} />
             </div>

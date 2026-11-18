@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Clock3, Copy, Fingerprint, Hash, History, Info, Network, Pencil, Share2, UserRound, X, Zap } from 'lucide-react';
+import { BookOpen, Clock3, Copy, Fingerprint, Hash, History, Info, Network, Pencil, Share2, Siren, Ticket, UserRound, X, Zap } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Chip } from '@/components/ui/Chip';
@@ -28,6 +28,8 @@ import { useToast } from '../Toast';
 import { cmdbKnowledgeItem } from '../../lib/knowledge-card';
 import { InstanceHistory } from './InstanceHistory';
 import { InstanceOverview } from './InstanceOverview';
+import { FederatedCITab } from './FederatedCITab';
+import { getMappingStatus } from '@/api/federation';
 import { InstanceTopology } from './InstanceTopology';
 import { InstanceTriggers } from './InstanceTriggers';
 
@@ -38,12 +40,13 @@ import { InstanceTriggers } from './InstanceTriggers';
 // things an instance can answer from this service: its values, its relation
 // neighbourhood, its own change log, and the triggers that fired for it.
 //
-// MONITORING AND PROMETHEUS ALERTS ARE ABSENT ON PURPOSE. cantor read those
-// through its own common-setting integration; the Go service deliberately did
-// not port that mapping, so a tab here would be a promise with no data behind
-// it. The console's /monitor and /alerts pages remain the place for them.
+// ALERT/TICKET TABS ARE CONDITIONAL. They appear only when an administrator
+// has configured a CI-type mapping in Settings → Federated sources. The data
+// is read-only and comes from the external alert/ITSM source; probing the
+// upstream on every drawer open would be a promise with no data behind it, so
+// visibility comes from the mapping-status endpoint.
 
-type TabKey = 'overview' | 'topology' | 'history' | 'triggers';
+type TabKey = 'overview' | 'topology' | 'alerts' | 'tickets' | 'history' | 'triggers';
 
 // A topology node opened from the drawer becomes the drawer's new subject.
 // Cantor switched the whole detail panel to the double-clicked CI and kept the
@@ -113,6 +116,26 @@ export function InstanceDetailDrawer({
   );
 
   const [tab, setTab] = useState<TabKey>(initialTab);
+  const [federationTabs, setFederationTabs] = useState({ alerts: false, tickets: false });
+  // Tab visibility is a mapping decision, not a probe of the upstream. Both
+  // lookups are best-effort: an unreachable CMDB hides the tabs rather than
+  // failing the drawer.
+  useEffect(() => {
+    let live = true;
+    void Promise.all([
+      getMappingStatus('external_alert', Number(model.id)).catch(() => null),
+      getMappingStatus('itsm_ticket', Number(model.id)).catch(() => null),
+    ]).then(([alerts, tickets]) => {
+      if (!live) return;
+      setFederationTabs({
+        alerts: Boolean(alerts?.has_mapping),
+        tickets: Boolean(tickets?.has_mapping),
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [model.id]);
   // `nav` holds a subject opened from the topology; until then the props are
   // authoritative. The effect clears it when a different row/model is opened.
   const [nav, setNav] = useState<Subject | null>(null);
@@ -483,6 +506,18 @@ export function InstanceDetailDrawer({
               <Network size={14} aria-hidden="true" />
               {tr('拓扑', 'Topology')}
             </TabsTrigger>
+            {federationTabs.alerts && (
+              <TabsTrigger value="alerts">
+                <Siren size={14} aria-hidden="true" />
+                {tr('告警', 'Alerts')}
+              </TabsTrigger>
+            )}
+            {federationTabs.tickets && (
+              <TabsTrigger value="tickets">
+                <Ticket size={14} aria-hidden="true" />
+                {tr('事件', 'Events')}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="history">
               <History size={14} aria-hidden="true" />
               {tr('变更历史', 'History')}
@@ -531,6 +566,12 @@ export function InstanceDetailDrawer({
               />
             </>
           )}
+        </TabsContent>
+        <TabsContent value="alerts" className="mt-4">
+          {tab === 'alerts' && <FederatedCITab kind="alerts" ciID={subject.id} />}
+        </TabsContent>
+        <TabsContent value="tickets" className="mt-4">
+          {tab === 'tickets' && <FederatedCITab kind="tickets" ciID={subject.id} />}
         </TabsContent>
         <TabsContent value="history" className="mt-4">
           {tab === 'history' && (

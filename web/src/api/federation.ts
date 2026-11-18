@@ -322,3 +322,88 @@ export function getTicketStats(params: ExternalListParams, scope?: string) {
   );
 }
 
+export type FieldMapping = {
+  source_field: string;
+  op: string;
+  map_type: 'field' | 'fixed';
+  value: string;
+};
+
+export type Mapping = {
+  id: number;
+  kind: FederationKind;
+  ci_type_id: number;
+  connection_id: number;
+  field_mapping: FieldMapping[];
+  enabled: boolean;
+};
+
+export type MappingInput = {
+  ci_type_id: number;
+  connection_id: number;
+  field_mapping: FieldMapping[];
+  enabled?: boolean;
+};
+
+export type CIType = { id: number; name: string; alias?: string };
+export type MappingStatus = { configured: boolean; has_mapping: boolean };
+export type MappingPreview = { and: string[]; or: string[]; matched: number; reason?: string };
+export type CIItems = {
+  kind: FederationKind;
+  configured: boolean;
+  has_mapping: boolean;
+  reason?: string;
+  total: number;
+  items: ExternalItem[];
+};
+
+export function listMappings(kind: FederationKind, ciTypeId?: number) {
+  const suffix = ciTypeId ? `&ci_type_id=${ciTypeId}` : '';
+  return request<{ items: Mapping[]; total: number }>(
+    'GET',
+    `/federation/mappings?kind=${encodeURIComponent(kind)}${suffix}`,
+  );
+}
+
+export function saveMapping(kind: FederationKind, input: MappingInput, id?: number) {
+  const path = id
+    ? `/federation/mappings/${id}?kind=${encodeURIComponent(kind)}`
+    : `/federation/mappings?kind=${encodeURIComponent(kind)}`;
+  return request<Mapping>(id ? 'PUT' : 'POST', path, input);
+}
+
+export function deleteMapping(kind: FederationKind, id: number) {
+  return request<void>(
+    'DELETE',
+    `/federation/mappings/${id}?kind=${encodeURIComponent(kind)}`,
+  );
+}
+
+export function previewMapping(kind: FederationKind, ciID: number, input: MappingInput) {
+  return request<MappingPreview>(
+    'POST',
+    `/federation/mappings/preview?kind=${encodeURIComponent(kind)}`,
+    { ...input, ci_id: ciID },
+  );
+}
+
+export function listCITypes() {
+  return request<{ items: CIType[]; total: number }>('GET', '/federation/ci-types');
+}
+
+export function getMappingStatus(kind: FederationKind, typeId: number) {
+  return request<MappingStatus>(
+    'GET',
+    `/federation/ci-types/${typeId}/mapping?kind=${encodeURIComponent(kind)}`,
+  );
+}
+
+export function listCIItems(
+  kind: 'alerts' | 'tickets',
+  ciID: number,
+  days?: number,
+) {
+  const suffix = days ? `?days=${days}` : '';
+  return request<CIItems>('GET', `/federation/ci/${ciID}/${kind}${suffix}`);
+}
+
