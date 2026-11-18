@@ -6,21 +6,24 @@ import model "github.com/ongridio/ongrid/internal/manager/model/federation"
 // differences between an external alert source and an ITSM ticket source are
 // data, not behaviour.
 type SourceProfile struct {
-	Kind            string
-	DefaultDays     int
-	DefaultPageSize int
-	MaxPageSize     int
-	DefaultTable    string
-	StatusField     string
-	SeverityField   string
-	KeywordField    string
-	StatsMode       string
+	Kind            string `json:"kind"`
+	DefaultDays     int    `json:"default_days"`
+	DefaultPageSize int    `json:"default_page_size"`
+	MaxPageSize     int    `json:"max_page_size"`
+	DefaultTable    string `json:"default_table"`
+	StatusField     string `json:"status_field"`
+	SeverityField   string `json:"severity_field"`
+	KeywordField    string `json:"keyword_field"`
+	StatsMode       string `json:"stats_mode"`
 }
 
 const (
 	StatsModeUpstream = "upstream_stats"
 	StatsModeTargeted = "targeted_counts"
 )
+
+// ValidKind reports whether kind is a supported federation source.
+func ValidKind(kind string) bool { return model.ValidKind(kind) }
 
 // Profile returns the source profile for kind.
 func Profile(kind string) (SourceProfile, bool) {
