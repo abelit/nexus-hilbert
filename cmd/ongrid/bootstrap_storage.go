@@ -19,6 +19,7 @@ import (
 	manageraudtdata "github.com/ongridio/ongrid/internal/manager/data/audit/store"
 	managerdevicedata "github.com/ongridio/ongrid/internal/manager/data/device/store"
 	manageredgedata "github.com/ongridio/ongrid/internal/manager/data/edge/store"
+	managerfederationdata "github.com/ongridio/ongrid/internal/manager/data/federation/store"
 	managerflowdata "github.com/ongridio/ongrid/internal/manager/data/flow/store"
 	managerk8sdata "github.com/ongridio/ongrid/internal/manager/data/k8s/store"
 	managerlogsdata "github.com/ongridio/ongrid/internal/manager/data/logs/store"
@@ -63,6 +64,7 @@ func bootstrapStorage(rootCtx context.Context, cfg *config.Config, log *slog.Log
 		iamdataorg.Migrate,
 		iamdatamembership.Migrate,
 		manageralertdata.Migrate,
+		managerfederationdata.Migrate,
 		managerdevicedata.Migrate,
 		manageredgedata.Migrate,
 		managerk8sdata.Migrate,
