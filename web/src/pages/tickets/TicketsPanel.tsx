@@ -1,6 +1,7 @@
 import { getTicketStats, listMyTickets, listTickets } from '@/api/federation';
 import {
   FederatedListPanel,
+  type FederatedApi,
   type FederatedField,
 } from '@/pages/federation/FederatedListPanel';
 
@@ -28,6 +29,12 @@ const TICKET_STATUS_OPTIONS = [
   { value: 'TERMINATED', label: 'Terminated' },
 ];
 
+const TICKET_API: FederatedApi = {
+  list: listTickets,
+  mine: listMyTickets,
+  stats: getTicketStats,
+};
+
 export function TicketsPanel() {
   return (
     <FederatedListPanel
@@ -43,11 +50,7 @@ export function TicketsPanel() {
       statusOptions={TICKET_STATUS_OPTIONS}
       settingsPath="/settings/federation"
       defaultDays={30}
-      api={{
-        list: listTickets,
-        mine: listMyTickets,
-        stats: getTicketStats,
-      }}
+      api={TICKET_API}
     />
   );
 }

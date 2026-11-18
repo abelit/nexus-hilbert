@@ -1,6 +1,7 @@
 import { getAlertStats, listExternalAlerts, listMyAlerts } from '@/api/federation';
 import {
   FederatedListPanel,
+  type FederatedApi,
   type FederatedField,
 } from '@/pages/federation/FederatedListPanel';
 
@@ -35,6 +36,12 @@ const ALERT_SEVERITY_OPTIONS = [
   { value: 'info', label: 'Info' },
 ];
 
+const ALERT_API: FederatedApi = {
+  list: listExternalAlerts,
+  mine: listMyAlerts,
+  stats: getAlertStats,
+};
+
 export function ExternalAlertsPanel() {
   return (
     <FederatedListPanel
@@ -50,11 +57,7 @@ export function ExternalAlertsPanel() {
       statusOptions={ALERT_STATUS_OPTIONS}
       severityOptions={ALERT_SEVERITY_OPTIONS}
       settingsPath="/settings/federation"
-      api={{
-        list: listExternalAlerts,
-        mine: listMyAlerts,
-        stats: getAlertStats,
-      }}
+      api={ALERT_API}
     />
   );
 }
