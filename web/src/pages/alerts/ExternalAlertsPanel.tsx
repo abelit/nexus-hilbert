@@ -18,6 +18,7 @@ import {
   Select,
 } from '@/components/ui';
 import { Modal } from '@/components/Modal';
+import { useDialogs } from '@/components/ui/useDialogs';
 import { cn } from '@/lib/cn';
 import { relativeTime } from '@/lib/format';
 import { useI18n } from '@/i18n/locale';
@@ -166,6 +167,7 @@ function download(name: string, mime: string, content: string) {
 export function ExternalAlertsPanel() {
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
+  const { alertAction, dialog } = useDialogs();
   const [items, setItems] = useState<ExternalItem[]>([]);
   const [total, setTotal] = useState(0);
   const [configured, setConfigured] = useState(true);
@@ -271,6 +273,12 @@ export function ExternalAlertsPanel() {
       if (chunk.length < EXPORT_PAGE_SIZE || rows.length >= res.total) break;
     }
     const capped = rows.slice(0, EXPORT_MAX_ROWS);
+    if (rows.length >= EXPORT_MAX_ROWS) {
+      await alertAction(tr(
+        `导出达到 ${EXPORT_MAX_ROWS} 行上限，结果已截断。`,
+        `Export reached the ${EXPORT_MAX_ROWS}-row cap and was truncated.`,
+      ));
+    }
     const stamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
     if (format === 'json') {
       download(`external-alerts-${stamp}.json`, 'application/json', JSON.stringify(capped, null, 2));
@@ -606,6 +614,7 @@ export function ExternalAlertsPanel() {
           </div>
         </Modal>
       )}
+      {dialog}
     </main>
   );
 }
