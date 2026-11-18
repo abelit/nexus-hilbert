@@ -281,6 +281,29 @@ func TestListConnectionsIncludesInternal(t *testing.T) {
 	}
 }
 
+type failingProbe struct{ err error }
+
+func (f failingProbe) ProbeGrafana(context.Context) error { return f.err }
+func (f failingProbe) ProbeProm(context.Context) error    { return f.err }
+
+func TestConnectionsHealthInternalPointsAtIntegrations(t *testing.T) {
+	uc, _ := newUsecase(t, nil, nil)
+	uc.SetGlobalProbe(failingProbe{err: errors.New("grafana: sa_token / api_key empty")})
+	rows, err := uc.ConnectionsHealth(context.Background(), model.ProviderGrafana)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %+v, %v", rows, err)
+	}
+	if rows[0].OK {
+		t.Fatalf("internal connection reported healthy")
+	}
+	if !strings.Contains(rows[0].Error, "sa_token / api_key empty") {
+		t.Fatalf("probe error lost: %q", rows[0].Error)
+	}
+	if !strings.Contains(rows[0].Error, "Settings → Integrations") {
+		t.Fatalf("error does not point at the global integration: %q", rows[0].Error)
+	}
+}
+
 func TestSaveConnectionEncryptsAndMasks(t *testing.T) {
 	uc, repo := newUsecase(t, nil, nil)
 	uc.SetCrypto(fakeCrypto{})

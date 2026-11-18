@@ -192,7 +192,9 @@ func (u *Usecase) ConnectionsHealth(ctx context.Context, provider string) ([]Con
 	if u.globalProbe == nil {
 		out[0].Error = "not configured"
 	} else if err := u.probeGlobal(ctx, provider); err != nil {
-		out[0].Error = err.Error()
+		// The internal row is a read-only projection of Settings → Integrations,
+		// so a failure here is fixed there, not on this page.
+		out[0].Error = err.Error() + " — fix the global integration in Settings → Integrations"
 	} else {
 		out[0].OK = true
 	}
