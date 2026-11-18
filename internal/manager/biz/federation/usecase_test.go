@@ -197,6 +197,8 @@ func TestConnectionValidationRejectsBadEndpoint(t *testing.T) {
 		{Kind: model.KindExternalAlert, Name: "x", BaseURL: "ftp://x", APIPath: "/a"},
 		{Kind: model.KindExternalAlert, Name: "x", BaseURL: "http://user:pass@x", APIPath: "/a"},
 		{Kind: model.KindExternalAlert, Name: "x", BaseURL: "http://x", APIPath: "a"},
+		{Kind: model.KindExternalAlert, Name: "x", BaseURL: "http://x?y=1", APIPath: "/a"},
+		{Kind: model.KindExternalAlert, Name: "x", BaseURL: "http://x", APIPath: "/a?b=1"},
 		{Kind: model.KindExternalAlert, Name: "x", BaseURL: "http://x", APIPath: "/a", AuthType: "basic"},
 	}
 	for _, in := range cases {

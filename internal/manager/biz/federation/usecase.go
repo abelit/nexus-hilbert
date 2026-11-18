@@ -444,6 +444,9 @@ func normalizeConnection(in ConnectionInput, existing *model.Connection) (normal
 	if !strings.HasPrefix(apiPath, "/") || len(apiPath) > 512 {
 		return normalizedConnection{}, SourceProfile{}, fmt.Errorf("%w: api path must start with /", errs.ErrInvalid)
 	}
+	if strings.ContainsAny(apiPath, "?# \t\r\n") {
+		return normalizedConnection{}, SourceProfile{}, fmt.Errorf("%w: api path must be a plain path (no query, fragment or whitespace)", errs.ErrInvalid)
+	}
 	method := strings.ToUpper(strings.TrimSpace(in.Method))
 	if method == "" {
 		method = http.MethodGet
@@ -550,6 +553,9 @@ func normalizeBaseURL(raw string) (string, error) {
 	}
 	if parsed.User != nil {
 		return "", fmt.Errorf("%w: base url must not carry credentials", errs.ErrInvalid)
+	}
+	if parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("%w: base url must be scheme + host + optional path only", errs.ErrInvalid)
 	}
 	return strings.TrimRight(base, "/"), nil
 }
