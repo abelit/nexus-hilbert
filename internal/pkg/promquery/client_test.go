@@ -151,3 +151,17 @@ func TestClient_AlertsNonSuccess(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestClient_AlertsWrappedData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"success","data":{"alerts":[{"labels":{"alertname":"DiskFull"},"state":"firing"}]}}`))
+	}))
+	defer srv.Close()
+	alerts, err := New(srv.URL, slog.Default()).Alerts(context.Background())
+	if err != nil {
+		t.Fatalf("Alerts: %v", err)
+	}
+	if len(alerts) != 1 || alerts[0].Labels["alertname"] != "DiskFull" {
+		t.Fatalf("alerts = %+v", alerts)
+	}
+}

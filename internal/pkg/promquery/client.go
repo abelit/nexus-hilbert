@@ -155,9 +155,9 @@ func (c *Client) Alerts(ctx context.Context) ([]Alert, error) {
 		return nil, fmt.Errorf("promquery: alerts returned %d: %s", resp.StatusCode, string(body))
 	}
 	var env struct {
-		Status string  `json:"status"`
-		Data   []Alert `json:"data"`
-		Error  string  `json:"error"`
+		Status string          `json:"status"`
+		Data   json.RawMessage `json:"data"`
+		Error  string          `json:"error"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
 		return nil, fmt.Errorf("promquery: decode alerts: %w", err)
@@ -165,10 +165,28 @@ func (c *Client) Alerts(ctx context.Context) ([]Alert, error) {
 	if env.Status != "success" {
 		return nil, fmt.Errorf("promquery: alerts status=%s error=%s", env.Status, env.Error)
 	}
-	if env.Data == nil {
+	if len(env.Data) == 0 || string(env.Data) == "null" {
 		return []Alert{}, nil
 	}
-	return env.Data, nil
+	// Prometheus ≤2.x returns data as an array; some builds return
+	// {"alerts":[...]}. Accept both rather than failing on a version detail.
+	var alerts []Alert
+	if err := json.Unmarshal(env.Data, &alerts); err == nil {
+		if alerts == nil {
+			return []Alert{}, nil
+		}
+		return alerts, nil
+	}
+	var wrapped struct {
+		Alerts []Alert `json:"alerts"`
+	}
+	if err := json.Unmarshal(env.Data, &wrapped); err != nil {
+		return nil, fmt.Errorf("promquery: decode alerts data: %w", err)
+	}
+	if wrapped.Alerts == nil {
+		return []Alert{}, nil
+	}
+	return wrapped.Alerts, nil
 }
 
 // do builds the GET, decodes the wire envelope, and returns the InstantResult.
