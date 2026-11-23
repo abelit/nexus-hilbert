@@ -32,6 +32,10 @@ AIOps 同时有 manager 拓扑和 CMDB 关系图。它们不是同一张图，�
 - `only_propagating=true` 只保留 `propagates=true` 的边，并跳过不传播的邻居；`counts` 仍报告原始一跳 `numfound`。
 - `truncated` 在任何一跳分页被截断时置真，`truncated_levels` 列出发生截断的跳数；不再只比较第一跳。
 
+### CMDB 本地语义与 topocortex 语义
+
+CMDB 关系类型的 `category`/`direction` 是**本地字段**：前者服务控制台分组，后者服务本文件的 manager AIOps 方向计算。它们不是 topocortex 的闭集类别和声明方向。CMDB 行另外镜像 `topocortex_category` 和 `traits`，connector 读取这两个字段，并按 `inverse_of` 交换端点；不要把 `direction` 直接复制到 topocortex，也不要用本地 `category` 推断 AIOps trait。`HAS_INSTANCE` 的 inverse 目标是 `REPLICA_OF`，不是已移除的 `INSTANCE_OF`。
+
 ## 为什么还不合并
 
 单入口需要先满足：

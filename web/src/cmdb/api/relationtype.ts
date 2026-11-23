@@ -10,6 +10,8 @@ import { cmdbDelete, cmdbGet, cmdbPost, cmdbPut, type ListResponse } from './htt
 export type RelationType = {
   id: number;
   name: string;
+  /** CMDB-local alternative names for lookup/search; not the identity. */
+  aliases: string[] | null;
   /** A `#rrggbb` colour the topology draws the edge in, or ''. */
   color: string;
 
@@ -38,6 +40,11 @@ export type RelationType = {
 export type RelationTypeInput = {
   name: string;
   color: string;
+  aliases: string[];
+  /** Localised labels shown by the console; both may be empty. */
+  display_name_zh: string;
+  display_name_en: string;
+  description: string;
 };
 
 /**

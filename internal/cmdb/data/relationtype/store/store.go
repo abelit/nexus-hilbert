@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	relationtypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/relationtype"
+	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
@@ -82,9 +83,18 @@ func (r *Repo) Update(ctx context.Context, rt *citypemodel.RelationType) error {
 	if rt == nil {
 		return fmt.Errorf("cmdb relation type: update: nil row")
 	}
+	patch := citypemodel.RelationType{
+		Name: rt.Name, Color: rt.Color, Aliases: rt.Aliases,
+		DisplayNameZH: rt.DisplayNameZH, DisplayNameEN: rt.DisplayNameEN,
+		Description: rt.Description,
+	}
 	res := r.db.WithContext(ctx).Model(&citypemodel.RelationType{}).
 		Where("id = ?", rt.ID).
-		Updates(map[string]any{"name": rt.Name, "color": rt.Color})
+		Select(
+			"name", "color", "aliases",
+			"display_name_zh", "display_name_en", "description",
+		).
+		Updates(&patch)
 	if res.Error != nil {
 		return fmt.Errorf("cmdb relation type: update %d: %w", rt.ID, res.Error)
 	}
@@ -93,6 +103,30 @@ func (r *Repo) Update(ctx context.Context, rt *citypemodel.RelationType) error {
 		return errs.ErrNotFound
 	}
 	return nil
+}
+
+// Usage counts live model rules, live instance edges and history rows that
+// reference the type. The explicit delete_marker/deleted_at predicates are
+// load-bearing: these tables use the CMDB soft-delete pair, and a deleted or
+// soft-deleted row must not block a cleanup.
+func (r *Repo) Usage(ctx context.Context, id int32) (relationtypebiz.Usage, error) {
+	var out relationtypebiz.Usage
+	if err := r.db.WithContext(ctx).Model(&citypemodel.CITypeRelation{}).
+		Where("relation_type_id = ? AND delete_marker = 0 AND deleted_at IS NULL", id).
+		Count(&out.ModelRules).Error; err != nil {
+		return out, fmt.Errorf("cmdb relation type: count model rules for %d: %w", id, err)
+	}
+	if err := r.db.WithContext(ctx).Model(&cimodel.Relation{}).
+		Where("relation_type_id = ? AND delete_marker = 0 AND deleted_at IS NULL", id).
+		Count(&out.InstanceEdges).Error; err != nil {
+		return out, fmt.Errorf("cmdb relation type: count instance edges for %d: %w", id, err)
+	}
+	if err := r.db.WithContext(ctx).Model(&cimodel.RelationHistory{}).
+		Where("relation_type_id = ?", id).
+		Count(&out.HistoryRows).Error; err != nil {
+		return out, fmt.Errorf("cmdb relation type: count history rows for %d: %w", id, err)
+	}
+	return out, nil
 }
 
 // SoftDelete marks a relation type deleted.

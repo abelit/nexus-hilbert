@@ -161,7 +161,7 @@ func TestPlanServiceLayersRecommendsBusinessServices(t *testing.T) {
 		51: {"HAS_BELONGING", "structure"},
 		52: {"CONNECTS_TO", "dependency"},
 		53: {"COVERS", "ownership"},
-		54: {"manage", "ownership"},
+		54: {"MANAGES", "ownership"},
 	} {
 		rt := citypemodel.RelationType{Name: spec.name, Category: spec.category}
 		rt.ID = id

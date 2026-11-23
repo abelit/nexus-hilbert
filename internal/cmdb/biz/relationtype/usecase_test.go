@@ -26,6 +26,7 @@ type fakeRepo struct {
 	rows   map[int32]*citypemodel.RelationType
 	nextID int32
 	failOn string
+	usage  Usage
 }
 
 func newFakeRepo(seed ...citypemodel.RelationType) *fakeRepo {
@@ -119,6 +120,13 @@ func (f *fakeRepo) SoftDelete(_ context.Context, id int32) error {
 	return nil
 }
 
+func (f *fakeRepo) Usage(_ context.Context, _ int32) (Usage, error) {
+	if f.failOn == "Usage" {
+		return Usage{}, errors.New("boom")
+	}
+	return f.usage, nil
+}
+
 func TestListReturnsEverything(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(
 		newRT(1, "runs_on", "#1890ff"),
@@ -165,7 +173,7 @@ func TestCreateAppliesDefaultColour(t *testing.T) {
 	repo := newFakeRepo()
 	uc := NewUsecase(repo, nil)
 
-	got, err := uc.Create(context.Background(), "runs_on", "")
+	got, err := uc.Create(context.Background(), Input{Name: "runs_on"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -180,7 +188,7 @@ func TestCreateAppliesDefaultColour(t *testing.T) {
 func TestCreateTrimsName(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(), nil)
 
-	got, err := uc.Create(context.Background(), "  runs_on  ", "#AABBCC")
+	got, err := uc.Create(context.Background(), Input{Name: "  runs_on  ", Color: "#AABBCC"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -192,12 +200,150 @@ func TestCreateTrimsName(t *testing.T) {
 	}
 }
 
+func TestCreateStoresNormalizedAliases(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), nil)
+
+	got, err := uc.Create(context.Background(), Input{Name: "runs_on", Color: "#1890ff", Aliases: []string{"  run_on  ", "", "running"}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(got.Aliases) != 2 || got.Aliases[0] != "run_on" || got.Aliases[1] != "running" {
+		t.Fatalf("aliases = %v", got.Aliases)
+	}
+}
+
+func TestCreateStoresPresentationFields(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), nil)
+
+	got, err := uc.Create(context.Background(), Input{
+		Name: "RUNS_ON", DisplayNameZH: " 运行于 ", DisplayNameEN: " Runs on ",
+		Description: " 工作负载运行在宿主上。 ",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if got.DisplayNameZH != "运行于" || got.DisplayNameEN != "Runs on" ||
+		got.Description != "工作负载运行在宿主上。" {
+		t.Fatalf("presentation = %+v, want it trimmed and stored", got)
+	}
+}
+
+func TestCreateRejectsTooLongDisplayName(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), nil)
+
+	_, err := uc.Create(context.Background(), Input{
+		Name: "RUNS_ON", DisplayNameEN: strings.Repeat("x", MaxDisplayNameLen+1),
+	})
+	if !errors.Is(err, ErrDisplayNameTooLong) {
+		t.Fatalf("error = %v, want ErrDisplayNameTooLong", err)
+	}
+	if !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("error = %v, want it to wrap errs.ErrInvalid", err)
+	}
+}
+
+func TestUpdateReplacesPresentationFields(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(newRT(1, "RUNS_ON", "")), nil)
+	ctx := context.Background()
+
+	got, err := uc.Update(ctx, 1, Input{
+		Name: "RUNS_ON", DisplayNameZH: "运行于", DisplayNameEN: "Runs on",
+		Description: "宿主机故障影响其上工作负载。",
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if got.DisplayNameZH != "运行于" || got.DisplayNameEN != "Runs on" ||
+		got.Description != "宿主机故障影响其上工作负载。" {
+		t.Fatalf("presentation = %+v", got)
+	}
+
+	got, err = uc.Update(ctx, 1, Input{Name: "RUNS_ON"})
+	if err != nil {
+		t.Fatalf("clear presentation error = %v", err)
+	}
+	if got.DisplayNameZH != "" || got.DisplayNameEN != "" || got.Description != "" {
+		t.Fatalf("presentation after clear = %+v", got)
+	}
+}
+
+func TestCreateRejectsAliasEqualToName(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), nil)
+
+	if _, err := uc.Create(context.Background(), Input{Name: "runs_on", Aliases: []string{"runs_on"}}); !errors.Is(err, ErrAliasEqualsName) {
+		t.Fatalf("error = %v, want ErrAliasEqualsName", err)
+	}
+}
+
+func TestCreateRejectsDuplicateAlias(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), nil)
+
+	if _, err := uc.Create(context.Background(), Input{Name: "runs_on", Aliases: []string{"run_on", "run_on"}}); !errors.Is(err, ErrAliasDuplicate) {
+		t.Fatalf("error = %v, want ErrAliasDuplicate", err)
+	}
+}
+
+func TestCreateRejectsAliasCollidingWithNameOrAlias(t *testing.T) {
+	other := newRT(1, "hosted_on", "")
+	other.Aliases = citypemodel.StringList{"hosted"}
+	uc := NewUsecase(newFakeRepo(other), nil)
+
+	if _, err := uc.Create(context.Background(), Input{Name: "runs_on", Aliases: []string{"hosted_on"}}); !errors.Is(err, ErrAliasExists) {
+		t.Fatalf("name collision error = %v, want ErrAliasExists", err)
+	}
+	if _, err := uc.Create(context.Background(), Input{Name: "runs_on", Aliases: []string{"hosted"}}); !errors.Is(err, ErrAliasExists) {
+		t.Fatalf("alias collision error = %v, want ErrAliasExists", err)
+	}
+}
+
+func TestCreateRejectsNameCollidingWithExistingAlias(t *testing.T) {
+	other := newRT(1, "hosted_on", "")
+	other.Aliases = citypemodel.StringList{"runs_on"}
+	uc := NewUsecase(newFakeRepo(other), nil)
+
+	if _, err := uc.Create(context.Background(), Input{Name: "runs_on"}); !errors.Is(err, ErrNameExists) {
+		t.Fatalf("error = %v, want ErrNameExists", err)
+	}
+}
+
+func TestUpdateSetsAndClearsAliases(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(newRT(1, "runs_on", "")), nil)
+	ctx := context.Background()
+
+	got, err := uc.Update(ctx, 1, Input{Name: "runs_on", Aliases: []string{"run_on"}})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if len(got.Aliases) != 1 || got.Aliases[0] != "run_on" {
+		t.Fatalf("aliases = %v", got.Aliases)
+	}
+
+	got, err = uc.Update(ctx, 1, Input{Name: "runs_on"})
+	if err != nil {
+		t.Fatalf("clear aliases error = %v", err)
+	}
+	if len(got.Aliases) != 0 {
+		t.Fatalf("aliases after clear = %v", got.Aliases)
+	}
+}
+
+func TestUpdateRejectsAliasCollision(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(
+		newRT(1, "runs_on", ""),
+		newRT(2, "hosted_on", ""),
+	), nil)
+
+	if _, err := uc.Update(context.Background(), 1, Input{Name: "runs_on", Aliases: []string{"hosted_on"}}); !errors.Is(err, ErrAliasExists) {
+		t.Fatalf("error = %v, want ErrAliasExists", err)
+	}
+}
+
 // A duplicate name is a conflict, and the error must carry errs.ErrConflict so
 // the HTTP layer maps it to 409 without knowing this package's vocabulary.
 func TestCreateRejectsDuplicateName(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(newRT(1, "runs_on", "")), nil)
 
-	_, err := uc.Create(context.Background(), "runs_on", "")
+	_, err := uc.Create(context.Background(), Input{Name: "runs_on"})
 	if !errors.Is(err, ErrNameExists) {
 		t.Fatalf("error = %v, want ErrNameExists", err)
 	}
@@ -235,7 +381,7 @@ func TestCreateValidation(t *testing.T) {
 			// would otherwise collide.
 			uc := NewUsecase(newFakeRepo(), nil)
 
-			_, err := uc.Create(ctx, tc.input, tc.color)
+			_, err := uc.Create(ctx, Input{Name: tc.input, Color: tc.color})
 			if tc.wantValid {
 				if err != nil {
 					t.Fatalf("Create(%q, %q) error = %v, want nil", tc.input, tc.color, err)
@@ -255,7 +401,7 @@ func TestCreateValidation(t *testing.T) {
 func TestUpdateRenamesAndRecolours(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(newRT(1, "runs_on", "#1890ff")), nil)
 
-	got, err := uc.Update(context.Background(), 1, "hosted_on", "#ff0000")
+	got, err := uc.Update(context.Background(), 1, Input{Name: "hosted_on", Color: "#ff0000"})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -269,7 +415,7 @@ func TestUpdateRenamesAndRecolours(t *testing.T) {
 func TestUpdateToOwnNameIsAllowed(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(newRT(1, "runs_on", "#1890ff")), nil)
 
-	if _, err := uc.Update(context.Background(), 1, "runs_on", "#000000"); err != nil {
+	if _, err := uc.Update(context.Background(), 1, Input{Name: "runs_on", Color: "#000000"}); err != nil {
 		t.Fatalf("Update() to its own name error = %v, want nil", err)
 	}
 }
@@ -280,7 +426,7 @@ func TestUpdateRejectsNameHeldByAnotherRow(t *testing.T) {
 		newRT(2, "belongs_to", ""),
 	), nil)
 
-	_, err := uc.Update(context.Background(), 1, "belongs_to", "")
+	_, err := uc.Update(context.Background(), 1, Input{Name: "belongs_to"})
 	if !errors.Is(err, ErrNameExists) {
 		t.Fatalf("error = %v, want ErrNameExists", err)
 	}
@@ -289,7 +435,7 @@ func TestUpdateRejectsNameHeldByAnotherRow(t *testing.T) {
 func TestUpdateMissingRowIsNotFound(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(), nil)
 
-	_, err := uc.Update(context.Background(), 99, "runs_on", "")
+	_, err := uc.Update(context.Background(), 99, Input{Name: "runs_on"})
 	if !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("error = %v, want errs.ErrNotFound", err)
 	}
@@ -298,7 +444,7 @@ func TestUpdateMissingRowIsNotFound(t *testing.T) {
 func TestUpdateRejectsZeroID(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(), nil)
 
-	if _, err := uc.Update(context.Background(), 0, "runs_on", ""); !errors.Is(err, errs.ErrInvalid) {
+	if _, err := uc.Update(context.Background(), 0, Input{Name: "runs_on"}); !errors.Is(err, errs.ErrInvalid) {
 		t.Fatalf("error = %v, want errs.ErrInvalid", err)
 	}
 }
@@ -317,6 +463,50 @@ func TestDeleteRemovesFromList(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("List() after delete = %+v, want empty", got)
+	}
+}
+
+func TestDeleteRejectsTypeWithLiveReferences(t *testing.T) {
+	repo := newFakeRepo(newRT(1, "runs_on", ""))
+	repo.usage = Usage{ModelRules: 2, InstanceEdges: 3, HistoryRows: 4}
+	uc := NewUsecase(repo, nil)
+
+	err := uc.Delete(context.Background(), 1)
+	if !errors.Is(err, ErrRelationTypeInUse) || !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("error = %v, want ErrRelationTypeInUse wrapping errs.ErrConflict", err)
+	}
+	var inUse *InUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("error = %v, want *InUseError with counts", err)
+	}
+	if inUse.Usage.ModelRules != 2 || inUse.Usage.InstanceEdges != 3 || inUse.Usage.HistoryRows != 4 {
+		t.Fatalf("usage = %+v", inUse.Usage)
+	}
+	if _, ok := repo.rows[1]; !ok {
+		t.Fatal("the row was deleted despite live references")
+	}
+}
+
+func TestDeleteAllowsTypeWithoutLiveReferences(t *testing.T) {
+	repo := newFakeRepo(newRT(1, "install", ""))
+	repo.usage = Usage{HistoryRows: 9}
+	uc := NewUsecase(repo, nil)
+
+	if err := uc.Delete(context.Background(), 1); err != nil {
+		t.Fatalf("Delete() error = %v, want history-only rows to be allowed", err)
+	}
+	if _, ok := repo.rows[1]; ok {
+		t.Fatal("the unreferenced row was not deleted")
+	}
+}
+
+func TestDeleteUsageErrorPropagates(t *testing.T) {
+	repo := newFakeRepo(newRT(1, "runs_on", ""))
+	repo.failOn = "Usage"
+	uc := NewUsecase(repo, nil)
+
+	if err := uc.Delete(context.Background(), 1); err == nil {
+		t.Fatal("Delete() swallowed a usage error")
 	}
 }
 
@@ -346,10 +536,10 @@ func TestUnwiredRepoReportsNotWiredYet(t *testing.T) {
 	if _, err := uc.List(ctx); !errors.Is(err, errs.ErrNotWiredYet) {
 		t.Fatalf("List() error = %v, want errs.ErrNotWiredYet", err)
 	}
-	if _, err := uc.Create(ctx, "x", ""); !errors.Is(err, errs.ErrNotWiredYet) {
+	if _, err := uc.Create(ctx, Input{Name: "x"}); !errors.Is(err, errs.ErrNotWiredYet) {
 		t.Fatalf("Create() error = %v, want errs.ErrNotWiredYet", err)
 	}
-	if _, err := uc.Update(ctx, 1, "x", ""); !errors.Is(err, errs.ErrNotWiredYet) {
+	if _, err := uc.Update(ctx, 1, Input{Name: "x"}); !errors.Is(err, errs.ErrNotWiredYet) {
 		t.Fatalf("Update() error = %v, want errs.ErrNotWiredYet", err)
 	}
 	if err := uc.Delete(ctx, 1); !errors.Is(err, errs.ErrNotWiredYet) {

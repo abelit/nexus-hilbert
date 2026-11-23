@@ -46,12 +46,14 @@ type AddRelationRequest struct {
 
 // AddRelation relates two instances.
 //
-// THE RULE ALWAYS COMES FROM THE MODEL PAIR, even when the caller names a
-// relation type. cantor resolved the cardinality rule by looking the caller's
-// relation-type id up in the TYPE-RELATION table — two different tables with
-// overlapping ids — so an explicit relation type either crashed with a nil
-// dereference or silently enforced some unrelated pair's rule. The constraint
-// belongs to the pair; only the label is the caller's to choose.
+// THE RULE ALWAYS COMES FROM THE MODEL PAIR, and it fixes the label as well.
+// A caller may omit the relation type (the pair's rule supplies it) or repeat
+// the declared type; a different type is refused. Accepting an arbitrary label
+// would create an edge that the model graph never declared and the topocortex
+// projection cannot validate. cantor looked the caller's relation-type id up
+// in the TYPE-RELATION table — two different tables with overlapping ids — so
+// an explicit relation type either crashed with a nil dereference or silently
+// enforced some unrelated pair's rule.
 //
 // A SELF-LOOP IS REFUSED. cantor allowed one, and an instance related to itself
 // is always a mistake: it makes a hierarchy walk's path degenerate, and nothing
@@ -95,6 +97,9 @@ func (u *Usecase) AddRelation(ctx context.Context, req AddRelationRequest, audit
 	relationTypeID := req.RelationTypeID
 	if relationTypeID == 0 {
 		relationTypeID = rule.RelationTypeID
+	} else if relationTypeID != rule.RelationTypeID {
+		return nil, fmt.Errorf("%w: relation type %d is not declared for models %d -> %d (declared %d)",
+			ErrRelationTypeMismatch, relationTypeID, first.TypeID, second.TypeID, rule.RelationTypeID)
 	}
 
 	row, err := u.repo.AddRelation(ctx, RelationAddSpec{

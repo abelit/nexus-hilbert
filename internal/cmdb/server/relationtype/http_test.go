@@ -32,6 +32,7 @@ type stubRepo struct {
 	byName  map[string]citypemodel.RelationType
 	nextID  int32
 	failAll bool
+	usage   relationtypebiz.Usage
 }
 
 func newStubRepo() *stubRepo {
@@ -107,6 +108,13 @@ func (s *stubRepo) SoftDelete(_ context.Context, id int32) error {
 		}
 	}
 	return errs.ErrNotFound
+}
+
+func (s *stubRepo) Usage(context.Context, int32) (relationtypebiz.Usage, error) {
+	if s.failAll {
+		return relationtypebiz.Usage{}, errors.New("boom")
+	}
+	return s.usage, nil
 }
 
 // asUser runs fn with a caller identity attached, the way auth.Middleware
@@ -215,13 +223,16 @@ func TestListCanHideDeprecatedTypes(t *testing.T) {
 // AI tools can explain an edge without a second ontology call.
 func TestListExposesSemanticMirror(t *testing.T) {
 	row := row(1, "CALLS", "#1890ff")
+	row.Aliases = citypemodel.StringList{"call", "invoke"}
 	row.Category = "dependency"
+	row.TopocortexCategory = "dependency"
 	row.Direction = "src_to_dst"
 	row.PropagatesDefault = true
 	row.WeightDefault = 0.8
 	row.InverseOf = "CALLED_BY"
 	row.Transitive = false
 	row.SubPropertyOf = citypemodel.StringList{"DEPENDS_ON"}
+	row.Traits = citypemodel.StringList{"dependency"}
 	row.DisplayNameZH = "调用"
 	row.DisplayNameEN = "Calls"
 	row.Description = "caller invokes callee"
@@ -246,7 +257,8 @@ func TestListExposesSemanticMirror(t *testing.T) {
 		t.Fatalf("items = %+v, want one", got.Items)
 	}
 	item := got.Items[0]
-	if item["category"] != "dependency" || item["direction"] != "src_to_dst" ||
+	if item["category"] != "dependency" || item["topocortex_category"] != "dependency" ||
+		item["direction"] != "src_to_dst" ||
 		item["propagates_default"] != true || item["weight_default"] != 0.8 ||
 		item["inverse_of"] != "CALLED_BY" || item["transitive"] != false ||
 		item["display_name_zh"] != "调用" || item["display_name_en"] != "Calls" ||
@@ -257,6 +269,39 @@ func TestListExposesSemanticMirror(t *testing.T) {
 	sub, ok := item["sub_property_of"].([]any)
 	if !ok || len(sub) != 1 || sub[0] != "DEPENDS_ON" {
 		t.Fatalf("sub_property_of = %#v, want [DEPENDS_ON]", item["sub_property_of"])
+	}
+	traits, ok := item["traits"].([]any)
+	if !ok || len(traits) != 1 || traits[0] != "dependency" {
+		t.Fatalf("traits = %#v, want [dependency]", item["traits"])
+	}
+	aliases, ok := item["aliases"].([]any)
+	if !ok || len(aliases) != 2 || aliases[0] != "call" || aliases[1] != "invoke" {
+		t.Fatalf("aliases = %#v", item["aliases"])
+	}
+	if item["ontology_ready"] != true {
+		t.Fatalf("ontology_ready = %#v, want true", item["ontology_ready"])
+	}
+}
+
+// A revision-0 custom word is local-only: the connector must be able to tell
+// without re-deriving it from category/traits.
+func TestListMarksLocalOnlyTypeNotOntologyReady(t *testing.T) {
+	repo := newStubRepo()
+	repo.rows = []citypemodel.RelationType{row(1, "custom_local", "#1890ff")}
+	router := newRouter(t, repo, "user", false)
+
+	rec := do(t, router, http.MethodGet, "/v1/cmdb/relation-types", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, rec.Body.String())
+	}
+	if len(got.Items) != 1 || got.Items[0]["ontology_ready"] != false {
+		t.Fatalf("ontology_ready = %#v, want false", got.Items)
 	}
 }
 
@@ -356,6 +401,81 @@ func TestCreateReturns201AndTheRow(t *testing.T) {
 	}
 	if got.ID == 0 || got.Name != "runs_on" || got.Color != "#ff0000" {
 		t.Fatalf("response = %+v", got)
+	}
+}
+
+func TestCreatePersistsAliases(t *testing.T) {
+	router := newRouter(t, newStubRepo(), "admin", false)
+
+	rec := do(t, router, http.MethodPost, "/v1/cmdb/relation-types",
+		`{"name":"runs_on","aliases":["run_on","running"]}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got relationTypeDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Aliases) != 2 || got.Aliases[0] != "run_on" || got.Aliases[1] != "running" {
+		t.Fatalf("aliases = %v", got.Aliases)
+	}
+}
+
+func TestCreatePersistsPresentationFields(t *testing.T) {
+	router := newRouter(t, newStubRepo(), "admin", false)
+
+	rec := do(t, router, http.MethodPost, "/v1/cmdb/relation-types",
+		`{"name":"RUNS_ON","display_name_zh":"运行于","display_name_en":"Runs on","description":"宿主故障影响其上工作负载。"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got relationTypeDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.DisplayNameZH != "运行于" || got.DisplayNameEN != "Runs on" ||
+		got.Description != "宿主故障影响其上工作负载。" {
+		t.Fatalf("presentation = %+v", got)
+	}
+}
+
+func TestUpdateReplacesPresentationFields(t *testing.T) {
+	repo := newStubRepo()
+	repo.rows = []citypemodel.RelationType{row(5, "RUNS_ON", "")}
+	repo.byName["RUNS_ON"] = repo.rows[0]
+	router := newRouter(t, repo, "admin", false)
+
+	rec := do(t, router, http.MethodPut, "/v1/cmdb/relation-types/5",
+		`{"name":"RUNS_ON","display_name_zh":"运行于","display_name_en":"Runs on"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got relationTypeDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.DisplayNameZH != "运行于" || got.DisplayNameEN != "Runs on" {
+		t.Fatalf("presentation = %+v", got)
+	}
+}
+
+func TestUpdateReplacesAliases(t *testing.T) {
+	repo := newStubRepo()
+	repo.rows = []citypemodel.RelationType{row(5, "runs_on", "")}
+	repo.byName["runs_on"] = repo.rows[0]
+	router := newRouter(t, repo, "admin", false)
+
+	rec := do(t, router, http.MethodPut, "/v1/cmdb/relation-types/5",
+		`{"name":"runs_on","aliases":["run_on"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var got relationTypeDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Aliases) != 1 || got.Aliases[0] != "run_on" {
+		t.Fatalf("aliases = %v", got.Aliases)
 	}
 }
 
@@ -479,6 +599,30 @@ func TestDeleteReturnsNoContent(t *testing.T) {
 	}
 	if rec.Body.Len() != 0 {
 		t.Fatalf("body = %q, want empty for 204", rec.Body.String())
+	}
+}
+
+func TestDeleteInUseReturnsConflict(t *testing.T) {
+	repo := newStubRepo()
+	repo.rows = []citypemodel.RelationType{row(5, "manage", "")}
+	repo.byName["manage"] = repo.rows[0]
+	repo.usage = relationtypebiz.Usage{ModelRules: 2, InstanceEdges: 3, HistoryRows: 4}
+	router := newRouter(t, repo, "admin", false)
+
+	rec := do(t, router, http.MethodDelete, "/v1/cmdb/relation-types/5", "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "conflict" || !strings.Contains(body.Error, "model rules") ||
+		!strings.Contains(body.Error, "instance edges") {
+		t.Fatalf("body = %+v", body)
+	}
+	if len(repo.rows) != 1 {
+		t.Fatal("the row was deleted despite live references")
 	}
 }
 

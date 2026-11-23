@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	citypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
@@ -38,6 +39,23 @@ func saveSpec(parent, child, rtID model.ID, attrs ...model.ID) citypebiz.TypeRel
 		Constraint:    string(model.ConstraintOne2Many),
 		ParentAttrIDs: attrs,
 		Actor:         7,
+	}
+}
+
+// EnsureRelationType is the builtin bootstrap's write path. It must not create
+// a word whose topocortex category/trait combination topocortex would reject.
+func TestEnsureRelationTypeRejectsInvalidTopocortexSemantics(t *testing.T) {
+	repo, _ := newAttrRepo(t)
+	spec := cibiz.RelationTypeSpec{
+		Name:               "BAD",
+		Category:           "dependency",
+		TopocortexCategory: "runtime",
+		Traits:             []string{cibiz.TraitDependency},
+		Propagates:         true,
+		Weight:             1,
+	}
+	if _, err := repo.EnsureRelationType(context.Background(), spec); err == nil {
+		t.Fatal("invalid topocortex semantics were accepted")
 	}
 }
 

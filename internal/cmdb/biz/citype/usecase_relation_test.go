@@ -88,10 +88,13 @@ func (a *attrRepo) EnsureRelationType(_ context.Context, spec cibiz.RelationType
 	id := model.ID(len(a.relationTypes) + 100)
 	rt := citypemodel.RelationType{
 		Name: spec.Name, Color: "#1890ff",
-		Category: spec.Category, Direction: spec.Direction,
+		Category: spec.Category, TopocortexCategory: spec.TopocortexCategory,
+		Direction:         spec.Direction,
 		PropagatesDefault: spec.Propagates, WeightDefault: spec.Weight,
 		InverseOf: spec.InverseOf, Transitive: spec.Transitive,
-		Revision: 1,
+		Traits:        citypemodel.StringList(spec.Traits),
+		SubPropertyOf: citypemodel.StringList(spec.SubPropertyOf),
+		Revision:      1,
 	}
 	rt.ID = id
 	a.relationTypes[id] = rt
@@ -137,6 +140,36 @@ func relRepo() *attrRepo {
 func relInput() TypeRelationInput {
 	return TypeRelationInput{
 		ParentRef: "10", ChildRef: "20", RelationTypeID: 5, Actor: 7,
+	}
+}
+
+// A managed relation type (revision >= 1) must carry topocortex semantics
+// before a model rule may use it. Legacy/operator-created rows stay revision 0
+// and are treated as local-only; they are not projected into AIOps.
+func TestSaveTypeRelationRejectsManagedTypeWithoutOntologySemantics(t *testing.T) {
+	repo := relRepo()
+	rt := repo.relationTypes[5]
+	rt.Revision = 1
+	repo.relationTypes[5] = rt
+
+	uc := NewUsecase(repo, nil)
+	_, err := uc.SaveTypeRelation(context.Background(), relInput())
+	if !errors.Is(err, ErrRelationTypeSemanticsMissing) {
+		t.Fatalf("error = %v, want ErrRelationTypeSemanticsMissing", err)
+	}
+}
+
+func TestSaveTypeRelationAcceptsOntologyReadyManagedType(t *testing.T) {
+	repo := relRepo()
+	rt := repo.relationTypes[5]
+	rt.Revision = 1
+	rt.TopocortexCategory = "dependency"
+	rt.Traits = citypemodel.StringList{"dependency"}
+	repo.relationTypes[5] = rt
+
+	uc := NewUsecase(repo, nil)
+	if _, err := uc.SaveTypeRelation(context.Background(), relInput()); err != nil {
+		t.Fatalf("ontology-ready managed type was rejected: %v", err)
 	}
 }
 

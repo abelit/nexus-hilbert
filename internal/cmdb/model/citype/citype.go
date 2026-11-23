@@ -24,30 +24,54 @@ import (
 //
 // THE SEMANTIC FIELDS BELOW ARE A READ-ONLY MIRROR of nexus-topocortex's
 // RelationTypeInfo. They are written by the ontology sync, never by CMDB's
-// create/update use case: the repository's Update selects only name and colour,
-// and a CMDB administrator's semantic edit is a proposal to topocortex. Keeping
-// the mirror in the row lets the CMDB UI and the AI tools answer "what does this
-// edge mean?" without a second HTTP call.
+// create/update use case; a CMDB administrator's semantic edit is a proposal
+// to topocortex. Keeping the mirror in the row lets the CMDB UI and the AI
+// tools answer "what does this edge mean?" without a second HTTP call.
+//
+// PRESENTATION IS CMDB-OWNED DATA. Name, colour, aliases and the zh/en display
+// names are ordinary row data the console edits; they are deliberately not
+// compiled into the vocabulary specs. A fresh row may start with them empty
+// and the console falls back to the canonical name.
 type RelationType struct {
 	cmdbmodel.Base
 
 	Name  string `gorm:"column:name;size:64;not null;index:idx_c_relation_types_name"`
 	Color string `gorm:"column:color;size:7;not null;default:'#1890ff'"`
 
+	// Aliases are CMDB-local alternative names for lookup/search. They are not
+	// the type's identity and are not projected to topocortex; the canonical
+	// Name remains the connector's mapping key.
+	Aliases StringList `gorm:"column:aliases;serializer:json"`
+
 	// Semantic mirror, owned by nexus-topocortex.
-	Category          string       `gorm:"column:category;size:32;not null;default:''"`
-	Direction         string       `gorm:"column:direction;size:16;not null;default:''"`
-	PropagatesDefault bool         `gorm:"column:propagates_default;not null;default:false"`
-	WeightDefault     float64      `gorm:"column:weight_default;type:decimal(3,2);not null;default:1"`
-	InverseOf         string       `gorm:"column:inverse_of;size:64;not null;default:''"`
-	Transitive        bool         `gorm:"column:transitive;not null;default:false"`
-	SubPropertyOf     StringList   `gorm:"column:sub_property_of;serializer:json"`
-	DisplayNameZH     string       `gorm:"column:display_name_zh;size:128;not null;default:''"`
-	DisplayNameEN     string       `gorm:"column:display_name_en;size:128;not null;default:''"`
-	Description       string       `gorm:"column:description;type:text"`
-	Deprecated        bool         `gorm:"column:deprecated;not null;default:false"`
-	Replacement       string       `gorm:"column:replacement;size:64;not null;default:''"`
-	Revision          cmdbmodel.ID `gorm:"column:revision;not null;default:0"`
+	//
+	// Category and Direction are CMDB-LOCAL fields: Category drives the console
+	// grouping and Direction drives the manager topology's downstream/upstream
+	// calculation. They are NOT the topocortex vocabulary. TopocortexCategory
+	// is the closed topocortex category (dependency/association/monitoring/
+	// ownership/other), and Traits is the machine-readable AIOps contract the
+	// ontology connector reads. A connector must use TopocortexCategory and
+	// Traits, never guess from the local Category/Direction pair.
+	Category           string     `gorm:"column:category;size:32;not null;default:''"`
+	TopocortexCategory string     `gorm:"column:topocortex_category;size:16;not null;default:''"`
+	Direction          string     `gorm:"column:direction;size:16;not null;default:''"`
+	PropagatesDefault  bool       `gorm:"column:propagates_default;not null;default:false"`
+	WeightDefault      float64    `gorm:"column:weight_default;type:decimal(3,2);not null;default:1"`
+	InverseOf          string     `gorm:"column:inverse_of;size:64;not null;default:''"`
+	Transitive         bool       `gorm:"column:transitive;not null;default:false"`
+	SubPropertyOf      StringList `gorm:"column:sub_property_of;serializer:json"`
+	Traits             StringList `gorm:"column:traits;serializer:json"`
+
+	// Display names and description are CMDB-owned presentation data. They may
+	// mirror topocortex's labels, but the console edits them and nothing
+	// projects them back into the ontology.
+	DisplayNameZH string `gorm:"column:display_name_zh;size:128;not null;default:''"`
+	DisplayNameEN string `gorm:"column:display_name_en;size:128;not null;default:''"`
+	Description   string `gorm:"column:description;type:text"`
+
+	Deprecated  bool         `gorm:"column:deprecated;not null;default:false"`
+	Replacement string       `gorm:"column:replacement;size:64;not null;default:''"`
+	Revision    cmdbmodel.ID `gorm:"column:revision;not null;default:0"`
 
 	// DisplayNameOverride is CMDB-local presentation only. It must never change
 	// the semantic name or be written back to topocortex.
@@ -55,6 +79,14 @@ type RelationType struct {
 }
 
 func (RelationType) TableName() string { return "c_relation_types" }
+
+// OntologyReady reports whether the row carries the topocortex semantics a
+// managed relation type needs. Revision-0 rows are legacy or operator-created
+// local words; they can be used in CMDB model rules but must not be projected
+// into the ontology/AIOps graph.
+func (r RelationType) OntologyReady() bool {
+	return r.TopocortexCategory != "" || len(r.Traits) > 0
+}
 
 // StringList is a JSON array of vocabulary names, stored in a text column.
 // It mirrors topocortex's []string fields (sub_property_of, property_chains).

@@ -27,7 +27,52 @@ var (
 	ErrColorTooLong = fmt.Errorf("%w: relation type colour is too long", errs.ErrInvalid)
 	// ErrColorInvalid is returned for a colour that is not a #rrggbb literal.
 	ErrColorInvalid = fmt.Errorf("%w: relation type colour must be a #rrggbb literal", errs.ErrInvalid)
+	// ErrRelationTypeInUse is returned when live model rules or instance edges
+	// still reference the type. Deleting it would leave those rows resolvable
+	// only by a dangling id.
+	ErrRelationTypeInUse = fmt.Errorf("%w: relation type is still referenced", errs.ErrConflict)
+
+	// ErrAliasTooLong is returned when an alias exceeds the column width.
+	ErrAliasTooLong = fmt.Errorf("%w: relation type alias is too long", errs.ErrInvalid)
+	// ErrAliasDuplicate is returned when one request repeats an alias.
+	ErrAliasDuplicate = fmt.Errorf("%w: relation type alias is repeated", errs.ErrInvalid)
+	// ErrAliasEqualsName is returned when an alias repeats the canonical name.
+	ErrAliasEqualsName = fmt.Errorf("%w: relation type alias must differ from its name", errs.ErrInvalid)
+	// ErrAliasExists is returned when an alias is already a live name or alias
+	// of another relation type.
+	ErrAliasExists = fmt.Errorf("%w: relation type alias is already in use", errs.ErrConflict)
+	// ErrDisplayNameTooLong is returned when a localised display name exceeds
+	// the column width.
+	ErrDisplayNameTooLong = fmt.Errorf("%w: relation type display name is too long", errs.ErrInvalid)
 )
+
+// Input is the writable half of a relation type.
+//
+// THE PRESENTATION FIELDS ARE DATA, NOT CODE. The zh/en names, aliases and
+// description live in the row so an operator can change what the console shows
+// without a rebuild; the semantic mirror (category, traits, inverse) stays
+// read-only and ontology-owned.
+type Input struct {
+	Name          string
+	Color         string
+	Aliases       []string
+	DisplayNameZH string
+	DisplayNameEN string
+	Description   string
+}
+
+// InUseError carries the reference counts the caller needs to decide whether
+// to migrate or keep the deprecated type.
+type InUseError struct {
+	Usage Usage
+}
+
+func (e *InUseError) Error() string {
+	return fmt.Sprintf("%v: %d model rules, %d instance edges, %d history rows",
+		ErrRelationTypeInUse, e.Usage.ModelRules, e.Usage.InstanceEdges, e.Usage.HistoryRows)
+}
+
+func (e *InUseError) Unwrap() error { return ErrRelationTypeInUse }
 
 // Column widths. The colour stays cantor's String(7). The name was widened
 // from cantor's String(16) so the dictionary can hold the vocabulary that
@@ -38,8 +83,9 @@ var (
 // characters, so a 64-character Chinese name fits; `len()` counts bytes and
 // would reject it at 22 characters.
 const (
-	MaxNameLen  = 64
-	MaxColorLen = 7
+	MaxNameLen        = 64
+	MaxColorLen       = 7
+	MaxDisplayNameLen = 128
 )
 
 // DefaultColor mirrors cantor's server-side default for c_relation_types.color.
@@ -98,11 +144,19 @@ func (u *Usecase) ListUsable(ctx context.Context) ([]citypemodel.RelationType, e
 // without a data-cleanup migration for any existing cantor database that
 // already holds duplicates, so the race is accepted and documented rather than
 // silently papered over.
-func (u *Usecase) Create(ctx context.Context, name, color string) (*citypemodel.RelationType, error) {
+func (u *Usecase) Create(ctx context.Context, in Input) (*citypemodel.RelationType, error) {
 	if u.repo == nil {
 		return nil, errs.ErrNotWiredYet
 	}
-	name, color, err := NormalizeInput(name, color)
+	name, color, err := NormalizeInput(in.Name, in.Color)
+	if err != nil {
+		return nil, err
+	}
+	normalizedAliases, err := normalizeAliases(name, in.Aliases)
+	if err != nil {
+		return nil, err
+	}
+	zh, en, description, err := normalizePresentation(in)
 	if err != nil {
 		return nil, err
 	}
@@ -112,23 +166,37 @@ func (u *Usecase) Create(ctx context.Context, name, color string) (*citypemodel.
 	} else if existing != nil {
 		return nil, fmt.Errorf("%w: %s", ErrNameExists, name)
 	}
+	if err := u.validateAliasCollisions(ctx, 0, name, normalizedAliases); err != nil {
+		return nil, err
+	}
 
-	rt := &citypemodel.RelationType{Name: name, Color: color}
+	rt := &citypemodel.RelationType{
+		Name: name, Color: color, Aliases: normalizedAliases,
+		DisplayNameZH: zh, DisplayNameEN: en, Description: description,
+	}
 	if err := u.repo.Create(ctx, rt); err != nil {
 		return nil, err
 	}
 	return rt, nil
 }
 
-// Update renames and/or recolours a relation type.
-func (u *Usecase) Update(ctx context.Context, id int32, name, color string) (*citypemodel.RelationType, error) {
+// Update changes the writable fields of a relation type.
+func (u *Usecase) Update(ctx context.Context, id int32, in Input) (*citypemodel.RelationType, error) {
 	if u.repo == nil {
 		return nil, errs.ErrNotWiredYet
 	}
 	if id == 0 {
 		return nil, fmt.Errorf("%w: relation type id is required", errs.ErrInvalid)
 	}
-	name, color, err := NormalizeInput(name, color)
+	name, color, err := NormalizeInput(in.Name, in.Color)
+	if err != nil {
+		return nil, err
+	}
+	normalizedAliases, err := normalizeAliases(name, in.Aliases)
+	if err != nil {
+		return nil, err
+	}
+	zh, en, description, err := normalizePresentation(in)
 	if err != nil {
 		return nil, err
 	}
@@ -148,9 +216,16 @@ func (u *Usecase) Update(ctx context.Context, id int32, name, color string) (*ci
 	} else if other != nil && other.ID != id {
 		return nil, fmt.Errorf("%w: %s", ErrNameExists, name)
 	}
+	if err := u.validateAliasCollisions(ctx, id, name, normalizedAliases); err != nil {
+		return nil, err
+	}
 
 	existing.Name = name
 	existing.Color = color
+	existing.Aliases = normalizedAliases
+	existing.DisplayNameZH = zh
+	existing.DisplayNameEN = en
+	existing.Description = description
 	if err := u.repo.Update(ctx, existing); err != nil {
 		return nil, err
 	}
@@ -159,10 +234,12 @@ func (u *Usecase) Update(ctx context.Context, id int32, name, color string) (*ci
 
 // Delete soft-deletes a relation type.
 //
-// It does not check whether the relation type is in use. cantor did not either,
-// and blocking the delete would be a behaviour change: an unused-but-referenced
-// dictionary entry is a data problem the operator should see rather than have
-// hidden behind a refusal.
+// LIVE REFERENCES BLOCK THE DELETE. A type still used by a model rule or an
+// instance edge returns *InUseError, which wraps errs.ErrConflict (HTTP 409)
+// and carries the counts. History rows are reported in the same error but do
+// not block: they are audit evidence, not a live use. This replaces cantor's
+// unconditional delete, which let an operator strand live rows on an id that
+// no longer resolves.
 func (u *Usecase) Delete(ctx context.Context, id int32) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
@@ -176,6 +253,13 @@ func (u *Usecase) Delete(ctx context.Context, id int32) error {
 	}
 	if existing == nil {
 		return errs.ErrNotFound
+	}
+	usage, err := u.repo.Usage(ctx, id)
+	if err != nil {
+		return err
+	}
+	if usage.LiveReferences() > 0 {
+		return &InUseError{Usage: usage}
 	}
 	return u.repo.SoftDelete(ctx, id)
 }
@@ -209,6 +293,82 @@ func NormalizeInput(name, color string) (string, string, error) {
 		return "", "", fmt.Errorf("%w: %q", ErrColorInvalid, color)
 	}
 	return name, color, nil
+}
+
+// normalizeAliases trims, de-duplicates and length-checks the alias list. An
+// alias equal to the canonical name is refused: it adds no lookup value and
+// would make "which one is the identity?" ambiguous.
+func normalizeAliases(name string, aliases []string) (citypemodel.StringList, error) {
+	out := make(citypemodel.StringList, 0, len(aliases))
+	seen := make(map[string]struct{}, len(aliases))
+	for _, raw := range aliases {
+		alias := strings.TrimSpace(raw)
+		if alias == "" {
+			continue
+		}
+		if utf8.RuneCountInString(alias) > MaxNameLen {
+			return nil, fmt.Errorf("%w: %s", ErrAliasTooLong, alias)
+		}
+		if alias == name {
+			return nil, ErrAliasEqualsName
+		}
+		if _, duplicate := seen[alias]; duplicate {
+			return nil, fmt.Errorf("%w: %s", ErrAliasDuplicate, alias)
+		}
+		seen[alias] = struct{}{}
+		out = append(out, alias)
+	}
+	return out, nil
+}
+
+// normalizePresentation trims the display fields and checks the column width.
+// An empty value is allowed: the console then falls back to the canonical name.
+func normalizePresentation(in Input) (zh, en, description string, err error) {
+	zh = strings.TrimSpace(in.DisplayNameZH)
+	en = strings.TrimSpace(in.DisplayNameEN)
+	description = strings.TrimSpace(in.Description)
+	if utf8.RuneCountInString(zh) > MaxDisplayNameLen {
+		return "", "", "", fmt.Errorf("%w: %s", ErrDisplayNameTooLong, zh)
+	}
+	if utf8.RuneCountInString(en) > MaxDisplayNameLen {
+		return "", "", "", fmt.Errorf("%w: %s", ErrDisplayNameTooLong, en)
+	}
+	return zh, en, description, nil
+}
+
+// validateAliasCollisions keeps the dictionary unambiguous: an alias may not
+// be another live row's name or alias, and a canonical name may not be another
+// row's alias. The dictionary is small, so listing it is cheaper than a
+// dialect-specific JSON containment query.
+func (u *Usecase) validateAliasCollisions(ctx context.Context, id int32, name string, aliases citypemodel.StringList) error {
+	rows, err := u.repo.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.ID == id {
+			continue
+		}
+		if row.Name == name {
+			return fmt.Errorf("%w: %s", ErrNameExists, name)
+		}
+		for _, alias := range aliases {
+			if row.Name == alias {
+				return fmt.Errorf("%w: %s is the name of %s", ErrAliasExists, alias, row.Name)
+			}
+			for _, existing := range row.Aliases {
+				if existing == alias {
+					return fmt.Errorf("%w: %s is an alias of %s", ErrAliasExists, alias, row.Name)
+				}
+			}
+		}
+		for _, existing := range row.Aliases {
+			if existing == name {
+				return fmt.Errorf("%w: %s is an alias of %s", ErrNameExists, name, row.Name)
+			}
+		}
+	}
+	return nil
 }
 
 // isHexColor reports whether s is a "#rrggbb" literal. The three-digit CSS

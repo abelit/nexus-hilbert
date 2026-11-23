@@ -23,11 +23,14 @@ import (
 
 	cibiz "github.com/ongridio/ongrid/internal/cmdb/biz/ci"
 	cmdbcitypebiz "github.com/ongridio/ongrid/internal/cmdb/biz/citype"
+	classmapbiz "github.com/ongridio/ongrid/internal/cmdb/biz/classmap"
+	cmdbconnector "github.com/ongridio/ongrid/internal/cmdb/biz/connector"
 	cmdbdiscoverybiz "github.com/ongridio/ongrid/internal/cmdb/biz/discovery"
 	cmdbfilebiz "github.com/ongridio/ongrid/internal/cmdb/biz/file"
 	cmdbdata "github.com/ongridio/ongrid/internal/cmdb/data"
 	cistore "github.com/ongridio/ongrid/internal/cmdb/data/ci/store"
 	cmdbcitypedata "github.com/ongridio/ongrid/internal/cmdb/data/citype/store"
+	connectorclient "github.com/ongridio/ongrid/internal/cmdb/data/connector"
 	model "github.com/ongridio/ongrid/internal/cmdb/model"
 	"github.com/ongridio/ongrid/internal/pkg/auth"
 	"github.com/ongridio/ongrid/internal/pkg/config"
@@ -47,8 +50,8 @@ const (
 )
 
 func main() {
-	var cleanupRelations, dryRun, planRelationSplit, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService, applyServiceEdges, rollbackServiceLayers bool
-	var serviceDecisionsPath, ingestCallEdgesPath string
+	var cleanupRelations, dryRun, planRelationSplit, planOntologyProjection, applyOntologyProjection, planClassProjection, applyClassProjection, splitRelations, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, classifyService, applyServiceEdges, rollbackServiceLayers bool
+	var serviceDecisionsPath, ingestCallEdgesPath, topocortexAPIURL, classMappingPath, classProfilePath string
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -86,6 +89,21 @@ func main() {
 			dryRun = true
 		case "--plan-relation-split":
 			planRelationSplit = true
+		case "--plan-ontology-projection":
+			planOntologyProjection = true
+		case "--apply-ontology-projection":
+			applyOntologyProjection = true
+		case "--plan-class-projection":
+			planClassProjection = true
+		case "--apply-class-projection":
+			applyClassProjection = true
+		case "--topocortex-api-url":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--topocortex-api-url requires a URL")
+				os.Exit(1)
+			}
+			topocortexAPIURL = args[i+1]
+			i++
 		case "--split-relations":
 			splitRelations = true
 		case "--ensure-relation-vocabulary":
@@ -109,6 +127,15 @@ func main() {
 			if strings.HasPrefix(arg, "--ingest-call-edges=") {
 				ingestCallEdgesPath = strings.TrimPrefix(arg, "--ingest-call-edges=")
 			}
+			if strings.HasPrefix(arg, "--topocortex-api-url=") {
+				topocortexAPIURL = strings.TrimPrefix(arg, "--topocortex-api-url=")
+			}
+			if strings.HasPrefix(arg, "--class-map=") {
+				classMappingPath = strings.TrimPrefix(arg, "--class-map=")
+			}
+			if strings.HasPrefix(arg, "--class-profile=") {
+				classProfilePath = strings.TrimPrefix(arg, "--class-profile=")
+			}
 		}
 	}
 	if classifyService && !applyServiceLayers {
@@ -119,18 +146,35 @@ func main() {
 		fmt.Fprintln(os.Stderr, "--service-decisions is only valid with --apply-service-layers")
 		os.Exit(1)
 	}
+	if classMappingPath != "" && !applyOntologyProjection && !planClassProjection && !applyClassProjection {
+		fmt.Fprintln(os.Stderr, "--class-map is only valid with an ontology/class projection command")
+		os.Exit(1)
+	}
+	if classProfilePath != "" && !planClassProjection && !applyClassProjection {
+		fmt.Fprintln(os.Stderr, "--class-profile is only valid with --plan-class-projection or --apply-class-projection")
+		os.Exit(1)
+	}
+	if applyOntologyProjection || applyClassProjection {
+		if strings.TrimSpace(topocortexAPIURL) == "" {
+			topocortexAPIURL = strings.TrimSpace(os.Getenv("ONGRID_TOPOCORTEX_API_URL"))
+		}
+		if topocortexAPIURL == "" {
+			fmt.Fprintln(os.Stderr, "an apply command requires --topocortex-api-url or ONGRID_TOPOCORTEX_API_URL")
+			os.Exit(1)
+		}
+	}
 	if dryRun && !cleanupRelations && !splitRelations && !ensureVocabulary && !applyServiceLayers && !applyServiceEdges && !rollbackServiceLayers && ingestCallEdgesPath == "" {
 		fmt.Fprintln(os.Stderr, "--dry-run is only valid with --cleanup-relations, --split-relations, --ensure-relation-vocabulary, --apply-service-layers, --apply-service-edges, --rollback-service-layers or --ingest-call-edges")
 		os.Exit(1)
 	}
 	commands := 0
-	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, applyServiceEdges, rollbackServiceLayers, ingestCallEdgesPath != ""} {
+	for _, on := range []bool{cleanupRelations, splitRelations, planRelationSplit, planOntologyProjection, applyOntologyProjection, planClassProjection, applyClassProjection, ensureVocabulary, ensureBuiltinModels, planServiceLayers, applyServiceLayers, applyServiceEdges, rollbackServiceLayers, ingestCallEdgesPath != ""} {
 		if on {
 			commands++
 		}
 	}
 	if commands > 1 {
-		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers, --apply-service-edges, --rollback-service-layers, --ingest-call-edges")
+		fmt.Fprintln(os.Stderr, "choose one of --cleanup-relations, --split-relations, --plan-relation-split, --plan-ontology-projection, --apply-ontology-projection, --plan-class-projection, --apply-class-projection, --ensure-relation-vocabulary, --ensure-builtin-models, --plan-service-layers, --apply-service-layers, --apply-service-edges, --rollback-service-layers, --ingest-call-edges")
 		os.Exit(1)
 	}
 
@@ -242,6 +286,102 @@ func main() {
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			fatal(log, "encode relation split plan", err)
+		}
+		return
+	}
+	// The ontology projection plan is read-only. It is the connector's dry run:
+	// a blocked report (unresolved or review rows) must prevent any apply step.
+	if planOntologyProjection {
+		report, err := cistore.PlanOntologyProjection(rootCtx, db)
+		if err != nil {
+			fatal(log, "plan ontology projection", err)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fatal(log, "encode ontology projection plan", err)
+		}
+		if report.Blocked {
+			fmt.Fprintln(os.Stderr, "ontology projection is blocked: resolve unresolved/review rows before applying")
+			os.Exit(1)
+		}
+		return
+	}
+	if applyOntologyProjection {
+		plan, err := cistore.PlanOntologyProjection(rootCtx, db)
+		if err != nil {
+			fatal(log, "plan ontology projection", err)
+		}
+		if plan.Blocked {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(plan); err != nil {
+				fatal(log, "encode ontology projection plan", err)
+			}
+			fmt.Fprintln(os.Stderr, "ontology projection is blocked: resolve unresolved/review rows before applying")
+			os.Exit(1)
+		}
+		classMapping, err := loadClassMapping(classMappingPath)
+		if err != nil {
+			fatal(log, "load class mapping", err)
+		}
+		if classMapping == nil {
+			log.Warn("ontology projection uses identity class mapping; pass --class-map for renamed classes")
+		}
+		report, applyErr := cmdbconnector.Apply(rootCtx, *plan, cmdbconnector.Options{
+			Target:       connectorclient.New(topocortexAPIURL, nil),
+			ClassMapping: classMapping,
+		})
+		if report != nil {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(report); err != nil {
+				fatal(log, "encode ontology apply report", err)
+			}
+		}
+		if applyErr != nil {
+			fatal(log, "apply ontology projection", applyErr)
+		}
+		return
+	}
+	if planClassProjection || applyClassProjection {
+		classMapping, err := loadClassMapping(classMappingPath)
+		if err != nil {
+			fatal(log, "load class mapping", err)
+		}
+		profiles, err := loadClassProfiles(classProfilePath)
+		if err != nil {
+			fatal(log, "load class profiles", err)
+		}
+		plan, err := cmdbcitypedata.PlanClassProjection(rootCtx, db, classMapping, profiles)
+		if err != nil {
+			fatal(log, "plan class projection", err)
+		}
+		if plan.Blocked || planClassProjection {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(plan); err != nil {
+				fatal(log, "encode class projection plan", err)
+			}
+		}
+		if plan.Blocked {
+			fmt.Fprintln(os.Stderr, "class projection is blocked: resolve unresolved/review rows before applying")
+			os.Exit(1)
+		}
+		if planClassProjection {
+			return
+		}
+		report, applyErr := cmdbconnector.ApplyClasses(rootCtx, *plan,
+			connectorclient.New(topocortexAPIURL, nil))
+		if report != nil {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(report); err != nil {
+				fatal(log, "encode class apply report", err)
+			}
+		}
+		if applyErr != nil {
+			fatal(log, "apply class projection", applyErr)
 		}
 		return
 	}
@@ -488,6 +628,47 @@ func readServiceDecisions(path string) (map[model.ID]string, error) {
 			return nil, fmt.Errorf("row %d: duplicate ci_id %d", i+1, id)
 		}
 		out[model.ID(id)] = target
+	}
+	return out, nil
+}
+
+// loadClassMapping reads a JSON object mapping CMDB model names to topocortex
+// class names. An absent file keeps identity mapping; a present file is strict,
+// so a missing entry fails the apply instead of silently using the CMDB name.
+func loadClassMapping(path string) (map[string]string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if out == nil {
+		out = map[string]string{}
+	}
+	return out, nil
+}
+
+// loadClassProfiles reads explicit enrichment for class projection:
+// CMDB model name -> display/domain/layer/roles/semantic bindings and any
+// attribute-name mappings. Absent keeps every profile empty.
+func loadClassProfiles(path string) (map[string]classmapbiz.Profile, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var out map[string]classmapbiz.Profile
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	return out, nil
 }

@@ -24,6 +24,12 @@ var (
 	// stays editable.
 	ErrRelationTypeDeprecated = fmt.Errorf("%w: relation type is deprecated", errs.ErrInvalid)
 
+	// ErrRelationTypeSemanticsMissing refuses a model rule that names a managed
+	// relation type (revision >= 1) without a topocortex category or trait.
+	// A revision-0 row is a legacy/operator-created local-only word and is
+	// allowed to stay out of the ontology projection.
+	ErrRelationTypeSemanticsMissing = fmt.Errorf("%w: relation type has no topocortex semantics", errs.ErrInvalid)
+
 	// ErrRelationSelfLoop refuses a relation from a model to itself.
 	//
 	// cantor refused it too, but only as a side effect of running a topological
@@ -240,6 +246,9 @@ func (u *Usecase) SaveTypeRelation(ctx context.Context, in TypeRelationInput) (*
 	// constraint or attribute pairs is not a new vocabulary decision), but a
 	// new pair must not adopt it.
 	relationType := types[in.RelationTypeID]
+	if relationType.Revision > 0 && !relationType.OntologyReady() {
+		return nil, fmt.Errorf("%w: %s", ErrRelationTypeSemanticsMissing, relationType.Name)
+	}
 	if relationType.Deprecated &&
 		(previous == nil || previous.RelationTypeID != in.RelationTypeID) {
 		if relationType.Replacement != "" {

@@ -13,6 +13,7 @@ import { ToastProvider } from '../components/Toast';
 
 function semantics(overrides: Record<string, unknown> = {}) {
   return {
+    aliases: [],
     category: '',
     direction: '',
     propagates_default: false,
@@ -36,8 +37,10 @@ const rows = [
     id: 1, name: 'depends_on', color: '#6366f1',
     created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
     ...semantics({
+      aliases: ['depends', 'requires'],
       category: 'dependency', direction: 'dst_to_src',
-      propagates_default: true, weight_default: 0.8, display_name_zh: '依赖',
+      propagates_default: true, weight_default: 0.8,
+      display_name_zh: '依赖于', display_name_en: 'Depends on',
     }),
   },
   {
@@ -45,7 +48,8 @@ const rows = [
     created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
     ...semantics({
       category: 'runtime', direction: 'dst_to_src',
-      propagates_default: true, weight_default: 1.0, display_name_zh: '运行于',
+      propagates_default: true, weight_default: 1.0,
+      display_name_zh: '运行于', display_name_en: 'Runs on',
     }),
   },
   {
@@ -62,7 +66,8 @@ const rows = [
     created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
     ...semantics({
       category: 'structure', direction: 'src_to_dst',
-      inverse_of: 'PART_OF', transitive: true, display_name_zh: '包含',
+      inverse_of: 'PART_OF', transitive: true,
+      display_name_zh: '包含', display_name_en: 'Contains',
     }),
   },
 ];
@@ -90,6 +95,11 @@ describe('the list', () => {
 
     expect(await screen.findByText('depends_on')).toBeInTheDocument();
     expect(screen.getByText('runs_on')).toBeInTheDocument();
+    // THE CONSOLE LABEL IS THE LOCALIZED DISPLAY NAME; the canonical name stays
+    // visible underneath because it is the identity the API and the connector
+    // address the type by.
+    expect(screen.getByText('依赖于')).toBeInTheDocument();
+    expect(screen.getByText('运行于')).toBeInTheDocument();
     // A TYPE WITH NO COLOUR SHOWS A DASH rather than a transparent swatch that
     // looks like a rendering bug. The inverse column uses the same convention.
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
@@ -103,6 +113,18 @@ describe('the list', () => {
     // direction mapping the connector applies.
     expect(screen.getByText('PART_OF')).toBeInTheDocument();
     expect(screen.getByText('可传递')).toBeInTheDocument();
+    expect(screen.getByText('depends, requires')).toBeInTheDocument();
+  });
+
+  it('switches the label with the console language, not the identity', async () => {
+    localStorage.setItem('ongrid-locale', 'en-US');
+    server.use(http.get('/api/v1/cmdb/relation-types', () => HttpResponse.json({ items: rows, total: rows.length })));
+    renderPage();
+
+    expect(await screen.findByText('Depends on')).toBeInTheDocument();
+    expect(screen.queryByText('依赖于')).not.toBeInTheDocument();
+    // The canonical name is still the thing the API addresses.
+    expect(screen.getByText('depends_on')).toBeInTheDocument();
   });
 
   it('offers a retry when the load fails, and keeps the table usable', async () => {
@@ -145,13 +167,53 @@ describe('writes', () => {
 
     await user.click(await screen.findByRole('button', { name: /新建/ }));
     await user.type(screen.getByLabelText('名称'), '  contains  ');
+    await user.type(screen.getByLabelText('别名'), 'holds, includes');
     await user.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(posted).toHaveLength(1));
     // THE NAME IS TRIMMED before it is sent, so a stray space does not become a
     // different dictionary entry.
-    expect(posted[0]).toEqual({ name: 'contains', color: '' });
+    expect(posted[0]).toEqual({
+      name: 'contains',
+      color: '',
+      aliases: ['holds', 'includes'],
+      display_name_zh: '',
+      display_name_en: '',
+      description: '',
+    });
     expect(await screen.findByText('已创建')).toBeInTheDocument();
+  });
+
+  it('stores the localised names and description it is given', async () => {
+    const user = userEvent.setup();
+    const posted: unknown[] = [];
+    server.use(
+      http.get('/api/v1/cmdb/relation-types', () => HttpResponse.json({ items: rows, total: rows.length })),
+      http.post('/api/v1/cmdb/relation-types', async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ id: 9, name: 'hosts', color: '' }, { status: 201 });
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /新建/ }));
+    await user.type(screen.getByLabelText('名称'), 'HOSTS');
+    await user.type(screen.getByLabelText('中文名'), ' 承载 ');
+    await user.type(screen.getByLabelText('英文名'), ' Hosts ');
+    await user.type(screen.getByLabelText('描述'), ' 主机承载其上的工作负载。 ');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    // THE DISPLAY FIELDS ARE DATA: they travel to the row, trimmed, and are not
+    // derived from the canonical name anywhere in the console.
+    expect(posted[0]).toEqual({
+      name: 'HOSTS',
+      color: '',
+      aliases: [],
+      display_name_zh: '承载',
+      display_name_en: 'Hosts',
+      description: '主机承载其上的工作负载。',
+    });
   });
 
   it('rejects a colour that is not a colour before sending it', async () => {

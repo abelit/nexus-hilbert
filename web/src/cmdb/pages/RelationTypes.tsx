@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { Hint } from '@/components/ui/Tooltip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import { Textarea } from '@/components/ui/Textarea';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -29,6 +30,7 @@ import { AIActionButton } from '../components/AIActionButton';
 import { FormAssistDialog } from '../components/FormAssistDialog';
 import { explainRelationTypePrompt } from '../lib/aiPrompts';
 import { isValidColor } from '../lib/iconvalue';
+import { relationTypeLabel } from '../lib/relation-type-label';
 import { useToast } from '../components/Toast';
 
 // 关系类型 — the relation-type dictionary.
@@ -146,31 +148,58 @@ export default function RelationTypesPage() {
       width: 'w-full min-w-[140px]',
       sortable: true,
       sortValue: (row) => row.name,
-      cell: (row) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="h-2.5 w-2.5 shrink-0 rounded-full border border-border"
-            style={{ backgroundColor: isValidColor(row.color) ? row.color : 'transparent' }}
-          />
-          <span
-            className="min-w-0 truncate font-medium text-text"
-            title={row.description ? `${row.name} — ${row.description}` : row.name}
-          >
-            {row.name}
-          </span>
-          {row.deprecated && (
-            <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/5 px-1 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
-              <span>{tr('已弃用', 'Deprecated')}</span>
-              {row.replacement && (
-                <span className="ml-1 font-mono" title={tr(`替代为 ${row.replacement}`, `Replaced by ${row.replacement}`)}>
-                  → {row.replacement}
+      cell: (row) => {
+        // The display name is the label; the canonical name stays visible in
+        // mono underneath because it is the identity the connector and the API
+        // address the type by. A type with no display name shows only the name.
+        const label = relationTypeLabel(row, locale);
+        return (
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="h-2.5 w-2.5 shrink-0 rounded-full border border-border"
+              style={{ backgroundColor: isValidColor(row.color) ? row.color : 'transparent' }}
+            />
+            <span className="flex min-w-0 flex-col">
+              <span
+                className="min-w-0 truncate font-medium text-text"
+                title={row.description ? `${label} — ${row.description}` : label}
+              >
+                {label}
+              </span>
+              {label !== row.name && (
+                <span className="min-w-0 truncate font-mono text-[10px] text-text-faint" title={row.name}>
+                  {row.name}
                 </span>
               )}
             </span>
-          )}
-        </div>
-      ),
+            {row.deprecated && (
+              <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/5 px-1 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                <span>{tr('已弃用', 'Deprecated')}</span>
+                {row.replacement && (
+                  <span className="ml-1 font-mono" title={tr(`替代为 ${row.replacement}`, `Replaced by ${row.replacement}`)}>
+                    → {row.replacement}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'aliases',
+      header: tr('别名', 'Aliases'),
+      hideable: true,
+      hideBelow: 1024,
+      cell: (row) =>
+        row.aliases && row.aliases.length > 0 ? (
+          <span className="min-w-0 truncate text-[11px] text-text-muted" title={row.aliases.join(', ')}>
+            {row.aliases.join(', ')}
+          </span>
+        ) : (
+          <span className="text-text-faint">—</span>
+        ),
     },
     {
       key: 'semantics',
@@ -402,6 +431,10 @@ function RelationTypeForm({
   const { tr, locale } = useI18n();
   const { isAdmin } = usePermissions();
   const [name, setName] = useState(row?.name ?? suggestion?.name ?? '');
+  const [aliasesText, setAliasesText] = useState((row?.aliases ?? []).join(', '));
+  const [displayNameZH, setDisplayNameZH] = useState(row?.display_name_zh ?? '');
+  const [displayNameEN, setDisplayNameEN] = useState(row?.display_name_en ?? '');
+  const [description, setDescription] = useState(row?.description ?? '');
   const [color, setColor] = useState(row?.color ?? suggestion?.color ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -414,6 +447,10 @@ function RelationTypeForm({
   });
 
   const nameId = 'cmdb-relation-type-name';
+  const aliasesId = 'cmdb-relation-type-aliases';
+  const displayZHId = 'cmdb-relation-type-display-zh';
+  const displayENId = 'cmdb-relation-type-display-en';
+  const descriptionId = 'cmdb-relation-type-description';
   const colorId = 'cmdb-relation-type-color';
   const colorInvalid = color.trim() !== '' && !isValidColor(color.trim());
 
@@ -429,7 +466,18 @@ function RelationTypeForm({
     }
     setSubmitting(true);
     setErr(null);
-    const input: RelationTypeInput = { name: trimmed, color: color.trim() };
+    const aliases = aliasesText
+      .split(/[,，]/)
+      .map((alias) => alias.trim())
+      .filter((alias) => alias.length > 0);
+    const input: RelationTypeInput = {
+      name: trimmed,
+      color: color.trim(),
+      aliases,
+      display_name_zh: displayNameZH.trim(),
+      display_name_en: displayNameEN.trim(),
+      description: description.trim(),
+    };
     try {
       if (row) await updateRelationType(row.id, input);
       else await createRelationType(input);
@@ -512,6 +560,74 @@ function RelationTypeForm({
             value={name}
             onChange={(event) => setName(event.target.value)}
             aria-invalid={err !== null && !name.trim() ? true : undefined}
+            className="mt-1 w-full"
+          />
+          <p className="mt-1 text-[11px] text-text-faint">
+            {tr(
+              '名称是关系类型的身份，connector 和各处引用都用它；展示名可以另外填写。',
+              'The name is the identity the connector and references use; the display names are separate.',
+            )}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <div className="min-w-0 flex-1">
+            <Label htmlFor={displayZHId}>{tr('中文名', 'Chinese name')}</Label>
+            <Input
+              id={displayZHId}
+              maxLength={128}
+              value={displayNameZH}
+              placeholder="运行于"
+              onChange={(event) => setDisplayNameZH(event.target.value)}
+              className="mt-1 w-full"
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <Label htmlFor={displayENId}>{tr('英文名', 'English name')}</Label>
+            <Input
+              id={displayENId}
+              maxLength={128}
+              value={displayNameEN}
+              placeholder="Runs on"
+              onChange={(event) => setDisplayNameEN(event.target.value)}
+              className="mt-1 w-full"
+            />
+          </div>
+        </div>
+        <p className="mt-1 text-[11px] text-text-faint">
+          {tr(
+            '展示名按控制台语言显示；留空则回退到另一种语言，再回退到名称。',
+            'The console shows the label for its language; empty falls back to the other language, then the name.',
+          )}
+        </p>
+
+        <div>
+          <Label htmlFor={aliasesId}>{tr('别名', 'Aliases')}</Label>
+          <Input
+            id={aliasesId}
+            maxLength={512}
+            value={aliasesText}
+            placeholder={tr('run_on, 运行于', 'run_on, hosted_on')}
+            onChange={(event) => setAliasesText(event.target.value)}
+            aria-describedby={`${aliasesId}-hint`}
+            className="mt-1 w-full"
+          />
+          <p id={`${aliasesId}-hint`} className="mt-1 text-[11px] text-text-faint">
+            {tr(
+              '可选，用逗号分隔；别名用于查找和展示，不改变关系类型的身份。',
+              'Optional, comma-separated; aliases help lookup and display without changing identity.',
+            )}
+          </p>
+        </div>
+
+        <div>
+          <Label htmlFor={descriptionId}>{tr('描述', 'Description')}</Label>
+          <Textarea
+            id={descriptionId}
+            rows={2}
+            value={description}
+            placeholder={tr('说明这条关系在什么场景使用。', 'What this relation means and when to use it.')}
+            onChange={(event) => setDescription(event.target.value)}
             className="mt-1 w-full"
           />
         </div>

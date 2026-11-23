@@ -124,6 +124,16 @@ ongrid-cmdb --split-relations
 
 保留旧边是为了可回滚；回滚到旧类型需要按备份恢复或单独的数据迁移。
 
+### 删除保护
+
+`DELETE /v1/cmdb/relation-types/{id}` 不再无条件删除：
+
+- live 模型规则（`c_ci_type_relations`）或 live 实例边（`c_ci_relations`）任一 > 0 → **409 `conflict`**，响应 message 带 `model rules` / `instance edges` / `history rows` 计数；
+- 历史行（`c_relation_histories`）只报告、不阻塞：它们是审计证据，不是 live 引用；
+- 两个 live 计数都为 0 才允许软删除。
+
+因此 deprecated 类型默认保留；只有确认无 live 规则/边、且外部消费者不再按名称查找时，才执行删除。需要强制清理时走独立命令 + 备份，不要用裸 DELETE。
+
 ### 目标词表的显式初始化
 
 拆分命令只为有存量规则的来源类型创建目标词。`CALLS` 这类没有旧规则可拆的词，以及新库上只由内置 bootstrap 创建的三类结构词，需要显式初始化：
@@ -136,7 +146,7 @@ ongrid-cmdb --ensure-relation-vocabulary --dry-run
 ongrid-cmdb --ensure-relation-vocabulary
 ```
 
-命令按 `internal/cmdb/biz/ci.TargetRelationTypes()` 创建缺失类型，写入 category、direction、propagates、weight、inverse_of、transitive、显示名和 revision；已存在的行（topocortex 同步、运营编辑或早先拆分创建）不覆盖，可重复执行。
+命令按 `internal/cmdb/biz/ci.TargetRelationTypes()` 创建缺失类型，写入 `category`、`topocortex_category`、`direction`、`traits`、`propagates`、`weight`、`inverse_of`、`transitive`、`sub_property_of`、显示名和 revision；已存在的行（topocortex 同步、运营编辑或早先拆分创建）不覆盖，可重复执行。除拆分产生的结构词外，它也会创建没有 legacy 规则可拆的 topocortex 词：`CALLS`、`MONITORING_OF`、`PUBLISHES_TO`、`SUBSCRIBES_TO`、`READS_FROM`、`WRITES_TO`、`USES_DATABASE`、`REPLICATES_FROM`。
 
 `CALLS` 的方向是调用方→被调用方，`category=dependency`、`direction=dst_to_src`、`propagates=true`、`weight=0.9`，用于同步 API/RPC 调用。异步消息不应使用 `CALLS`；`PUBLISHES_TO`/`SUBSCRIBES_TO` 尚未加入词表。`connect service→service` 的存量边仍保留为 `CONNECTS_TO`，等 APM/Trace 证据出现后再逐条细化为 `CALLS`。
 
@@ -144,7 +154,7 @@ ongrid-cmdb --ensure-relation-vocabulary
 
 1. 全量备份 MySQL 并记录 binlog 位点；
 2. 在 staging 用生产快照执行 `--split-relations --dry-run`，核对行数和边数；
-3. 确认 `manage` 不在本次范围内（它同样依赖 `inverse_of` 适配，尚未拆分）；
+3. 确认 `MANAGES`（legacy `manage`）不在本次范围内（它同样依赖 `inverse_of` 适配，尚未拆分；启动迁移会把唯一 `manage` 原地改名为 `MANAGES`）；
 4. 生产执行放在低峰窗口；命令是一个事务，失败整体回滚。
 
 ### 回滚
@@ -156,5 +166,5 @@ ongrid-cmdb --ensure-relation-vocabulary
 ## 不在本规划内
 
 - `install`：启动时的语义回填已标记 `deprecated=true`、`replacement=RUNS_ON`，且无规则/边引用；只剩可选的字典删除，需要逐部署确认后再做；
-- `manage` 的数据方向：由 `inverse_of` 适配，不翻转；
+- `MANAGES`（legacy `manage`）的数据方向：由 `inverse_of` 适配，不翻转；
 - 实例边迁移本身：需要备份、dry-run、双写/对账和回滚，不能在规划器里执行。

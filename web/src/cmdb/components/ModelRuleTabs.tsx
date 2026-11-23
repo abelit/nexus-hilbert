@@ -19,6 +19,7 @@ import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 import { RELATION_CONSTRAINTS, relationConstraintLabel } from '../lib/relation';
+import { relationTypeLabel } from '../lib/relation-type-label';
 
 import { describeError } from '../api/http';
 import {
@@ -529,7 +530,7 @@ function RelationModal({
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const [types, setTypes] = useState<RelationType[]>([]);
   const [peer, setPeer] = useState('');
   const [relationTypeID, setRelationTypeID] = useState('');
@@ -653,7 +654,7 @@ function RelationModal({
             label={tr('关系类型', 'Relation type')}
             value={relationTypeID}
             onValueChange={setRelationTypeID}
-            options={types.map((type) => ({ value: String(type.id), label: type.name }))}
+            options={types.map((type) => ({ value: String(type.id), label: relationTypeLabel(type, locale) }))}
             searchable
             className="mt-1 w-full"
           />

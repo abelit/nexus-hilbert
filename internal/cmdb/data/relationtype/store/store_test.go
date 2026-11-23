@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	cimodel "github.com/ongridio/ongrid/internal/cmdb/model/ci"
 	citypemodel "github.com/ongridio/ongrid/internal/cmdb/model/citype"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
@@ -20,10 +21,58 @@ func newTestRepo(t *testing.T) (*Repo, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&citypemodel.RelationType{}); err != nil {
+	if err := db.AutoMigrate(
+		&citypemodel.RelationType{},
+		&citypemodel.CITypeRelation{},
+		&cimodel.Relation{},
+		&cimodel.RelationHistory{},
+	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return NewRepo(db), db
+}
+
+// Usage is the delete guard's read model: live model rules and live instance
+// edges block deletion; history rows are reported but do not block, because
+// they are audit evidence rather than live references.
+func TestUsageCountsLiveReferences(t *testing.T) {
+	repo, db := newTestRepo(t)
+	ctx := context.Background()
+	rt := &citypemodel.RelationType{Name: "MANAGES"}
+	if err := repo.Create(ctx, rt); err != nil {
+		t.Fatal(err)
+	}
+
+	rule := citypemodel.CITypeRelation{ParentID: 1, ChildID: 2, RelationTypeID: rt.ID}
+	edge := cimodel.Relation{FirstCIID: 1, SecondCIID: 2, RelationTypeID: rt.ID}
+	history := cimodel.RelationHistory{RelationID: 1, RelationTypeID: &rt.ID}
+	for _, row := range []any{&rule, &edge, &history} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatalf("seed usage row: %v", err)
+		}
+	}
+	usage, err := repo.Usage(ctx, rt.ID)
+	if err != nil {
+		t.Fatalf("Usage() error = %v", err)
+	}
+	if usage.ModelRules != 1 || usage.InstanceEdges != 1 || usage.HistoryRows != 1 {
+		t.Fatalf("usage = %+v", usage)
+	}
+
+	// Soft-deleted rules/edges are not live references.
+	if err := db.Delete(&rule).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&edge).Error; err != nil {
+		t.Fatal(err)
+	}
+	usage, err = repo.Usage(ctx, rt.ID)
+	if err != nil {
+		t.Fatalf("Usage() after delete error = %v", err)
+	}
+	if usage.ModelRules != 0 || usage.InstanceEdges != 0 || usage.HistoryRows != 1 {
+		t.Fatalf("usage after soft delete = %+v", usage)
+	}
 }
 
 // The default colour is a database default in cantor, so it must survive a
@@ -52,6 +101,47 @@ func TestCreateAppliesDatabaseDefaultColour(t *testing.T) {
 // The default must match cantor's server_default exactly, otherwise a row
 // created here and a row created by cantor would render differently.
 const citypemodelDefaultColor = "#1890ff"
+
+func TestCreateAndUpdateAliases(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	rt := &citypemodel.RelationType{Name: "runs_on", Aliases: citypemodel.StringList{"run_on"}}
+	if err := repo.Create(ctx, rt); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, rt.ID)
+	if err != nil || got == nil {
+		t.Fatalf("Get() = %+v, %v", got, err)
+	}
+	if len(got.Aliases) != 1 || got.Aliases[0] != "run_on" {
+		t.Fatalf("aliases = %v", got.Aliases)
+	}
+
+	got.Aliases = citypemodel.StringList{"running", "executes_on"}
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.Get(ctx, rt.ID)
+	if err != nil || got == nil {
+		t.Fatalf("Get() after update = %+v, %v", got, err)
+	}
+	if len(got.Aliases) != 2 || got.Aliases[0] != "running" || got.Aliases[1] != "executes_on" {
+		t.Fatalf("aliases after update = %v", got.Aliases)
+	}
+
+	got.Aliases = nil
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.Get(ctx, rt.ID)
+	if err != nil || got == nil {
+		t.Fatalf("Get() after clear = %+v, %v", got, err)
+	}
+	if len(got.Aliases) != 0 {
+		t.Fatalf("aliases after clear = %v", got.Aliases)
+	}
+}
 
 func TestListOrdersByID(t *testing.T) {
 	repo, _ := newTestRepo(t)
@@ -185,6 +275,44 @@ func TestUpdateWritesNameAndColour(t *testing.T) {
 	}
 	if got.Name != "hosted_on" || got.Color != "#ff0000" {
 		t.Fatalf("row = %+v, want the updated name and colour", got)
+	}
+}
+
+func TestUpdateWritesPresentationFields(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	rt := &citypemodel.RelationType{Name: "RUNS_ON"}
+	if err := repo.Create(ctx, rt); err != nil {
+		t.Fatal(err)
+	}
+	rt.DisplayNameZH = "运行于"
+	rt.DisplayNameEN = "Runs on"
+	rt.Description = "工作负载运行在宿主上。"
+	if err := repo.Update(ctx, rt); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	got, err := repo.Get(ctx, rt.ID)
+	if err != nil || got == nil {
+		t.Fatalf("Get() = %+v, %v", got, err)
+	}
+	if got.DisplayNameZH != "运行于" || got.DisplayNameEN != "Runs on" ||
+		got.Description != "工作负载运行在宿主上。" {
+		t.Fatalf("presentation = %+v, want it written to the row", got)
+	}
+
+	// Empty values clear the row: the API replaces the whole writable set.
+	rt.DisplayNameZH, rt.DisplayNameEN, rt.Description = "", "", ""
+	if err := repo.Update(ctx, rt); err != nil {
+		t.Fatalf("clear presentation error = %v", err)
+	}
+	got, err = repo.Get(ctx, rt.ID)
+	if err != nil || got == nil {
+		t.Fatalf("Get() after clear = %+v, %v", got, err)
+	}
+	if got.DisplayNameZH != "" || got.DisplayNameEN != "" || got.Description != "" {
+		t.Fatalf("presentation after clear = %+v", got)
 	}
 }
 

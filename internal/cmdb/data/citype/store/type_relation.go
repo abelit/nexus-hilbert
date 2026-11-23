@@ -220,6 +220,10 @@ func (r *Repo) EnsureRelationType(ctx context.Context, spec cibiz.RelationTypeSp
 	if name == "" {
 		return nil, fmt.Errorf("%w: relation type name is required", errs.ErrInvalid)
 	}
+	spec.Name = name
+	if err := cibiz.ValidateRelationTypeSpec(spec); err != nil {
+		return nil, err
+	}
 	var rt citypemodel.RelationType
 	err := r.db.WithContext(ctx).Where("name = ?", name).First(&rt).Error
 	switch {
@@ -227,12 +231,14 @@ func (r *Repo) EnsureRelationType(ctx context.Context, spec cibiz.RelationTypeSp
 		return &rt, nil
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		rt = citypemodel.RelationType{
-			Name: name, Color: "#1890ff",
-			Category: spec.Category, Direction: spec.Direction,
+			Name:     name,
+			Category: spec.Category, TopocortexCategory: spec.TopocortexCategory,
+			Direction:         spec.Direction,
 			PropagatesDefault: spec.Propagates, WeightDefault: spec.Weight,
 			InverseOf: spec.InverseOf, Transitive: spec.Transitive,
-			DisplayNameZH: spec.DisplayZH, DisplayNameEN: spec.DisplayEN,
-			Description: spec.Description, Revision: 1,
+			Traits:        citypemodel.StringList(spec.Traits),
+			SubPropertyOf: citypemodel.StringList(spec.SubPropertyOf),
+			Revision:      1,
 		}
 		if err := r.db.WithContext(ctx).Create(&rt).Error; err != nil {
 			return nil, fmt.Errorf("cmdb type relation: create relation type %q: %w", name, err)

@@ -240,7 +240,7 @@ func valueLabel(row cibiz.ValueRow) string {
 //
 // THE ENDS ARE MATCHED BY TYPE ID, NOT BY MODEL NAME. The peer checks use the
 // governed vocabulary the relation split created (DEPENDS_ON, HAS_BELONGING,
-// COVERS, manage, CONNECTS_TO) and read only live rows; the three attribute
+// COVERS, MANAGES / legacy manage, CONNECTS_TO) and read only live rows; the three attribute
 // values the gates need are loaded by name. A model that does not carry one of
 // them leaves the field empty and the classifier sends the instance to review.
 func (r *Repo) ServiceLayerEvidence(ctx context.Context, sourceTypeID model.ID) (map[model.ID]cibiz.ServiceLayerEvidence, error) {
@@ -298,7 +298,8 @@ func (r *Repo) ServiceLayerEvidence(ctx context.Context, sourceTypeID model.ID) 
 		if secondIsSource && row.FirstType == "sla" && row.Relation == "COVERS" {
 			add(row.SecondCI, func(ev *cibiz.ServiceLayerEvidence) { ev.CoveredBySLA++ })
 		}
-		if secondIsSource && row.FirstType == "members" && row.Relation == "manage" {
+		if secondIsSource && row.FirstType == "members" &&
+			(row.Relation == "manage" || row.Relation == "MANAGES") {
 			add(row.SecondCI, func(ev *cibiz.ServiceLayerEvidence) { ev.ManagedByMembers++ })
 		}
 		if row.Relation == "CONNECTS_TO" && firstIsSource && secondIsSource {

@@ -290,6 +290,9 @@ func applySplitTx(ctx context.Context, tx *gorm.DB) (*SplitApplyReport, error) {
 }
 
 func ensureRelationType(tx *gorm.DB, spec cibiz.RelationTypeSpec) (model.ID, bool, error) {
+	if err := cibiz.ValidateRelationTypeSpec(spec); err != nil {
+		return 0, false, err
+	}
 	var existing citypemodel.RelationType
 	err := tx.Where("name = ?", spec.Name).First(&existing).Error
 	switch {
@@ -299,12 +302,14 @@ func ensureRelationType(tx *gorm.DB, spec cibiz.RelationTypeSpec) (model.ID, boo
 		return 0, false, fmt.Errorf("cmdb ci: ensure relation type: find %s: %w", spec.Name, err)
 	}
 	row := citypemodel.RelationType{
-		Name: spec.Name, Color: "#1890ff",
-		Category: spec.Category, Direction: spec.Direction,
+		Name:     spec.Name,
+		Category: spec.Category, TopocortexCategory: spec.TopocortexCategory,
+		Direction:         spec.Direction,
 		PropagatesDefault: spec.Propagates, WeightDefault: spec.Weight,
 		InverseOf: spec.InverseOf, Transitive: spec.Transitive,
-		DisplayNameZH: spec.DisplayZH, DisplayNameEN: spec.DisplayEN,
-		Description: spec.Description, Revision: 1,
+		Traits:        citypemodel.StringList(spec.Traits),
+		SubPropertyOf: citypemodel.StringList(spec.SubPropertyOf),
+		Revision:      1,
 	}
 	if err := tx.Create(&row).Error; err != nil {
 		return 0, false, fmt.Errorf("cmdb ci: ensure relation type: create %s: %w", spec.Name, err)

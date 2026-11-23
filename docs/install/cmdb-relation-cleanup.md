@@ -70,7 +70,7 @@ WHERE id IN (/* 报告中的 ids */);
 
 ## 不在本命令范围内
 
-- 关系类型重命名/拆分、`manage`/`contain` 方向迁移；
+- 关系类型重命名/拆分、`MANAGES`（legacy `manage`）/`contain` 方向迁移；
 - 模型规则修正；
 - 关系历史（只追加，不重写）；
 - demo/test CI 与关系类型的清理。

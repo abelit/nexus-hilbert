@@ -17,7 +17,7 @@ import (
 //
 // REVIEW MEANS "the pair can be argued either way". A caller must not treat a
 // reviewed row as approved; the direction-inverted rows need an inverse
-// adapter, just like contain/manage.
+// adapter, just like contain/MANAGES (legacy manage).
 type SplitPlanRow struct {
 	RelationType string `json:"relation_type"`
 	ParentModel  string `json:"parent_model"`

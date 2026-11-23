@@ -41,7 +41,7 @@ func NewHandler(uc *relationtypebiz.Usecase) *Handler { return &Handler{uc: uc} 
 //	GET    /v1/cmdb/relation-types      (any authed)
 //	POST   /v1/cmdb/relation-types      (admin)
 //	PUT    /v1/cmdb/relation-types/{id} (admin)
-//	DELETE /v1/cmdb/relation-types/{id} (admin)
+//	DELETE /v1/cmdb/relation-types/{id} (admin; 409 while live rules/edges reference it)
 //
 // Write access is gated on the admin role, mirroring cantor's
 // `perms_role_required(..., admin_name)` on the same three operations: the
@@ -79,20 +79,24 @@ func (h *Handler) requireAdmin(next http.Handler) http.Handler {
 // to_dict() serialised every mapped column, including the soft-delete fields;
 // the port deliberately narrows that.
 type relationTypeDTO struct {
-	ID    int32  `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	ID      int32                  `json:"id"`
+	Name    string                 `json:"name"`
+	Color   string                 `json:"color"`
+	Aliases citypemodel.StringList `json:"aliases"`
 
 	// Read-only mirror of nexus-topocortex's RelationTypeInfo. These fields are
 	// populated by the ontology sync; the write endpoints below do not accept
 	// them.
 	Category            string                 `json:"category"`
+	TopocortexCategory  string                 `json:"topocortex_category"`
 	Direction           string                 `json:"direction"`
 	PropagatesDefault   bool                   `json:"propagates_default"`
 	WeightDefault       float64                `json:"weight_default"`
 	InverseOf           string                 `json:"inverse_of"`
 	Transitive          bool                   `json:"transitive"`
 	SubPropertyOf       citypemodel.StringList `json:"sub_property_of"`
+	Traits              citypemodel.StringList `json:"traits"`
+	OntologyReady       bool                   `json:"ontology_ready"`
 	DisplayNameZH       string                 `json:"display_name_zh"`
 	DisplayNameEN       string                 `json:"display_name_en"`
 	Description         string                 `json:"description"`
@@ -107,11 +111,13 @@ type relationTypeDTO struct {
 
 func toDTO(rt citypemodel.RelationType) relationTypeDTO {
 	dto := relationTypeDTO{
-		ID: rt.ID, Name: rt.Name, Color: rt.Color,
-		Category: rt.Category, Direction: rt.Direction,
+		ID: rt.ID, Name: rt.Name, Color: rt.Color, Aliases: rt.Aliases,
+		Category: rt.Category, TopocortexCategory: rt.TopocortexCategory,
+		Direction:         rt.Direction,
 		PropagatesDefault: rt.PropagatesDefault, WeightDefault: rt.WeightDefault,
 		InverseOf: rt.InverseOf, Transitive: rt.Transitive,
-		SubPropertyOf: rt.SubPropertyOf,
+		SubPropertyOf: rt.SubPropertyOf, Traits: rt.Traits,
+		OntologyReady: rt.OntologyReady(),
 		DisplayNameZH: rt.DisplayNameZH, DisplayNameEN: rt.DisplayNameEN,
 		Description: rt.Description, Deprecated: rt.Deprecated,
 		Replacement: rt.Replacement, Revision: rt.Revision,
@@ -168,8 +174,20 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 type writeRequest struct {
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	Name          string   `json:"name"`
+	Color         string   `json:"color"`
+	Aliases       []string `json:"aliases"`
+	DisplayNameZH string   `json:"display_name_zh"`
+	DisplayNameEN string   `json:"display_name_en"`
+	Description   string   `json:"description"`
+}
+
+func (r writeRequest) input() relationtypebiz.Input {
+	return relationtypebiz.Input{
+		Name: r.Name, Color: r.Color, Aliases: r.Aliases,
+		DisplayNameZH: r.DisplayNameZH, DisplayNameEN: r.DisplayNameEN,
+		Description: r.Description,
+	}
 }
 
 func decodeWriteRequest(r *http.Request) (writeRequest, error) {
@@ -188,7 +206,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errs.ErrInvalid)
 		return
 	}
-	created, err := h.uc.Create(r.Context(), req.Name, req.Color)
+	created, err := h.uc.Create(r.Context(), req.input())
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -207,7 +225,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errs.ErrInvalid)
 		return
 	}
-	updated, err := h.uc.Update(r.Context(), id, req.Name, req.Color)
+	updated, err := h.uc.Update(r.Context(), id, req.input())
 	if err != nil {
 		writeErr(w, err)
 		return

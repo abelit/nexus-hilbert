@@ -408,14 +408,17 @@ func TestServiceBuiltinModelsCreateTheThreeLayers(t *testing.T) {
 	if err := db.Where("name = ?", "CALLS").First(&calls).Error; err != nil {
 		t.Fatalf("CALLS type: %v", err)
 	}
-	if calls.Direction != "dst_to_src" || !calls.PropagatesDefault || calls.WeightDefault != 0.9 {
+	if calls.Direction != "dst_to_src" || !calls.PropagatesDefault || calls.WeightDefault != 0.9 ||
+		calls.TopocortexCategory != "dependency" || len(calls.Traits) != 1 || calls.Traits[0] != "dependency" {
 		t.Fatalf("CALLS semantics = %+v", calls)
 	}
 	var hasInstance citypemodel.RelationType
 	if err := db.Where("name = ?", "HAS_INSTANCE").First(&hasInstance).Error; err != nil {
 		t.Fatalf("HAS_INSTANCE type: %v", err)
 	}
-	if hasInstance.InverseOf != "INSTANCE_OF" || hasInstance.WeightDefault != 0 {
+	if hasInstance.InverseOf != "REPLICA_OF" || hasInstance.WeightDefault != 0 ||
+		hasInstance.TopocortexCategory != "association" ||
+		len(hasInstance.Traits) != 1 || hasInstance.Traits[0] != "replica_membership" {
 		t.Fatalf("HAS_INSTANCE semantics = %+v", hasInstance)
 	}
 

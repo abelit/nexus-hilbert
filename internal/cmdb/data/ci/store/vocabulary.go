@@ -35,6 +35,11 @@ func EnsureRelationVocabulary(ctx context.Context, db *gorm.DB, dryRun bool) (*V
 	if db == nil {
 		return nil, errNilDB
 	}
+	// Fail closed before touching a row: an invalid managed word would give the
+	// connector a category/trait combination topocortex rejects.
+	if err := cibiz.ValidateTargetRelationTypes(); err != nil {
+		return nil, err
+	}
 	if dryRun {
 		report := &VocabularyReport{DryRun: true}
 		for _, spec := range cibiz.TargetRelationTypes() {

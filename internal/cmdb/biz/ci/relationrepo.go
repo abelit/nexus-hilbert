@@ -193,6 +193,12 @@ var (
 	// malformed request — cantor answered 404 here too.
 	ErrRelationTypeUndeclared = fmt.Errorf("%w: the two models have no relation rule", errs.ErrNotFound)
 
+	// ErrRelationTypeMismatch is returned when the caller names a relation
+	// type other than the one the model pair's rule declares. Accepting it
+	// would create an edge the ontology never declared, which the topocortex
+	// projection cannot validate or project.
+	ErrRelationTypeMismatch = fmt.Errorf("%w: relation type does not match the model pair rule", errs.ErrInvalid)
+
 	// ErrRelationConstraint is returned when the model pair's cardinality rule
 	// refuses the edge — a second parent for a one-to-many child, or either end
 	// of a one-to-one already being related.

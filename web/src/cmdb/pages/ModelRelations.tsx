@@ -17,6 +17,7 @@ import { openAssistant } from '@/lib/assistantIntent';
 import { usePermissions } from '@/store/me';
 import { cn } from '@/lib/cn';
 import { RELATION_CONSTRAINTS, relationConstraintLabel } from '../lib/relation';
+import { relationTypeLabel } from '../lib/relation-type-label';
 
 import { describeError } from '../api/http';
 import {
@@ -600,7 +601,7 @@ function RelationFormModal({
             placeholder={tr('选择关联类型', 'Select relation type')}
             value={typeID}
             onValueChange={setTypeID}
-            options={relationTypes.map((type) => ({ value: String(type.id), label: type.name }))}
+            options={relationTypes.map((type) => ({ value: String(type.id), label: relationTypeLabel(type, locale) }))}
             className="mt-1 w-full"
           />
         </div>
