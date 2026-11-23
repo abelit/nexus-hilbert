@@ -94,6 +94,16 @@ export function deleteMonitoringConnection(id: number) {
   return request<void>('DELETE', `/observability/monitoring-connections/${id}`);
 }
 
+// The platform connection is not a row in ci_monitoring_connections; this
+// endpoint only toggles whether CI monitoring uses the global integration.
+export function setPlatformConnectionEnabled(provider: Provider, enabled: boolean) {
+  return request<MonitoringConnection>(
+    'PUT',
+    `/observability/monitoring-connections/platform?provider=${provider}`,
+    { enabled },
+  );
+}
+
 export function testMonitoringConnection(provider: Provider, input: MonitoringConnectionInput) {
   return request<{ ok: boolean }>(
     'POST',

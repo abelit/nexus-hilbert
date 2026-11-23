@@ -129,6 +129,7 @@ type Usecase struct {
 	prom        PromAlerts
 	crypto      Crypto
 	globalProbe GlobalProbe
+	toggles     PlatformToggles
 	log         *slog.Logger
 }
 
@@ -145,6 +146,10 @@ func (u *Usecase) SetCrypto(c Crypto) { u.crypto = c }
 
 // SetGlobalProbe wires the platform's global Grafana/Prometheus health probes.
 func (u *Usecase) SetGlobalProbe(p GlobalProbe) { u.globalProbe = p }
+
+// SetPlatformToggles wires the persisted enable state of the internal
+// (platform) connections. Without it the internal connection stays enabled.
+func (u *Usecase) SetPlatformToggles(t PlatformToggles) { u.toggles = t }
 
 func (u *Usecase) ListLinks(ctx context.Context, provider string) ([]LinkView, error) {
 	if !validProvider(provider) {
@@ -214,6 +219,14 @@ func (u *Usecase) SaveLink(ctx context.Context, provider string, ciTypeID uint64
 		}
 		if conn.Provider != provider || !conn.Enabled {
 			return nil, fmt.Errorf("%w: connection %d is not an enabled %s connection", errs.ErrInvalid, in.ConnectionID, provider)
+		}
+	} else {
+		internalOn, err := u.internalEnabled(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
+		if !internalOn {
+			return nil, fmt.Errorf("%w: the platform %s connection is disabled", errs.ErrConflict, provider)
 		}
 	}
 	row := &model.Link{
@@ -289,6 +302,15 @@ func (u *Usecase) GrafanaForCI(ctx context.Context, ciID uint64) (*GrafanaResult
 	if !row.Enabled {
 		return &GrafanaResult{Configured: false, Reason: "not_configured"}, nil
 	}
+	if row.ConnectionID == 0 {
+		internalOn, err := u.internalEnabled(ctx, model.ProviderGrafana)
+		if err != nil {
+			return nil, err
+		}
+		if !internalOn {
+			return &GrafanaResult{Configured: false, Reason: reasonConnectionDisabled}, nil
+		}
+	}
 	mappings, err := unmarshal[VarMapping](row.VarMappingJSON)
 	if err != nil {
 		return nil, err
@@ -327,6 +349,15 @@ func (u *Usecase) PromAlertsForCI(ctx context.Context, ciID uint64) (*PromResult
 	}
 	if !row.Enabled {
 		return &PromResult{Configured: false, Reason: "not_configured", Alerts: []PromAlertView{}}, nil
+	}
+	if row.ConnectionID == 0 {
+		internalOn, err := u.internalEnabled(ctx, model.ProviderPrometheus)
+		if err != nil {
+			return nil, err
+		}
+		if !internalOn {
+			return &PromResult{Configured: false, Reason: reasonConnectionDisabled, Alerts: []PromAlertView{}}, nil
+		}
 	}
 	labelMappings, err := unmarshal[LabelMapping](row.LabelMappingJSON)
 	if err != nil {
@@ -377,6 +408,15 @@ func (u *Usecase) PromAlertsForCI(ctx context.Context, ciID uint64) (*PromResult
 func (u *Usecase) PreviewLink(ctx context.Context, provider string, ciID uint64, in LinkInput) (*PreviewResult, error) {
 	if !validProvider(provider) {
 		return nil, fmt.Errorf("%w: provider %q", errs.ErrInvalid, provider)
+	}
+	if in.ConnectionID == 0 {
+		internalOn, err := u.internalEnabled(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
+		if !internalOn {
+			return &PreviewResult{Reason: reasonConnectionDisabled}, nil
+		}
 	}
 	ci, reason, err := u.resolveCI(ctx, ciID)
 	if err != nil {

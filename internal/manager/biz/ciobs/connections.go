@@ -33,6 +33,23 @@ type GlobalProbe interface {
 	ProbeProm(ctx context.Context) error
 }
 
+// PlatformToggles persists whether the internal (platform) connection is
+// enabled for CI monitoring. It is backed by system_settings so the flag
+// survives restarts and is shared by every manager instance.
+type PlatformToggles interface {
+	Get(ctx context.Context, category, key string) (string, bool, error)
+	Set(ctx context.Context, category, key, value string, sensitive bool) error
+}
+
+const (
+	platformSettingsCategory = "ci_monitoring"
+	reasonConnectionDisabled  = "connection_disabled"
+)
+
+func internalEnabledKey(provider string) string {
+	return provider + "_internal_enabled"
+}
+
 type Credentials struct {
 	Token    string
 	Username string
@@ -73,15 +90,50 @@ type ConnectionHealth struct {
 	Error string `json:"error,omitempty"`
 }
 
-func internalConnectionView(provider string) ConnectionView {
+func internalConnectionView(provider string, enabled bool) ConnectionView {
 	name := "平台 Prometheus"
 	if provider == model.ProviderGrafana {
 		name = "平台 Grafana"
 	}
 	return ConnectionView{
 		ID: 0, Provider: provider, Kind: model.ConnectionKindInternal,
-		Name: name, AuthType: "none", Enabled: true,
+		Name: name, AuthType: "none", Enabled: enabled,
 	}
+}
+
+func (u *Usecase) internalEnabled(ctx context.Context, provider string) (bool, error) {
+	if u.toggles == nil {
+		return true, nil
+	}
+	value, ok, err := u.toggles.Get(ctx, platformSettingsCategory, internalEnabledKey(provider))
+	if err != nil {
+		return false, fmt.Errorf("ciobs: read platform connection state: %w", err)
+	}
+	if !ok {
+		return true, nil
+	}
+	return !strings.EqualFold(strings.TrimSpace(value), "false"), nil
+}
+
+// SetInternalEnabled persists the platform connection switch. The actual
+// integration credentials stay in system_settings; this flag only decides
+// whether CI monitoring uses them.
+func (u *Usecase) SetInternalEnabled(ctx context.Context, provider string, enabled bool) (*ConnectionView, error) {
+	if !validProvider(provider) {
+		return nil, fmt.Errorf("%w: provider %q", errs.ErrInvalid, provider)
+	}
+	if u.toggles == nil {
+		return nil, fmt.Errorf("%w: platform settings are not configured", errs.ErrInvalid)
+	}
+	value := "false"
+	if enabled {
+		value = "true"
+	}
+	if err := u.toggles.Set(ctx, platformSettingsCategory, internalEnabledKey(provider), value, false); err != nil {
+		return nil, fmt.Errorf("ciobs: save platform connection state: %w", err)
+	}
+	view := internalConnectionView(provider, enabled)
+	return &view, nil
 }
 
 func (u *Usecase) ListConnections(ctx context.Context, provider string) ([]ConnectionView, error) {
@@ -92,7 +144,11 @@ func (u *Usecase) ListConnections(ctx context.Context, provider string) ([]Conne
 	if err != nil {
 		return nil, err
 	}
-	out := []ConnectionView{internalConnectionView(provider)}
+	enabled, err := u.internalEnabled(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	out := []ConnectionView{internalConnectionView(provider, enabled)}
 	for i := range rows {
 		out = append(out, u.connectionView(&rows[i]))
 	}
@@ -103,12 +159,9 @@ func (u *Usecase) SaveConnection(ctx context.Context, provider string, in Connec
 	if !validProvider(provider) {
 		return nil, fmt.Errorf("%w: provider %q", errs.ErrInvalid, provider)
 	}
-	normalized, err := normalizeConnection(provider, in, nil)
-	if err != nil {
-		return nil, err
-	}
 	var existing *model.Connection
 	if id > 0 {
+		var err error
 		existing, err = u.repo.GetConnection(ctx, id)
 		if err != nil {
 			return nil, err
@@ -116,10 +169,12 @@ func (u *Usecase) SaveConnection(ctx context.Context, provider string, in Connec
 		if existing.Provider != provider {
 			return nil, fmt.Errorf("%w: connection provider cannot change", errs.ErrInvalid)
 		}
-		normalized, err = normalizeConnection(provider, in, existing)
-		if err != nil {
-			return nil, err
-		}
+	}
+	// Normalize against the stored row so an update that omits auth_data
+	// keeps the existing credential instead of failing the token check.
+	normalized, err := normalizeConnection(provider, in, existing)
+	if err != nil {
+		return nil, err
 	}
 	cipher, err := u.seal(normalized, existing)
 	if err != nil {
@@ -188,15 +243,23 @@ func (u *Usecase) ConnectionsHealth(ctx context.Context, provider string) ([]Con
 	if !validProvider(provider) {
 		return nil, fmt.Errorf("%w: provider %q", errs.ErrInvalid, provider)
 	}
-	out := []ConnectionHealth{{ID: 0, Name: internalConnectionView(provider).Name, Kind: model.ConnectionKindInternal}}
-	if u.globalProbe == nil {
-		out[0].Error = "not configured"
-	} else if err := u.probeGlobal(ctx, provider); err != nil {
-		// The internal row is a read-only projection of Settings → Integrations,
-		// so a failure here is fixed there, not on this page.
-		out[0].Error = err.Error() + " — fix the global integration in Settings → Integrations"
-	} else {
-		out[0].OK = true
+	enabled, err := u.internalEnabled(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ConnectionHealth, 0, 1)
+	if enabled {
+		internal := ConnectionHealth{ID: 0, Name: internalConnectionView(provider, true).Name, Kind: model.ConnectionKindInternal}
+		if u.globalProbe == nil {
+			internal.Error = "not configured"
+		} else if err := u.probeGlobal(ctx, provider); err != nil {
+			// The internal row is a read-only projection of Settings → Integrations,
+			// so a failure here is fixed there, not on this page.
+			internal.Error = err.Error() + " — fix the global integration in Settings → Integrations"
+		} else {
+			internal.OK = true
+		}
+		out = append(out, internal)
 	}
 	rows, err := u.repo.ListConnections(ctx, provider)
 	if err != nil {

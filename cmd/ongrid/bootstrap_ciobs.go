@@ -50,6 +50,7 @@ func bootstrapCIObs(log *slog.Logger, storage *storageModule, cmdbClient *cmdbcl
 	uc := ciobsbiz.NewUsecase(repo, cmdbFederationReader{client: cmdbClient}, prom, logger)
 	uc.SetCrypto(secretboxCrypto{})
 	uc.SetGlobalProbe(ciobsGlobalProbe{grafana: settings.grafanaSvc, prom: prom})
+	uc.SetPlatformToggles(settings.settingSvc)
 	return &ciobsModule{
 		handler: ciobsserver.NewHandler(ciobsservice.New(uc), logger),
 	}

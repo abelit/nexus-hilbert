@@ -79,12 +79,17 @@ export function CIMonitoringTab({ ciID }: { ciID: number }) {
 
   const hasGrafana = Boolean(grafana?.configured);
   const hasProm = Boolean(prom?.configured);
+  const connectionDisabled = grafana?.reason === 'connection_disabled' || prom?.reason === 'connection_disabled';
   if (!hasGrafana && !hasProm) {
     return (
       <EmptyState
         icon={MonitorPlay}
-        title={tr('该模型未配置监控链接', 'No monitoring link for this model')}
-        hint={tr('管理员可在设置 → CI 监控中绑定全局 Grafana 仪表盘或 Prometheus 标签。', 'An admin can bind the global Grafana dashboard or Prometheus labels in Settings → CI monitoring.')}
+        title={connectionDisabled
+          ? tr('监控连接已停用', 'Monitoring connection disabled')
+          : tr('该模型未配置监控链接', 'No monitoring link for this model')}
+        hint={connectionDisabled
+          ? tr('管理员可在 设置 → CI 监控 中启用平台连接，或检查外部连接。', 'An admin can enable the platform connection in Settings → CI monitoring, or check the external connection.')
+          : tr('管理员可在设置 → CI 监控中绑定全局 Grafana 仪表盘或 Prometheus 标签。', 'An admin can bind the global Grafana dashboard or Prometheus labels in Settings → CI monitoring.')}
       />
     );
   }
@@ -153,9 +158,16 @@ export function CIMonitoringTab({ ciID }: { ciID: number }) {
         </div>
       )}
 
-      {!hasGrafana && prom?.reason === 'prometheus_unavailable' && (
+      {!hasGrafana && grafana?.reason === 'connection_disabled' && (
         <p className="text-[11px] text-text-faint">
-          {tr('Prometheus 集成未启用；请检查 Settings → 集成。', 'The Prometheus integration is not enabled; check Settings → Integrations.')}
+          {tr('Grafana 监控连接已停用；请检查 设置 → CI 监控。', 'The Grafana monitoring connection is disabled; check Settings → CI monitoring.')}
+        </p>
+      )}
+      {!hasProm && (prom?.reason === 'prometheus_unavailable' || prom?.reason === 'connection_disabled') && (
+        <p className="text-[11px] text-text-faint">
+          {prom.reason === 'connection_disabled'
+            ? tr('Prometheus 监控连接已停用；请检查 设置 → CI 监控。', 'The Prometheus monitoring connection is disabled; check Settings → CI monitoring.')
+            : tr('Prometheus 集成未启用；请检查 Settings → 集成。', 'The Prometheus integration is not enabled; check Settings → Integrations.')}
         </p>
       )}
     </div>

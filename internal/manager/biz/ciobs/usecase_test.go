@@ -304,6 +304,123 @@ func TestConnectionsHealthInternalPointsAtIntegrations(t *testing.T) {
 	}
 }
 
+type fakeToggles struct {
+	values map[string]string
+	sets   []string
+}
+
+func (f *fakeToggles) Get(_ context.Context, category, key string) (string, bool, error) {
+	value, ok := f.values[category+"/"+key]
+	return value, ok, nil
+}
+
+func (f *fakeToggles) Set(_ context.Context, category, key, value string, _ bool) error {
+	if f.values == nil {
+		f.values = map[string]string{}
+	}
+	f.values[category+"/"+key] = value
+	f.sets = append(f.sets, category+"/"+key+"="+value)
+	return nil
+}
+
+type countingProbe struct{ calls int }
+
+func (p *countingProbe) ProbeGrafana(context.Context) error { p.calls++; return nil }
+func (p *countingProbe) ProbeProm(context.Context) error    { p.calls++; return nil }
+
+func TestInternalConnectionCanBeDisabled(t *testing.T) {
+	uc, _ := newUsecase(t, nil, nil)
+	toggles := &fakeToggles{values: map[string]string{}}
+	uc.SetPlatformToggles(toggles)
+
+	rows, err := uc.ListConnections(context.Background(), model.ProviderGrafana)
+	if err != nil || len(rows) != 1 || !rows[0].Enabled {
+		t.Fatalf("initial rows = %+v, %v", rows, err)
+	}
+
+	view, err := uc.SetInternalEnabled(context.Background(), model.ProviderGrafana, false)
+	if err != nil {
+		t.Fatalf("SetInternalEnabled: %v", err)
+	}
+	if view.Enabled {
+		t.Fatalf("view = %+v", view)
+	}
+	if toggles.values["ci_monitoring/grafana_internal_enabled"] != "false" {
+		t.Fatalf("stored = %+v", toggles.values)
+	}
+
+	rows, err = uc.ListConnections(context.Background(), model.ProviderGrafana)
+	if err != nil || len(rows) != 1 || rows[0].Enabled {
+		t.Fatalf("after disable = %+v, %v", rows, err)
+	}
+}
+
+func TestGrafanaForCIReportsDisabledPlatformConnection(t *testing.T) {
+	uc, _ := newUsecase(t, &federationbiz.CMDBInstance{ID: 7, TypeID: 3, Values: map[string]any{"hostname": "web-1"}}, nil)
+	toggles := &fakeToggles{values: map[string]string{}}
+	uc.SetPlatformToggles(toggles)
+	if _, err := uc.SaveLink(context.Background(), model.ProviderGrafana, 3, ciobsbiz.LinkInput{
+		DashboardUID: "dash",
+		VarMapping:   []ciobsbiz.VarMapping{{CIAttribute: "hostname", VarName: "device_id"}},
+	}); err != nil {
+		t.Fatalf("SaveLink: %v", err)
+	}
+	if _, err := uc.SetInternalEnabled(context.Background(), model.ProviderGrafana, false); err != nil {
+		t.Fatalf("SetInternalEnabled: %v", err)
+	}
+	got, err := uc.GrafanaForCI(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("GrafanaForCI: %v", err)
+	}
+	if got.Configured || got.Reason != "connection_disabled" {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
+func TestPromAlertsForCIReportsDisabledPlatformConnection(t *testing.T) {
+	uc, _ := newUsecase(t, &federationbiz.CMDBInstance{ID: 7, TypeID: 3, Values: map[string]any{"hostname": "web-1"}}, fakeProm{})
+	toggles := &fakeToggles{values: map[string]string{}}
+	uc.SetPlatformToggles(toggles)
+	if _, err := uc.SaveLink(context.Background(), model.ProviderPrometheus, 3, ciobsbiz.LinkInput{
+		LabelMapping: []ciobsbiz.LabelMapping{{CIAttribute: "hostname", PromLabel: "host"}},
+	}); err != nil {
+		t.Fatalf("SaveLink: %v", err)
+	}
+	if _, err := uc.SetInternalEnabled(context.Background(), model.ProviderPrometheus, false); err != nil {
+		t.Fatalf("SetInternalEnabled: %v", err)
+	}
+	got, err := uc.PromAlertsForCI(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("PromAlertsForCI: %v", err)
+	}
+	if got.Configured || got.Reason != "connection_disabled" {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
+func TestSaveLinkRejectsDisabledPlatformConnection(t *testing.T) {
+	uc, _ := newUsecase(t, nil, nil)
+	uc.SetPlatformToggles(&fakeToggles{values: map[string]string{"ci_monitoring/grafana_internal_enabled": "false"}})
+	_, err := uc.SaveLink(context.Background(), model.ProviderGrafana, 3, ciobsbiz.LinkInput{DashboardUID: "dash"})
+	if !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestConnectionsHealthSkipsDisabledPlatformConnection(t *testing.T) {
+	uc, _ := newUsecase(t, nil, nil)
+	probe := &countingProbe{}
+	uc.SetGlobalProbe(probe)
+	uc.SetPlatformToggles(&fakeToggles{values: map[string]string{"ci_monitoring/grafana_internal_enabled": "false"}})
+	rows, err := uc.ConnectionsHealth(context.Background(), model.ProviderGrafana)
+	if err != nil {
+		t.Fatalf("ConnectionsHealth: %v", err)
+	}
+	if probe.calls != 0 || len(rows) != 0 {
+		t.Fatalf("probe calls = %d, rows = %+v", probe.calls, rows)
+	}
+}
+
 func TestSaveConnectionEncryptsAndMasks(t *testing.T) {
 	uc, repo := newUsecase(t, nil, nil)
 	uc.SetCrypto(fakeCrypto{})
@@ -327,6 +444,32 @@ func TestSaveConnectionEncryptsAndMasks(t *testing.T) {
 	rows, _ := uc.ListConnections(context.Background(), model.ProviderGrafana)
 	if len(rows) != 2 || rows[1].Name != "external" {
 		t.Fatalf("list = %+v", rows)
+	}
+}
+
+func TestUpdateConnectionWithoutCredentialsKeepsStoredSecret(t *testing.T) {
+	uc, repo := newUsecase(t, nil, nil)
+	uc.SetCrypto(fakeCrypto{})
+	created, err := uc.SaveConnection(context.Background(), model.ProviderGrafana, ciobsbiz.ConnectionInput{
+		Provider: model.ProviderGrafana, Name: "external", BaseURL: "https://grafana.example.com/grafana",
+		AuthType: "bearer", Auth: &ciobsbiz.Credentials{Token: "tok-secret"},
+	}, 0)
+	if err != nil {
+		t.Fatalf("SaveConnection: %v", err)
+	}
+	cipher := repo.conns[created.ID].AuthCipher
+	disabled := false
+	updated, err := uc.SaveConnection(context.Background(), model.ProviderGrafana, ciobsbiz.ConnectionInput{
+		Name: created.Name, BaseURL: created.BaseURL, AuthType: "bearer", Enabled: &disabled,
+	}, created.ID)
+	if err != nil {
+		t.Fatalf("update without credentials: %v", err)
+	}
+	if updated.Enabled {
+		t.Fatalf("updated = %+v", updated)
+	}
+	if repo.conns[created.ID].AuthCipher != cipher {
+		t.Fatalf("credential was replaced")
 	}
 }
 

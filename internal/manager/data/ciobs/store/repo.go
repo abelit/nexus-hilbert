@@ -49,7 +49,9 @@ func (r *Repo) Upsert(ctx context.Context, link *model.Link) error {
 		return err
 	default:
 		link.ID = existing.ID
-		return r.db.WithContext(ctx).Save(link).Error
+		// The caller builds a fresh row without timestamps; omit created_at
+		// or MySQL strict mode rejects the zero datetime on every save.
+		return r.db.WithContext(ctx).Omit("created_at").Save(link).Error
 	}
 }
 

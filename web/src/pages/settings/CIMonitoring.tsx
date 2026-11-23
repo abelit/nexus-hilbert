@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { MonitorPlay, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import {
   Button,
   Card,
   Chip,
-  EmptyStateCard,
+  EmptyState,
   Input,
   Label,
   Select,
@@ -25,6 +26,7 @@ import {
   monitoringConnectionsHealth,
   previewCILink,
   saveCILink,
+  setPlatformConnectionEnabled,
   testMonitoringConnection,
   testSavedMonitoringConnection,
   updateMonitoringConnection,
@@ -39,11 +41,14 @@ import {
   type Provider,
   type VarMapping,
 } from '@/api/ciMonitoring';
-
-const PROVIDERS: { value: Provider; zh: string; en: string }[] = [
-  { value: 'grafana', zh: 'Grafana', en: 'Grafana' },
-  { value: 'prometheus', zh: 'Prometheus', en: 'Prometheus' },
-];
+import {
+  listSettings,
+  revealSetting,
+  setSetting,
+  testGrafanaConnection,
+  testPromConnection,
+} from '@/api/settings';
+import { invalidateGrafanaRootCache } from '@/lib/drilldown';
 
 const OPEN_MODES = [
   { value: 'link', label: 'link' },
@@ -52,156 +57,344 @@ const OPEN_MODES = [
 
 const MATCHER_OPS = ['eq', 'ne', 'regex'].map((op) => ({ value: op, label: op }));
 
+// The platform connection edits the same system_settings rows as
+// Settings → Integrations. Keys and sensitivity match that page, so the two
+// entry points cannot drift into different credential semantics.
+const GRAFANA_KEYS = ['root_url', 'sa_token', 'api_key', 'org_id', 'tls_insecure'] as const;
+const GRAFANA_SENSITIVE = new Set<string>(['sa_token', 'api_key']);
+const PROM_KEYS = ['query_url', 'remote_write_url', 'bearer_token', 'basic_user', 'basic_password', 'tls_insecure'] as const;
+const PROM_SENSITIVE = new Set<string>(['bearer_token', 'basic_password']);
+
+type PlatformForm = Record<string, string>;
+
 export default function CIMonitoringSettings() {
   const { tr } = useI18n();
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [ciTypes, setCITypes] = useState<CIType[]>([]);
+
+  useEffect(() => {
+    void listCITypes()
+      .then((response) => setCITypes(response.items ?? []))
+      .catch(() => setCITypes([]));
+  }, [refreshToken]);
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-base font-semibold text-text">{tr('CI 监控', 'CI monitoring')}</h1>
-        <p className="mt-1 text-xs text-text-muted">
-          {tr(
-            '把 CI 类型绑定到全局 Grafana 仪表盘或 Prometheus 标签；不在此保存任何凭据。',
-            'Bind CI types to the global Grafana dashboard or Prometheus labels; no credentials are stored here.',
-          )}
-        </p>
-      </div>
-      {PROVIDERS.map((provider) => (
-        <div key={provider.value} className="space-y-4">
-          <ConnectionsCard provider={provider.value} label={tr(provider.zh, provider.en)} />
-          <LinksCard provider={provider.value} label={tr(provider.zh, provider.en)} />
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-base font-semibold text-text">{tr('CI 监控', 'CI monitoring')}</h1>
+          <p className="mt-1 max-w-2xl text-xs text-text-muted">
+            {tr(
+              '每个供应商是一个整体：连接、平台内部配置与 CI 链接都在同一张卡片内完成。',
+              'Each provider is one unit: connections, platform configuration, and CI links live in the same card.',
+            )}
+          </p>
         </div>
-      ))}
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          onClick={() => setRefreshToken((token) => token + 1)}
+          aria-label={tr('刷新全部', 'Refresh all')}
+        >
+          <RefreshCw size={12} />
+          {tr('刷新', 'Refresh')}
+        </Button>
+      </div>
+
+      <ProviderSection provider="grafana" ciTypes={ciTypes} refreshToken={refreshToken} />
+      <ProviderSection provider="prometheus" ciTypes={ciTypes} refreshToken={refreshToken} />
     </div>
   );
 }
 
-function ConnectionsCard({ provider, label }: { provider: Provider; label: string }) {
+function ProviderSection({
+  provider,
+  ciTypes,
+  refreshToken,
+}: {
+  provider: Provider;
+  ciTypes: CIType[];
+  refreshToken: number;
+}) {
   const { tr } = useI18n();
   const { confirmAction, alertAction, dialog } = useDialogs();
-  const [rows, setRows] = useState<MonitoringConnection[]>([]);
-  const [health, setHealth] = useState<Record<number, ConnectionHealth>>({});
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [editing, setEditing] = useState<MonitoringConnection | null>(null);
-  const [creating, setCreating] = useState(false);
+  const label = provider === 'grafana' ? 'Grafana' : 'Prometheus';
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const [connections, setConnections] = useState<MonitoringConnection[]>([]);
+  const [health, setHealth] = useState<Record<number, ConnectionHealth>>({});
+  const [connLoading, setConnLoading] = useState(true);
+  const [connErr, setConnErr] = useState<string | null>(null);
+  const [busyConn, setBusyConn] = useState<number | null>(null);
+
+  const [links, setLinks] = useState<CILink[]>([]);
+  const [linksLoading, setLinksLoading] = useState(true);
+  const [linksErr, setLinksErr] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+
+  const [editingConn, setEditingConn] = useState<MonitoringConnection | null>(null);
+  const [creatingConn, setCreatingConn] = useState(false);
+  const [configuringPlatform, setConfiguringPlatform] = useState(false);
+  const [editingLink, setEditingLink] = useState<CILink | null>(null);
+  const [creatingLink, setCreatingLink] = useState(false);
+
+  const loadConnections = useCallback(async () => {
+    setConnLoading(true);
     try {
-      const [connections, healthRows] = await Promise.all([
+      const [rows, healthRows] = await Promise.all([
         listMonitoringConnections(provider),
         monitoringConnectionsHealth(provider).catch(() => ({ items: [] as ConnectionHealth[], total: 0 })),
       ]);
-      setRows(connections.items ?? []);
+      setConnections(rows.items ?? []);
       setHealth(Object.fromEntries((healthRows.items ?? []).map((row) => [row.id, row])));
-      setErr(null);
+      setConnErr(null);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+      setConnErr(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
-      setLoading(false);
+      setConnLoading(false);
+    }
+  }, [provider]);
+
+  const loadLinks = useCallback(async () => {
+    setLinksLoading(true);
+    try {
+      const response = await listCILinks(provider);
+      setLinks(response.items ?? []);
+      setLinksErr(null);
+    } catch (e) {
+      setLinksErr(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setLinksLoading(false);
     }
   }, [provider]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadConnections();
+    void loadLinks();
+  }, [loadConnections, loadLinks, refreshToken]);
 
-  async function remove(row: MonitoringConnection) {
-    if (!(await confirmAction(tr(`删除连接「${row.name}」？`, `Delete connection “${row.name}”?`)))) return;
+  const typeName = useCallback(
+    (id: number) => {
+      const found = ciTypes.find((ciType) => ciType.id === id);
+      return found ? found.alias || found.name : `#${id}`;
+    },
+    [ciTypes],
+  );
+
+  const connectionName = useCallback(
+    (id?: number) => {
+      if (!id) return tr('平台内部', 'Platform');
+      return connections.find((conn) => conn.id === id)?.name ?? `#${id}`;
+    },
+    [connections, tr],
+  );
+
+  const visibleLinks = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return links;
+    return links.filter((link) => {
+      const name = typeName(link.ci_type_id).toLowerCase();
+      return name.includes(query) || String(link.ci_type_id) === query;
+    });
+  }, [links, search, typeName]);
+
+  const stats = useMemo(() => {
+    const platform = links.filter((link) => !link.connection_id).length;
+    const healthRows = Object.values(health);
+    return {
+      platform,
+      external: links.length - platform,
+      healthy: healthRows.length ? `${healthRows.filter((row) => row.ok).length}/${healthRows.length}` : '—',
+    };
+  }, [links, health]);
+
+  const platformEnabled = connections.find((conn) => conn.kind === 'internal')?.enabled ?? true;
+
+  async function toggleConnection(row: MonitoringConnection, enabled: boolean) {
+    setBusyConn(row.id);
     try {
-      await deleteMonitoringConnection(row.id);
-      await load();
+      if (row.kind === 'internal') {
+        await setPlatformConnectionEnabled(provider, enabled);
+      } else {
+        // auth_data is omitted so the stored credential is preserved.
+        await updateMonitoringConnection(provider, row.id, {
+          name: row.name,
+          base_url: row.base_url ?? '',
+          auth_type: (row.auth_type as 'none' | 'bearer' | 'basic') || 'none',
+          tls_insecure: row.tls_insecure,
+          enabled,
+          remark: row.remark ?? '',
+        });
+      }
+      await loadConnections();
     } catch (e) {
       await alertAction(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setBusyConn(null);
     }
   }
 
   async function probe(row: MonitoringConnection) {
     try {
       if (row.kind === 'internal') {
-        await load();
+        await loadConnections();
         return;
       }
       await testSavedMonitoringConnection(row.id);
-      await load();
+      await loadConnections();
+    } catch (e) {
+      await alertAction(e instanceof ApiError ? e.message : (e as Error).message);
+    }
+  }
+
+  async function removeConnection(row: MonitoringConnection) {
+    if (!(await confirmAction(tr(`删除连接「${row.name}」？`, `Delete connection “${row.name}”?`)))) return;
+    try {
+      await deleteMonitoringConnection(row.id);
+      await loadConnections();
+    } catch (e) {
+      await alertAction(e instanceof ApiError ? e.message : (e as Error).message);
+    }
+  }
+
+  async function removeLink(link: CILink) {
+    if (!(await confirmAction(tr('删除该监控链接？', 'Delete this monitoring link?')))) return;
+    try {
+      await deleteCILink(provider, link.ci_type_id);
+      await loadLinks();
     } catch (e) {
       await alertAction(e instanceof ApiError ? e.message : (e as Error).message);
     }
   }
 
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-text">{tr('连接管理', 'Connections')} · {label}</h2>
-          <p className="mt-1 text-xs text-text-muted">
-            {tr('「平台内部」读取 Settings → 集成 的全局配置；外部连接独立保存地址与加密凭据。', '“Platform” reads the global Settings → Integrations value; external connections store their own endpoint and encrypted credentials.')}
-          </p>
+    <Card className="p-5">
+      <div className="mb-1 flex items-center gap-2">
+        <MonitorPlay size={14} className="text-text-faint" />
+        <h2 className="text-sm font-semibold text-text">{tr(`${label} 监控`, `${label} monitoring`)}</h2>
+      </div>
+      <p className="mb-4 text-[11px] text-text-muted">
+        {provider === 'grafana'
+          ? tr(
+              '管理平台内部或外部 Grafana 连接，并把 CI 类型绑定到仪表盘变量；连接、配置和链接共用同一份设置。',
+              'Manage the platform or external Grafana connections and bind CI types to dashboard variables; connections, configuration, and links share one setup.',
+            )
+          : tr(
+              '管理平台内部或外部 Prometheus 连接，并把 CI 类型绑定到告警标签；连接、配置和链接共用同一份设置。',
+              'Manage the platform or external Prometheus connections and bind CI types to alert labels; connections, configuration, and links share one setup.',
+            )}
+      </p>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-xs font-medium text-text">{tr('连接', 'Connections')}</h3>
+          <span className="text-[10.5px] text-text-faint">
+            {tr('平台内部 + 外部实例', 'Platform + external instances')}
+          </span>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" type="button" onClick={() => void load()} disabled={loading}>
-            <RefreshCw size={12} className={loading ? 'animate-spin' : undefined} />
-            {tr('刷新', 'Refresh')}
-          </Button>
-          <Button variant="primary" size="sm" type="button" onClick={() => { setEditing(null); setCreating(true); }}>
-            <Plus size={12} />
-            {tr('新建外部连接', 'New external connection')}
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          onClick={() => { setEditingConn(null); setCreatingConn(true); }}
+        >
+          <Plus size={12} />
+          {tr('新建外部连接', 'New external connection')}
+        </Button>
       </div>
 
-      {err && <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">{err}</div>}
+      {connErr && (
+        <div className="mt-2 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] text-red-500 dark:text-red-300">
+          <div>{connErr}</div>
+          <Button variant="subtle" size="sm" type="button" className="mt-2" onClick={() => void loadConnections()}>
+            {tr('重试', 'Retry')}
+          </Button>
+        </div>
+      )}
 
-      {loading ? (
-        <p className="py-6 text-center text-xs text-text-faint">{tr('加载中…', 'Loading…')}</p>
-      ) : (
-        <div className="og-resource-table" data-variant="quiet">
-          <table className="w-full text-xs">
-            <thead>
-              <tr>
-                <th>{tr('名称', 'Name')}</th>
-                <th>{tr('类型', 'Kind')}</th>
-                <th>{tr('地址 / 认证', 'Endpoint / auth')}</th>
-                <th>{tr('启用', 'Enabled')}</th>
-                <th>{tr('健康', 'Health')}</th>
-                <th className="text-right">{tr('操作', 'Actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const healthRow = health[row.id];
-                return (
+      <div className="mt-2">
+        {connLoading && connections.length === 0 ? (
+          <p className="py-6 text-center text-[11px] text-text-faint">{tr('加载中…', 'Loading…')}</p>
+        ) : (
+          <div className="og-resource-table overflow-x-auto" data-variant="quiet">
+            <table className="w-full min-w-[680px] text-xs">
+              <thead>
+                <tr>
+                  <th>{tr('名称', 'Name')}</th>
+                  <th>{tr('类型', 'Kind')}</th>
+                  <th>{tr('地址 / 认证', 'Endpoint / auth')}</th>
+                  <th>{tr('健康', 'Health')}</th>
+                  <th>{tr('启用', 'Enabled')}</th>
+                  <th className="text-right">{tr('操作', 'Actions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {connections.map((row) => (
                   <tr key={`${row.kind}-${row.id}`}>
-                    <td className="font-medium text-text">{row.name}</td>
-                    <td>{row.kind === 'internal' ? <Chip tone="info">{tr('平台内部', 'Platform')}</Chip> : <Chip>{tr('外部', 'External')}</Chip>}</td>
-                    <td className="max-w-[26rem] truncate text-text-muted">
+                    <td className="whitespace-nowrap text-text">{row.name}</td>
+                    <td className="whitespace-nowrap">
+                      {row.kind === 'internal' ? (
+                        <Chip tone="info">{tr('平台内部', 'Platform')}</Chip>
+                      ) : (
+                        <Chip>{tr('外部', 'External')}</Chip>
+                      )}
+                    </td>
+                    <td
+                      className="max-w-[13rem] truncate font-mono text-[11px] text-text-muted"
+                      title={row.kind === 'internal'
+                        ? tr('Settings → 集成', 'Settings → Integrations')
+                        : `${row.base_url ?? ''}${row.auth_type && row.auth_type !== 'none' ? ` · ${row.auth_type}` : ''}`}
+                    >
                       {row.kind === 'internal'
                         ? tr('Settings → 集成', 'Settings → Integrations')
-                        : `${row.base_url ?? ''}${row.auth_type ? ` · ${row.auth_type}` : ''}`}
+                        : `${row.base_url ?? ''}${row.auth_type && row.auth_type !== 'none' ? ` · ${row.auth_type}` : ''}`}
                     </td>
-                    <td>{row.enabled ? <Chip tone="success">{tr('启用', 'On')}</Chip> : <Chip>{tr('停用', 'Off')}</Chip>}</td>
-                    <td>
-                      {healthRow ? (
-                        healthRow.ok ? (
-                          <span className="text-emerald-400">{tr('正常', 'OK')}</span>
-                        ) : (
-                          <span className="text-red-300" title={healthRow.error}>{tr('异常', 'Failed')}</span>
-                        )
-                      ) : (
-                        <span className="text-text-faint">—</span>
-                      )}
+                    <td><ConnectionHealthLabel row={row} health={health[row.id]} /></td>
+                    <td className="whitespace-nowrap">
+                      <Switch
+                        checked={row.enabled}
+                        disabled={busyConn === row.id}
+                        onCheckedChange={(checked) => void toggleConnection(row, checked)}
+                        aria-label={tr(`启用 ${row.name}`, `Enable ${row.name}`)}
+                      />
                     </td>
                     <td className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button variant="subtle" size="sm" type="button" onClick={() => void probe(row)}>
-                          {tr('测试', 'Test')}
-                        </Button>
-                        {row.kind === 'external' && (
+                        {row.kind === 'internal' ? (
                           <>
-                            <Button variant="ghost" size="sm" type="button" aria-label={tr('编辑', 'Edit')} onClick={() => { setCreating(false); setEditing(row); }}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              type="button"
+                              onClick={() => { setEditingConn(null); setCreatingConn(false); setConfiguringPlatform(true); }}
+                            >
+                              {tr('配置', 'Configure')}
+                            </Button>
+                            <Button variant="ghost" size="sm" type="button" onClick={() => void probe(row)}>
+                              {tr('测试', 'Test')}
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button variant="ghost" size="sm" type="button" onClick={() => void probe(row)}>
+                              {tr('测试', 'Test')}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              type="button"
+                              aria-label={tr('编辑', 'Edit')}
+                              onClick={() => { setConfiguringPlatform(false); setCreatingConn(false); setEditingConn(row); }}
+                            >
                               <Pencil size={12} />
                             </Button>
-                            <Button variant="dangerGhost" size="sm" type="button" aria-label={tr('删除', 'Delete')} onClick={() => void remove(row)}>
+                            <Button
+                              variant="dangerGhost"
+                              size="sm"
+                              type="button"
+                              aria-label={tr('删除', 'Delete')}
+                              onClick={() => void removeConnection(row)}
+                            >
                               <Trash2 size={12} />
                             </Button>
                           </>
@@ -209,28 +402,260 @@ function ConnectionsCard({ provider, label }: { provider: Provider; label: strin
                       </div>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="my-4 border-t border-border" />
+
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h3 className="text-xs font-medium text-text">{tr('监控链接', 'Monitoring links')}</h3>
+          <span className="text-[10.5px] text-text-faint">
+            {tr(`已配置 ${links.length}`, `${links.length} configured`)}
+            {' · '}{tr(`平台 ${stats.platform}`, `platform ${stats.platform}`)}
+            {' · '}{tr(`外部 ${stats.external}`, `external ${stats.external}`)}
+            {' · '}{tr(`连接健康 ${stats.healthy}`, `health ${stats.healthy}`)}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            aria-label={tr('搜索 CI 类型', 'Search CI types')}
+            placeholder={tr('搜索 CI 类型', 'Search CI types')}
+            className="w-40"
+          />
+          <Button
+            variant="primary"
+            size="sm"
+            type="button"
+            onClick={() => { setEditingLink(null); setCreatingLink(true); }}
+          >
+            <Plus size={12} />
+            {tr('新建链接', 'New link')}
+          </Button>
+        </div>
+      </div>
+
+      {linksErr && (
+        <div className="mt-2 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] text-red-500 dark:text-red-300">
+          <div>{linksErr}</div>
+          <Button variant="subtle" size="sm" type="button" className="mt-2" onClick={() => void loadLinks()}>
+            {tr('重试', 'Retry')}
+          </Button>
         </div>
       )}
 
-      {(creating || editing) && (
+      <div className="mt-2">
+        {linksLoading && links.length === 0 ? (
+          <p className="py-6 text-center text-[11px] text-text-faint">{tr('加载中…', 'Loading…')}</p>
+        ) : links.length === 0 ? (
+          <EmptyState
+            icon={MonitorPlay}
+            title={tr('尚未配置链接', 'No links yet')}
+            hint={tr(
+              '配置后，CMDB 实例详情会出现「监控」页签。',
+              'Once configured, CMDB instance details gain a Monitoring tab.',
+            )}
+            action={
+              <Button variant="primary" size="sm" type="button" onClick={() => { setEditingLink(null); setCreatingLink(true); }}>
+                {tr('新建链接', 'New link')}
+              </Button>
+            }
+          />
+        ) : visibleLinks.length === 0 ? (
+          <EmptyState
+            icon={MonitorPlay}
+            title={tr('没有匹配的 CI 类型', 'No matching CI types')}
+            hint={tr('当前类型下没有与搜索词匹配的链接。', 'No link under this provider matches the search.')}
+            action={
+              <Button variant="subtle" size="sm" type="button" onClick={() => setSearch('')}>
+                {tr('清除搜索', 'Clear search')}
+              </Button>
+            }
+          />
+        ) : (
+          <div className="og-resource-table overflow-x-auto" data-variant="quiet">
+            <table className="w-full min-w-[720px] text-xs">
+              <thead>
+                <tr>
+                  <th>{tr('CI 类型', 'CI type')}</th>
+                  <th>{tr('连接', 'Connection')}</th>
+                  <th>{provider === 'grafana' ? tr('仪表盘 / 变量映射', 'Dashboard / variables') : tr('标签 / 匹配条件', 'Labels / matchers')}</th>
+                  <th>{tr('状态', 'Status')}</th>
+                  <th className="text-right">{tr('操作', 'Actions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleLinks.map((link) => (
+                  <tr key={link.ci_type_id}>
+                    <td>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-text">{typeName(link.ci_type_id)}</span>
+                        <span className="text-[10.5px] text-text-faint">
+                          {ciTypes.find((ciType) => ciType.id === link.ci_type_id)?.name ?? 'ci'} · #{link.ci_type_id}
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      {link.connection_id ? (
+                        <Chip>{connectionName(link.connection_id)}</Chip>
+                      ) : (
+                        <Chip tone={platformEnabled ? 'info' : 'default'}>
+                          {platformEnabled ? tr('平台内部', 'Platform') : tr('平台内部 · 已停用', 'Platform · disabled')}
+                        </Chip>
+                      )}
+                    </td>
+                    <td className="max-w-[24rem]">
+                      {provider === 'grafana' ? (
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-[11px] text-text-muted" title={`${link.dashboard_uid ?? ''}${link.dashboard_slug ? ` / ${link.dashboard_slug}` : ''}`}>
+                            {link.dashboard_uid}
+                            {link.dashboard_slug ? ` / ${link.dashboard_slug}` : ''}
+                          </div>
+                          {link.var_mapping?.length ? (
+                            <div className="mt-0.5 truncate text-[10.5px] text-text-faint">
+                              {link.var_mapping.map((mapping) => `var-${mapping.var_name} ← ${mapping.ci_attribute}`).join(' · ')}
+                            </div>
+                          ) : (
+                            <Chip tone="warning" dense className="mt-1">{tr('变量未映射', 'No variables')}</Chip>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-[11px] text-text-muted">
+                            {link.label_mapping?.length
+                              ? link.label_mapping.map((mapping) => `${mapping.prom_label} ← ${mapping.ci_attribute}`).join(' · ')
+                              : '—'}
+                          </div>
+                          {link.extra_matchers?.length ? (
+                            <div className="mt-0.5 truncate text-[10.5px] text-text-faint">
+                              {link.extra_matchers.map((matcher) => `${matcher.label}${matcherSymbol(matcher.op)}${matcher.value}`).join(' · ')}
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {link.enabled ? (
+                        <Chip tone="success">{tr('启用', 'On')}</Chip>
+                      ) : (
+                        <Chip>{tr('停用', 'Off')}</Chip>
+                      )}
+                    </td>
+                    <td className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          type="button"
+                          aria-label={tr('编辑', 'Edit')}
+                          onClick={() => { setCreatingLink(false); setEditingLink(link); }}
+                        >
+                          <Pencil size={12} />
+                        </Button>
+                        <Button
+                          variant="dangerGhost"
+                          size="sm"
+                          type="button"
+                          aria-label={tr('删除', 'Delete')}
+                          onClick={() => void removeLink(link)}
+                        >
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <p className="mt-3 text-[10.5px] text-text-faint">
+        {tr(
+          '链接决定 CMDB 实例详情是否出现「监控」页签；保存后立即生效。',
+          'Links decide whether a CMDB instance detail shows the Monitoring tab; changes apply immediately.',
+        )}
+      </p>
+
+      {(creatingConn || editingConn) && (
         <ConnectionDialog
           provider={provider}
-          connection={editing}
-          onClose={() => { setCreating(false); setEditing(null); }}
+          connection={editingConn}
+          onClose={() => { setCreatingConn(false); setEditingConn(null); }}
           onSaved={async () => {
-            setCreating(false);
-            setEditing(null);
-            await load();
+            setCreatingConn(false);
+            setEditingConn(null);
+            await loadConnections();
+          }}
+        />
+      )}
+      {configuringPlatform && (
+        <PlatformConnectionDialog
+          provider={provider}
+          enabled={platformEnabled}
+          onClose={() => setConfiguringPlatform(false)}
+          onSaved={async () => {
+            await loadConnections();
+            setConfiguringPlatform(false);
+          }}
+        />
+      )}
+      {(creatingLink || editingLink) && (
+        <LinkDialog
+          provider={provider}
+          link={editingLink}
+          ciTypes={ciTypes}
+          connections={connections}
+          platformEnabled={platformEnabled}
+          onClose={() => { setCreatingLink(false); setEditingLink(null); }}
+          onSaved={async () => {
+            setCreatingLink(false);
+            setEditingLink(null);
+            await loadLinks();
           }}
         />
       )}
       {dialog}
     </Card>
   );
+}
+
+function ConnectionHealthLabel({ row, health }: { row: MonitoringConnection; health?: ConnectionHealth }) {
+  const { tr } = useI18n();
+  if (!row.enabled) {
+    return <span className="text-[10.5px] text-text-faint">{tr('未启用', 'Disabled')}</span>;
+  }
+  if (!health) {
+    return <span className="text-[10.5px] text-text-faint">—</span>;
+  }
+  if (health.ok) {
+    return (
+      <span className="inline-flex items-center gap-1 whitespace-nowrap text-[10.5px] text-emerald-500">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+        {tr('正常', 'OK')}
+      </span>
+    );
+  }
+  return (
+    <span title={health.error} className="inline-flex items-center gap-1 whitespace-nowrap text-[10.5px] text-amber-500">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+      {row.kind === 'internal' ? tr('需配置', 'Needs setup') : tr('异常', 'Failed')}
+    </span>
+  );
+}
+
+function matcherSymbol(op: string) {
+  if (op === 'ne') return '!=';
+  if (op === 'regex') return '=~';
+  return '=';
 }
 
 function ConnectionDialog({
@@ -393,151 +818,290 @@ function ConnectionDialog({
   );
 }
 
-function LinksCard({ provider, label }: { provider: Provider; label: string }) {
+function PlatformConnectionDialog({
+  provider,
+  enabled,
+  onClose,
+  onSaved,
+}: {
+  provider: Provider;
+  enabled: boolean;
+  onClose(): void;
+  onSaved(): Promise<void>;
+}) {
   const { tr } = useI18n();
-  const { confirmAction, alertAction, dialog } = useDialogs();
-  const [rows, setRows] = useState<CILink[]>([]);
-  const [ciTypes, setCITypes] = useState<CIType[]>([]);
-  const [connections, setConnections] = useState<MonitoringConnection[]>([]);
+  const category = provider;
+  const keys = provider === 'grafana' ? GRAFANA_KEYS : PROM_KEYS;
+  const sensitive = provider === 'grafana' ? GRAFANA_SENSITIVE : PROM_SENSITIVE;
+  const [server, setServer] = useState<PlatformForm>({});
+  const [draft, setDraft] = useState<PlatformForm>({});
+  const [enabledDraft, setEnabledDraft] = useState(enabled);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [editing, setEditing] = useState<CILink | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [ok, setOk] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setErr(null);
     try {
-      const [links, types, conns] = await Promise.all([
-        listCILinks(provider),
-        listCITypes().catch(() => ({ items: [] as CIType[], total: 0 })),
-        listMonitoringConnections(provider).catch(() => ({ items: [] as MonitoringConnection[], total: 0 })),
-      ]);
-      setRows(links.items ?? []);
-      setCITypes(types.items ?? []);
-      setConnections(conns.items ?? []);
-      setErr(null);
+      const response = await listSettings(category);
+      const next: PlatformForm = {};
+      for (const key of keys) next[key] = '';
+      for (const item of response.items ?? []) {
+        if (!(keys as readonly string[]).includes(item.key)) continue;
+        if (!sensitive.has(item.key)) next[item.key] = item.value ?? '';
+      }
+      await Promise.all(
+        (response.items ?? [])
+          .filter((item) => sensitive.has(item.key) && (item.value ?? '') !== '')
+          .map(async (item) => {
+            try {
+              next[item.key] = (await revealSetting(category, item.key)).value ?? '';
+            } catch {
+              /* leave it empty so a fresh credential can be pasted */
+            }
+          }),
+      );
+      setServer(next);
+      setDraft(next);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [provider]);
+  }, [category, keys, sensitive]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const typeName = (id: number) => {
-    const found = ciTypes.find((ciType) => ciType.id === id);
-    return found ? found.alias || found.name : `#${id}`;
-  };
-  const connectionName = (id?: number) =>
-    id ? connections.find((conn) => conn.id === id)?.name ?? `#${id}` : tr('平台内部', 'Platform');
+  const dirty = keys.some((key) => (draft[key] ?? '') !== (server[key] ?? ''));
 
-  async function remove(link: CILink) {
-    if (!(await confirmAction(tr(`删除 ${label} 链接？`, `Delete the ${label} link?`)))) return;
+  function update(key: string, value: string) {
+    setOk(null);
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function probe() {
+    setTesting(true);
+    setErr(null);
+    setOk(null);
     try {
-      await deleteCILink(provider, link.ci_type_id);
-      await load();
+      if (provider === 'grafana') {
+        await testGrafanaConnection({
+          root_url: draft.root_url ?? '',
+          sa_token: draft.sa_token ?? '',
+          api_key: draft.api_key ?? '',
+          org_id: draft.org_id ?? '',
+          tls_insecure: draft.tls_insecure === 'true',
+        });
+      } else {
+        await testPromConnection({
+          query_url: draft.query_url ?? '',
+          remote_write_url: draft.remote_write_url ?? '',
+          bearer_token: draft.bearer_token ?? '',
+          basic_user: draft.basic_user ?? '',
+          basic_password: draft.basic_password ?? '',
+          tls_insecure: draft.tls_insecure === 'true',
+        });
+      }
+      setOk(tr('连接测试通过', 'Connection test passed'));
     } catch (e) {
-      await alertAction(e instanceof ApiError ? e.message : (e as Error).message);
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setTesting(false);
     }
   }
 
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    try {
+      for (const key of keys) {
+        if ((draft[key] ?? '') === (server[key] ?? '')) continue;
+        await setSetting(category, key, draft[key] ?? '', sensitive.has(key));
+      }
+      if (enabledDraft !== enabled) {
+        await setPlatformConnectionEnabled(provider, enabledDraft);
+      }
+      if (provider === 'grafana') invalidateGrafanaRootCache();
+      await onSaved();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const title = provider === 'grafana' ? tr('配置平台 Grafana', 'Configure platform Grafana') : tr('配置平台 Prometheus', 'Configure platform Prometheus');
+
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-text">{label}</h2>
-          <p className="mt-1 text-xs text-text-muted">
-            {provider === 'grafana'
-              ? tr('按 CI 属性填充仪表盘变量，打开全局 Grafana 深链。', 'Fill dashboard variables from CI attributes and open a deep link to the global Grafana.')
-              : tr('按 CI 属性匹配 Prometheus 标签，只展示全局 Prometheus 的活动告警。', 'Match Prometheus labels from CI attributes and show the global Prometheus active alerts.')}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" type="button" onClick={() => void load()} disabled={loading}>
-            <RefreshCw size={12} className={loading ? 'animate-spin' : undefined} />
-            {tr('刷新', 'Refresh')}
-          </Button>
-          <Button variant="primary" size="sm" type="button" onClick={() => { setEditing(null); setCreating(true); }}>
-            <Plus size={12} />
-            {tr('新建链接', 'New link')}
-          </Button>
-        </div>
-      </div>
-
-      {err && <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">{err}</div>}
-
-      {loading ? (
-        <p className="py-6 text-center text-xs text-text-faint">{tr('加载中…', 'Loading…')}</p>
-      ) : rows.length === 0 ? (
-        <EmptyStateCard
-          icon={MonitorPlay}
-          title={tr('尚未配置链接', 'No links yet')}
-          hint={tr('配置后，CMDB 实例详情会出现「监控」页签。', 'Once configured, CMDB instance details gain a Monitoring tab.')}
-          action={
-            <Button variant="primary" size="sm" type="button" onClick={() => { setEditing(null); setCreating(true); }}>
-              {tr('新建链接', 'New link')}
+    <Modal
+      open
+      onClose={onClose}
+      title={title}
+      size="lg"
+      footer={
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
+          <Link to="/settings/integrations" className="text-[11px] text-text-muted underline-offset-2 hover:text-text hover:underline">
+            {tr('打开设置 → 集成', 'Open Settings → Integrations')}
+          </Link>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button variant="outline" size="sm" type="button" onClick={() => void probe()} disabled={loading || testing || saving}>
+              {testing ? tr('测试中…', 'Testing…') : tr('测试连接', 'Test connection')}
             </Button>
-          }
-        />
-      ) : (
-        <div className="og-resource-table" data-variant="quiet">
-          <table className="w-full text-xs">
-            <thead>
-              <tr>
-                <th>{tr('CI 类型', 'CI type')}</th>
-                <th>{tr('连接', 'Connection')}</th>
-                <th>{tr('配置', 'Mapping')}</th>
-                <th>{tr('启用', 'Enabled')}</th>
-                <th className="text-right">{tr('操作', 'Actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((link) => (
-                <tr key={link.ci_type_id}>
-                  <td className="text-text">{typeName(link.ci_type_id)}</td>
-                  <td className="text-text-muted">{connectionName(link.connection_id)}</td>
-                  <td className="max-w-[28rem] truncate text-text-muted">
-                    {provider === 'grafana'
-                      ? `${link.dashboard_uid ?? ''}${link.dashboard_slug ? ` / ${link.dashboard_slug}` : ''}`
-                      : `${link.label_mapping?.length ?? 0} labels · ${link.extra_matchers?.length ?? 0} matchers`}
-                  </td>
-                  <td>{link.enabled ? <Chip tone="success">{tr('启用', 'On')}</Chip> : <Chip>{tr('停用', 'Off')}</Chip>}</td>
-                  <td className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="sm" type="button" aria-label={tr('编辑', 'Edit')} onClick={() => { setCreating(false); setEditing(link); }}>
-                        <Pencil size={12} />
-                      </Button>
-                      <Button variant="dangerGhost" size="sm" type="button" aria-label={tr('删除', 'Delete')} onClick={() => void remove(link)}>
-                        <Trash2 size={12} />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <Button variant="ghost" size="sm" type="button" onClick={onClose} disabled={saving}>
+              {tr('取消', 'Cancel')}
+            </Button>
+            <Button variant="primary" size="sm" type="button" onClick={() => void save()} disabled={loading || saving || testing}>
+              {saving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+            </Button>
+          </div>
         </div>
-      )}
-
-      {(creating || editing) && (
-        <LinkDialog
-          provider={provider}
-          link={editing}
-          ciTypes={ciTypes}
-          connections={connections}
-          onClose={() => { setCreating(false); setEditing(null); }}
-          onSaved={async () => {
-            setCreating(false);
-            setEditing(null);
-            await load();
-          }}
-        />
-      )}
-      {dialog}
-    </Card>
+      }
+    >
+      <div className="space-y-3">
+        {err && <div role="alert" className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-300">{err}</div>}
+        {ok && <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300">{ok}</div>}
+        <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-[11px] leading-relaxed text-text-muted">
+          {tr(
+            '与 设置 → 集成 共用同一份配置；保存后平台内所有使用该连接的监控链接立即生效。',
+            'Shares one configuration with Settings → Integrations; saving affects every platform-backed monitoring link immediately.',
+          )}
+        </div>
+        {loading ? (
+          <p className="py-6 text-center text-xs text-text-faint">{tr('加载中…', 'Loading…')}</p>
+        ) : provider === 'grafana' ? (
+          <>
+            <div>
+              <Label htmlFor="ciobs-platform-root">{tr('Root URL', 'Root URL')}</Label>
+              <Input
+                id="ciobs-platform-root"
+                value={draft.root_url ?? ''}
+                onChange={(event) => update('root_url', event.target.value)}
+                className="font-mono"
+                placeholder="http://grafana:3000/grafana"
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="ciobs-platform-sa-token">{tr('Service account token', 'Service account token')}</Label>
+                <Input
+                  id="ciobs-platform-sa-token"
+                  type="password"
+                  value={draft.sa_token ?? ''}
+                  onChange={(event) => update('sa_token', event.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ciobs-platform-api-key">{tr('API Key', 'API key')}</Label>
+                <Input
+                  id="ciobs-platform-api-key"
+                  type="password"
+                  value={draft.api_key ?? ''}
+                  onChange={(event) => update('api_key', event.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+            <p className="text-[10.5px] text-text-faint">
+              {tr('两种凭据二选一，Service account token 优先。', 'Use either credential; the service account token takes precedence.')}
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="ciobs-platform-org">{tr('Org ID', 'Org ID')}</Label>
+                <Input
+                  id="ciobs-platform-org"
+                  value={draft.org_id ?? ''}
+                  onChange={(event) => update('org_id', event.target.value)}
+                />
+              </div>
+              <label className="flex items-end gap-2 pb-2 text-xs text-text-muted">
+                <Switch
+                  checked={draft.tls_insecure === 'true'}
+                  onCheckedChange={(checked) => update('tls_insecure', checked ? 'true' : 'false')}
+                  aria-label={tr('跳过 TLS 校验', 'Skip TLS verification')}
+                />
+                {tr('跳过 TLS 校验', 'Skip TLS verification')}
+              </label>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <Label htmlFor="ciobs-platform-query">{tr('Query URL', 'Query URL')}</Label>
+              <Input
+                id="ciobs-platform-query"
+                value={draft.query_url ?? ''}
+                onChange={(event) => update('query_url', event.target.value)}
+                className="font-mono"
+                placeholder="http://prometheus:9090/prometheus"
+              />
+            </div>
+            <div>
+              <Label htmlFor="ciobs-platform-bearer">{tr('Bearer token', 'Bearer token')}</Label>
+              <Input
+                id="ciobs-platform-bearer"
+                type="password"
+                value={draft.bearer_token ?? ''}
+                onChange={(event) => update('bearer_token', event.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="ciobs-platform-basic-user">{tr('Basic 用户名', 'Basic username')}</Label>
+                <Input
+                  id="ciobs-platform-basic-user"
+                  value={draft.basic_user ?? ''}
+                  onChange={(event) => update('basic_user', event.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ciobs-platform-basic-pass">{tr('Basic 密码', 'Basic password')}</Label>
+                <Input
+                  id="ciobs-platform-basic-pass"
+                  type="password"
+                  value={draft.basic_password ?? ''}
+                  onChange={(event) => update('basic_password', event.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-text-muted">
+              <Switch
+                checked={draft.tls_insecure === 'true'}
+                onCheckedChange={(checked) => update('tls_insecure', checked ? 'true' : 'false')}
+                aria-label={tr('跳过 TLS 校验', 'Skip TLS verification')}
+              />
+              {tr('跳过 TLS 校验', 'Skip TLS verification')}
+            </label>
+          </>
+        )}
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
+          <div>
+            <div className="text-xs text-text">{tr('启用该连接', 'Enable this connection')}</div>
+            <div className="mt-0.5 text-[10.5px] text-text-faint">
+              {tr('停用后，使用平台连接的监控链接不再展示仪表盘或活动告警。', 'When disabled, monitoring links backed by the platform connection show no dashboard or active alerts.')}
+            </div>
+          </div>
+          <Switch
+            checked={enabledDraft}
+            onCheckedChange={setEnabledDraft}
+            aria-label={tr('启用该连接', 'Enable this connection')}
+          />
+        </div>
+        {dirty && (
+          <p className="text-[10.5px] text-text-faint">
+            {tr('保存只写入有改动的配置项。', 'Only changed settings are written on save.')}
+          </p>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -546,6 +1110,7 @@ function LinkDialog({
   link,
   ciTypes,
   connections,
+  platformEnabled,
   onClose,
   onSaved,
 }: {
@@ -553,6 +1118,7 @@ function LinkDialog({
   link: CILink | null;
   ciTypes: CIType[];
   connections: MonitoringConnection[];
+  platformEnabled: boolean;
   onClose(): void;
   onSaved(): Promise<void>;
 }) {
@@ -662,7 +1228,12 @@ function LinkDialog({
               value={connectionID}
               onValueChange={setConnectionID}
               options={[
-                { value: '0', label: tr('平台内部', 'Platform') },
+                {
+                  value: '0',
+                  label: platformEnabled
+                    ? tr('平台内部', 'Platform')
+                    : tr('平台内部（已停用）', 'Platform (disabled)'),
+                },
                 ...connections
                   .filter((conn) => conn.kind === 'external' && conn.enabled)
                   .map((conn) => ({ value: String(conn.id), label: conn.name })),
@@ -679,6 +1250,15 @@ function LinkDialog({
             {tr('启用', 'Enabled')}
           </label>
         </div>
+
+        {connectionID === '0' && !platformEnabled && (
+          <p className="text-[10.5px] text-amber-500">
+            {tr(
+              '平台连接已停用；请先在连接表中启用，或选择一个外部连接。',
+              'The platform connection is disabled; enable it in the connection table or choose an external connection.',
+            )}
+          </p>
+        )}
 
         {provider === 'grafana' ? (
           <>

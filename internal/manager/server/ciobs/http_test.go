@@ -36,6 +36,18 @@ type testProm struct{ alerts []promquery.Alert }
 
 func (p testProm) Alerts(context.Context) ([]promquery.Alert, error) { return p.alerts, nil }
 
+type testToggles struct{ values map[string]string }
+
+func (t *testToggles) Get(_ context.Context, category, key string) (string, bool, error) {
+	value, ok := t.values[category+"/"+key]
+	return value, ok, nil
+}
+
+func (t *testToggles) Set(_ context.Context, category, key, value string, _ bool) error {
+	t.values[category+"/"+key] = value
+	return nil
+}
+
 type testCrypto struct{}
 
 func (testCrypto) Encrypt(plain string) (string, error) { return "enc:" + plain, nil }
@@ -62,6 +74,7 @@ func newRouter(t *testing.T, role string) (*chi.Mux, *ciobsservice.Service) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	uc.SetCrypto(testCrypto{})
+	uc.SetPlatformToggles(&testToggles{values: map[string]string{}})
 	service := ciobsservice.New(uc)
 	handler := ciobsserver.NewHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	router := chi.NewRouter()
@@ -211,6 +224,37 @@ func TestMonitoringConnectionsInternalAndExternal(t *testing.T) {
 	rec = do(t, admin, http.MethodDelete, "/v1/observability/monitoring-connections/"+formatID(created.ID), nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestPlatformConnectionCanBeToggled(t *testing.T) {
+	admin, _ := newRouter(t, "admin")
+	rec := do(t, admin, http.MethodPut, "/v1/observability/monitoring-connections/platform?provider=grafana", map[string]any{"enabled": false})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("toggle status = %d body=%s", rec.Code, rec.Body)
+	}
+	view := decode[ciobsbiz.ConnectionView](t, rec)
+	if view.Enabled || view.Kind != "internal" {
+		t.Fatalf("view = %+v", view)
+	}
+
+	rec = do(t, admin, http.MethodGet, "/v1/observability/monitoring-connections?provider=grafana", nil)
+	rows := decode[struct {
+		Items []ciobsbiz.ConnectionView `json:"items"`
+	}](t, rec)
+	if len(rows.Items) != 1 || rows.Items[0].Enabled {
+		t.Fatalf("rows = %+v", rows.Items)
+	}
+
+	rec = do(t, admin, http.MethodPut, "/v1/observability/ci-links/grafana/3", map[string]any{"dashboard_uid": "dash"})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("link status = %d body=%s", rec.Code, rec.Body)
+	}
+
+	user, _ := newRouter(t, "user")
+	rec = do(t, user, http.MethodPut, "/v1/observability/monitoring-connections/platform?provider=grafana", map[string]any{"enabled": true})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("user status = %d body=%s", rec.Code, rec.Body)
 	}
 }
 

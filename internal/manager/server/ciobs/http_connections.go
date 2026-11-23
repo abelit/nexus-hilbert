@@ -1,6 +1,7 @@
 package ciobs
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,16 +12,19 @@ import (
 	biz "github.com/ongridio/ongrid/internal/manager/biz/ciobs"
 	auditmodel "github.com/ongridio/ongrid/internal/manager/model/audit"
 	auditmw "github.com/ongridio/ongrid/internal/manager/server/middleware"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
-// Connection management: the internal connection is a read-only projection of
-// the platform integration; external connections are admin-managed.
+// Connection management: the internal connection projects the platform
+// integration, and can be enabled/configured without touching its credentials;
+// external connections are admin-managed.
 
 func (h *Handler) registerConnections(r chi.Router) {
 	r.Get("/v1/observability/monitoring-connections", h.listConnections)
 	r.Post("/v1/observability/monitoring-connections", h.saveConnection)
 	r.Get("/v1/observability/monitoring-connections/health", h.connectionsHealth)
 	r.Post("/v1/observability/monitoring-connections/test", h.testConnection)
+	r.Put("/v1/observability/monitoring-connections/platform", h.setPlatformConnection)
 	r.Put("/v1/observability/monitoring-connections/{id}", h.updateConnection)
 	r.Delete("/v1/observability/monitoring-connections/{id}", h.deleteConnection)
 	r.Post("/v1/observability/monitoring-connections/{id}/test", h.testSavedConnection)
@@ -93,6 +97,39 @@ func (h *Handler) saveConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	auditConnection(r, auditmodel.ActionSettingUpdate, view, "create")
 	writeJSON(w, http.StatusCreated, view)
+}
+
+type platformToggleDTO struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// setPlatformConnection toggles the internal (platform) connection without
+// touching the global integration credentials.
+func (h *Handler) setPlatformConnection(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	provider := strings.TrimSpace(r.URL.Query().Get("provider"))
+	var in platformToggleDTO
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Enabled == nil {
+		writeErr(w, fmt.Errorf("%w: enabled is required", errs.ErrInvalid))
+		return
+	}
+	view, err := h.svc.SetInternalEnabled(r.Context(), provider, *in.Enabled)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	auditmw.SetAuditEvent(r, bizaudit.Event{
+		Action: auditmodel.ActionSettingUpdate, ResourceType: auditmodel.ResourceSetting,
+		ResourceID: "ci-monitoring-connection/0", ResourceName: view.Name,
+		Status: auditmodel.StatusSuccess,
+		Payload: map[string]any{"provider": view.Provider, "kind": view.Kind, "verb": "toggle", "enabled": view.Enabled},
+	})
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (h *Handler) updateConnection(w http.ResponseWriter, r *http.Request) {

@@ -30,9 +30,12 @@ Prometheus 设置，以及两套「历史设置」。迁移评估发现：
    新增 `ci_monitoring_links` 仅保存「CI 类型 → Grafana 仪表盘 UID / Prometheus 标签」映射，
    连接地址与凭据在 `ci_monitoring_connections`（内部连接不落表）。不实现 Grafana 反向代理，
    也不在全局集成上做多连接。
-   CI 监控连接支持 **内部**（平台全局集成，只读投影，不落表）与 **外部**（管理员命名的
-   Grafana/Prometheus，独立地址与 secretbox 加密凭据，支持 test/health）；链接通过可空
-   `connection_id` 选择，0 表示内部。外部连接同样不做反向代理。
+   CI 监控连接支持 **内部**（平台全局集成，可在 CI 监控页编辑并写回 `system_settings`，
+   不新建连接表；启用/停用状态存 `system_settings` 的 `ci_monitoring` 类别）与 **外部**
+   （管理员命名的 Grafana/Prometheus，独立地址与 secretbox 加密凭据，支持 test/health）；
+   链接通过可空 `connection_id` 选择，0 表示内部。停用内部连接后，解析返回
+   `connection_disabled`，保存/预览指向它的链接会被拒绝。外部连接同样不做反向代理。页面按
+   供应商各一张卡片，连接、内部配置与链接在同一张卡片内完成，不拆成左右栏或供应商页签。
 5. **CI 解析走调用方 JWT**。`cmd/ongrid` 用现有 CMDB HTTP 客户端实现 `CMDBReader`；后台 RCA /
    工作流没有调用者时继续 fail-closed，不引入服务账号。CMDB 不可用时，全局中心仍工作，
    CI 页签/映射预览降级为 `cmdb_unavailable`。
@@ -58,7 +61,8 @@ Prometheus 设置，以及两套「历史设置」。迁移评估发现：
 - ITSM 上游忽略 `instance_status` 参数，状态筛选走 `filter=form_data.instanceStatus:eq:...`
   语法；这是有意的行为修正，不追求与 Cantor 的坏行为兼容。
 - 只读意味着没有外部 ack/关闭；如未来需要写回，必须单独设计权限、审计与上游幂等语义。
-- `ci_monitoring_links` 只引用全局集成，因此改 Grafana/Prom 地址仍在 Settings → 集成 一处完成。
+- 平台内部连接的地址与凭据只有一份（`system_settings`），可在 Settings → 集成 或 CI 监控页的
+  「配置」中修改；外部连接各自保存，不会互相覆盖。
 - 本决策不覆盖 Cantor 的工作流告警轮询、知识库同步或报告事实；这些属于 Cantor 自身自动化，
   需要时另立需求。
 

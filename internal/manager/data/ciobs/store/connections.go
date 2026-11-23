@@ -40,7 +40,9 @@ func (r *Repo) CreateConnection(ctx context.Context, conn *model.Connection) err
 }
 
 func (r *Repo) UpdateConnection(ctx context.Context, conn *model.Connection) error {
-	if err := r.db.WithContext(ctx).Save(conn).Error; err != nil {
+	// Callers build the row without timestamps; omit created_at or MySQL
+	// strict mode rejects the zero datetime on every edit.
+	if err := r.db.WithContext(ctx).Omit("created_at").Save(conn).Error; err != nil {
 		if isDuplicate(err) {
 			return fmt.Errorf("%w: connection %q already exists for %s", errs.ErrConflict, conn.Name, conn.Provider)
 		}
