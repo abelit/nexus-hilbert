@@ -113,7 +113,10 @@ func relationStub() *attrStub {
 	idc := typeRow(20, "idc")
 	idc.UniqueID = 2
 	stub.seedType(host).seedType(idc)
-	rt := citypemodel.RelationType{Name: "runs_on", Color: "#abc"}
+	rt := citypemodel.RelationType{
+		Name: "runs_on", Color: "#abc",
+		DisplayNameZH: "运行于", DisplayNameEN: "Runs on",
+	}
 	rt.ID = 5
 	stub.relationTypes[5] = rt
 	return stub
@@ -201,6 +204,11 @@ func TestListTypeRelationsShape(t *testing.T) {
 	}
 	if edge.Parent.RelationType.Name != "runs_on" || edge.Parent.RelationType.Color != "#abc" {
 		t.Fatalf("relation type = %+v, want the dictionary entry resolved", edge.Parent.RelationType)
+	}
+	// The console localises the label, so the ref carries the display names
+	// with the rest of the dictionary entry.
+	if edge.Parent.RelationType.DisplayNameZH != "运行于" || edge.Parent.RelationType.DisplayNameEN != "Runs on" {
+		t.Fatalf("relation type display names = %+v", edge.Parent.RelationType)
 	}
 	// The ctr_id is what the console needs to address the write endpoints,
 	// which is why every rendered edge carries it.

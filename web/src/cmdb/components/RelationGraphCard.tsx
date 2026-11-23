@@ -29,6 +29,7 @@ import {
   layoutRelationGraph,
   mergeExpansion,
 } from '../lib/relation-graph';
+import { relationTypeLabel } from '../lib/relation-type-label';
 import { InstanceDetailPeek } from './InstanceDetailPeek';
 
 // The relation graph the assistant draws inline.
@@ -228,7 +229,7 @@ function GraphCanvas({
 }
 
 export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const [current, setCurrent] = useState(graph);
   const [collapsed, setCollapsed] = useState(false);
   const [busyID, setBusyID] = useState<number | null>(null);
@@ -257,14 +258,21 @@ export function RelationGraphCard({ graph }: { graph: RelationGraph }) {
           for (const relation of rows) {
             labelMap.current.set(
               `${relation.parent.type.id}:${relation.child.type.id}`,
-              relation.parent.relation_type.name,
+              relationTypeLabel(relation.parent.relation_type, locale),
             );
           }
         })
         .catch(() => undefined);
     }
     await labelsLoaded.current;
-  }, []);
+  }, [locale]);
+
+  // The cached labels are language-specific: a locale switch must rebuild them
+  // rather than leave the old language on every edge.
+  useEffect(() => {
+    labelMap.current.clear();
+    labelsLoaded.current = null;
+  }, [locale]);
 
   const expand = useCallback(
     async (node: RelationNode) => {

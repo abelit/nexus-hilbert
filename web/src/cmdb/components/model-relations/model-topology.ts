@@ -2,6 +2,7 @@ import dagre from '@dagrejs/dagre';
 
 import type { CIType, RelatedType } from '../../api/citype';
 import type { ModelGroup } from '../../api/preferences';
+import { relationTypeLabel } from '../../lib/relation-type-label';
 
 // The model-relations graph, with no React in it.
 //
@@ -84,13 +85,14 @@ function edgeFrom(
   source: number,
   target: number,
   direction: 'in' | 'out',
+  locale: string,
 ): ModelEdge {
   return {
     key: `${source}-${target}-${relation.ctr_id}`,
     source,
     target,
     relationId: relation.ctr_id,
-    relationName: relation.relation_type.name || String(relation.relation_type.id),
+    relationName: relationTypeLabel(relation.relation_type, locale) || String(relation.relation_type.id),
     relationColor: relation.relation_type.color || EDGE_FALLBACK_COLOR,
     constraint: relation.constraint,
     direction,
@@ -127,6 +129,7 @@ export function createInitialGraph(
   parents: RelatedType[],
   children: RelatedType[],
   colors: Map<number, string>,
+  locale = 'zh-CN',
 ): ModelGraph {
   const nodes = new Map<number, ModelNode>();
   const edges: ModelEdge[] = [];
@@ -137,7 +140,7 @@ export function createInitialGraph(
     if (!nodes.has(relation.type.id)) {
       nodes.set(relation.type.id, nodeFrom(relation.type, 'left', 1, colors));
     }
-    const edge = edgeFrom(relation, relation.type.id, center.id, 'in');
+    const edge = edgeFrom(relation, relation.type.id, center.id, 'in', locale);
     if (!seen.has(edge.key)) {
       seen.add(edge.key);
       edges.push(edge);
@@ -147,7 +150,7 @@ export function createInitialGraph(
     if (!nodes.has(relation.type.id)) {
       nodes.set(relation.type.id, nodeFrom(relation.type, 'right', 1, colors));
     }
-    const edge = edgeFrom(relation, center.id, relation.type.id, 'out');
+    const edge = edgeFrom(relation, center.id, relation.type.id, 'out', locale);
     if (!seen.has(edge.key)) {
       seen.add(edge.key);
       edges.push(edge);
@@ -162,6 +165,7 @@ export function mergeExpansion(
   nodeId: number,
   items: RelatedType[],
   colors: Map<number, string>,
+  locale = 'zh-CN',
 ): ModelGraph {
   const node = graph.nodes.get(nodeId);
   if (!node || node.side === 'center') return graph;
@@ -177,7 +181,7 @@ export function mergeExpansion(
     }
     const source = node.side === 'left' ? other.id : nodeId;
     const target = node.side === 'left' ? nodeId : other.id;
-    const edge = edgeFrom(item, source, target, node.side === 'left' ? 'in' : 'out');
+    const edge = edgeFrom(item, source, target, node.side === 'left' ? 'in' : 'out', locale);
     if (!seen.has(edge.key)) {
       seen.add(edge.key);
       edges.push(edge);

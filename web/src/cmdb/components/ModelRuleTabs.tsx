@@ -88,7 +88,7 @@ export function RelationsTab({
   isAdmin: boolean;
   adminTip?: string;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const toast = useToast();
   const { confirmAction, dialog } = useDialogs();
   const [children, setChildren] = useState<RelatedType[]>([]);
@@ -223,7 +223,7 @@ export function RelationsTab({
       width: 'w-[11rem]',
       cell: (row) => {
         const type = row.relation.relation_type;
-        const label = type.name || String(type.id);
+        const label = relationTypeLabel(type, locale) || String(type.id);
         return (
           <span className="flex min-w-0 items-center gap-1.5">
             <span
@@ -442,7 +442,7 @@ function RelationCard({
   adminTip?: string;
   onDelete(): void;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const label = row.other.alias || row.other.name;
   const directionLabel = row.direction === 'children' ? tr('子模型', 'Child model') : tr('父模型', 'Parent model');
   return (
@@ -479,7 +479,9 @@ function RelationCard({
               className="h-2 w-2 shrink-0 rounded-full border border-border"
               style={{ backgroundColor: row.relation.relation_type.color || 'transparent' }}
             />
-            <span className="truncate">{row.relation.relation_type.name || row.relation.relation_type.id}</span>
+            <span className="truncate">
+              {relationTypeLabel(row.relation.relation_type, locale) || row.relation.relation_type.id}
+            </span>
           </dd>
         </div>
         <div className="min-w-0">

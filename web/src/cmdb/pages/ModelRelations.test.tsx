@@ -18,7 +18,13 @@ const related = (type: typeof host, constraint: string) => ({
   ctr_id: 1,
   type,
   attributes: [],
-  relation_type: { id: 1, name: '包含', color: '#6366f1' },
+  relation_type: {
+    id: 1,
+    name: 'CONTAINS',
+    color: '#6366f1',
+    display_name_zh: '包含',
+    display_name_en: 'Contains',
+  },
   constraint,
   parent_attr_ids: [],
   child_attr_ids: [],
@@ -343,6 +349,81 @@ describe('the flat relation list', () => {
     expect(posted).toMatchObject({
       path: '/api/v1/cmdb/ci-types/1/relation-children/2',
       body: { relation_type_id: 1, constraint: '0' },
+    });
+  });
+});
+
+describe('editing and language', () => {
+  it('labels the relation type in the console language', async () => {
+    localStorage.setItem('ongrid-locale', 'en-US');
+    server.use(http.get('/api/v1/cmdb/ci-type-relations', () => HttpResponse.json({ items: relations, total: relations.length })));
+    renderPage();
+
+    // The canonical name stays the identity; only the label switches.
+    expect(await screen.findAllByText('Contains')).toHaveLength(2);
+    expect(screen.queryByText('包含')).not.toBeInTheDocument();
+  });
+
+  it('edits the type, constraint and an empty attribute association', async () => {
+    const user = userEvent.setup();
+    let posted: unknown;
+    let postedPath = '';
+    const attr = (id: number, name: string, alias: string) => ({
+      id, name, alias, value_type: '2', is_choice: false, is_list: false, is_unique: false,
+      is_index: true, is_indexed: true, is_password: false, is_sortable: false, is_dynamic: false,
+      is_bool: false, is_file: false, is_reference: false, is_computed: false,
+      has_compute_script: false, has_choice_web_hook: false, has_choice_other: false,
+      storage_table: 'c_value_index_texts', is_required: false, order: id,
+      default_show: true, inherited: false,
+    });
+    server.use(
+      http.get('/api/v1/cmdb/ci-type-relations', () => HttpResponse.json({ items: relations, total: relations.length })),
+      http.get('/api/v1/cmdb/relation-types', () =>
+        HttpResponse.json({
+          items: [{
+            id: 1, name: 'CONTAINS', color: '#6366f1',
+            display_name_zh: '包含', display_name_en: 'Contains',
+          }],
+          total: 1,
+        }),
+      ),
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [host, disk], total: 2 })),
+      http.get('/api/v1/cmdb/ci-types/:ref/attributes', ({ params }) =>
+        HttpResponse.json({
+          type_id: Number(params.ref),
+          unique_id: 1,
+          unique: 'name',
+          attributes: Number(params.ref) === 1
+            ? [attr(10, 'hostname', '主机名')]
+            : [attr(20, 'host_id', '主机ID')],
+        }),
+      ),
+      http.post('/api/v1/cmdb/ci-types/:parent/relation-children/:child', async ({ request, params }) => {
+        postedPath = `/api/v1/cmdb/ci-types/${params.parent}/relation-children/${params.child}`;
+        posted = await request.json();
+        return HttpResponse.json(relations[0]);
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '编辑 host → disk' }));
+    expect(await screen.findByRole('dialog', { name: '编辑关系' })).toBeInTheDocument();
+    // The pair is the relation's key, so editing does not move the endpoint.
+    expect(screen.getByLabelText('源 CI 类型')).toBeDisabled();
+    expect(screen.getByLabelText('目标 CI 类型')).toBeDisabled();
+
+    await selectOption(screen.getByLabelText('关系约束'), '一对一');
+    await selectOption(screen.getByLabelText('源属性 1'), '主机名（hostname）');
+    await selectOption(screen.getByLabelText('目标属性 1'), '主机ID（host_id）');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(postedPath).toBe('/api/v1/cmdb/ci-types/1/relation-children/2');
+    expect(posted).toEqual({
+      relation_type_id: 1,
+      constraint: '1',
+      parent_attr_ids: [10],
+      child_attr_ids: [20],
     });
   });
 });

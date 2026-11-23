@@ -327,7 +327,14 @@ export function swapAttributeGroups(
 
 // --- the model relation graph (`c_ci_type_relations`) ---
 
-export type RelationTypeRef = { id: number; name: string; color: string };
+export type RelationTypeRef = {
+  id: number;
+  name: string;
+  color: string;
+  /** Localised labels the console shows; may be empty, then `name` is used. */
+  display_name_zh?: string;
+  display_name_en?: string;
+};
 
 export type RelatedType = {
   ctr_id: number;

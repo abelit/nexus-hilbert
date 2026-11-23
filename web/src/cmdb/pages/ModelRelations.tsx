@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -64,6 +64,7 @@ export default function ModelRelationsPage() {
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
   const [createAssist, setCreateAssist] = useState(false);
+  const [editing, setEditing] = useState<ModelRelation | null>(null);
   const [models, setModels] = useState<CIType[]>([]);
   const [relationTypes, setRelationTypes] = useState<RelationType[]>([]);
   const [formLoading, setFormLoading] = useState(false);
@@ -97,7 +98,12 @@ export default function ModelRelationsPage() {
     return rows.filter((row) => {
       const source = `${row.parent.type.alias} ${row.parent.type.name}`.toLowerCase();
       const target = `${row.child.type.alias} ${row.child.type.name}`.toLowerCase();
-      const relation = `${row.child.relation_type.name ?? ''} ${row.child.relation_type.id ?? ''}`.toLowerCase();
+      const relation = [
+        row.child.relation_type.name ?? '',
+        row.child.relation_type.display_name_zh ?? '',
+        row.child.relation_type.display_name_en ?? '',
+        row.child.relation_type.id ?? '',
+      ].join(' ').toLowerCase();
       return source.includes(needle) || target.includes(needle) || relation.includes(needle);
     });
   }, [rows, query]);
@@ -141,6 +147,32 @@ export default function ModelRelationsPage() {
       setCreating(true);
     } catch (error) {
       toast.error(describeError(error, tr('无法打开新建关系', 'Could not open the relation form')));
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const openEdit = async (row: ModelRelation) => {
+    setFormLoading(true);
+    try {
+      // The CURRENT type may be retired, and a retired type stays usable on
+      // the rule that already has it, so the edit form loads the full
+      // dictionary rather than only the words a new relation may adopt.
+      const [gotModels, allTypes] = await Promise.all([
+        listCITypes(),
+        listRelationTypes(),
+      ]);
+      setModels(gotModels);
+      // A retired type may stay on the rule that already uses it, but no other
+      // retired word may be adopted: offer the current one plus the live ones.
+      setRelationTypes(
+        allTypes.filter(
+          (type) => !type.deprecated || String(type.id) === String(row.child.relation_type.id),
+        ),
+      );
+      setEditing(row);
+    } catch (error) {
+      toast.error(describeError(error, tr('无法打开编辑', 'Could not open the editor')));
     } finally {
       setFormLoading(false);
     }
@@ -219,16 +251,21 @@ export default function ModelRelationsPage() {
       key: 'type',
       header: tr('关系类型', 'Relation type'),
       width: 'min-w-28',
-      cell: (row) => (
-        <span className="flex items-center gap-1.5">
-          <span
-            aria-hidden="true"
-            className="h-2 w-2 shrink-0 rounded-full border border-border"
-            style={{ backgroundColor: row.child.relation_type.color || 'transparent' }}
-          />
-          <span className="truncate text-xs text-text-muted">{row.child.relation_type.name || row.child.relation_type.id}</span>
-        </span>
-      ),
+      cell: (row) => {
+        const label = relationTypeLabel(row.child.relation_type, locale);
+        return (
+          <span className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="h-2 w-2 shrink-0 rounded-full border border-border"
+              style={{ backgroundColor: row.child.relation_type.color || 'transparent' }}
+            />
+            <span className="truncate text-xs text-text-muted" title={row.child.relation_type.name}>
+              {label || row.child.relation_type.id}
+            </span>
+          </span>
+        );
+      },
     },
     {
       key: 'constraint',
@@ -339,7 +376,7 @@ export default function ModelRelationsPage() {
                         {
                           source: `${row.parent.type.alias || row.parent.type.name} (${row.parent.type.name})`,
                           target: `${row.child.type.alias || row.child.type.name} (${row.child.type.name})`,
-                          relationType: row.child.relation_type.name || String(row.child.relation_type.id ?? ''),
+                          relationType: relationTypeLabel(row.child.relation_type, locale),
                           constraint: relationConstraintLabel(row.child.constraint, tr),
                           mapping: mappingText(row).text,
                         },
@@ -348,6 +385,20 @@ export default function ModelRelationsPage() {
                     })
                   }
                 />
+                <Hint content={adminTip}>
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    onClick={() => void openEdit(row)}
+                    disabled={!isAdmin || formLoading}
+                    aria-label={tr(`编辑 ${row.parent.type.name} → ${row.child.type.name}`, `Edit ${row.parent.type.name} → ${row.child.type.name}`)}
+                    title={tr(`编辑 ${row.parent.type.name} → ${row.child.type.name}`, `Edit ${row.parent.type.name} → ${row.child.type.name}`)}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0 text-text-muted hover:bg-card hover:text-text"
+                  >
+                    <Pencil size={13} aria-hidden="true" />
+                  </Button>
+                </Hint>
                 <Hint content={adminTip}>
                 <Button
                   variant="plain"
@@ -387,18 +438,51 @@ export default function ModelRelationsPage() {
         />
       )}
 
+      {editing && (
+        <RelationFormModal
+          row={editing}
+          models={models}
+          relationTypes={relationTypes}
+          onClose={() => setEditing(null)}
+          onSaved={async (message) => {
+            setEditing(null);
+            toast.success(message);
+            await load(true);
+          }}
+        />
+      )}
+
       {dialog}
     </div>
   );
 }
 
+// The positional attribute pairs a relation already carries. Both ends of the
+// list response repeat them; the child's copy is preferred because that is the
+// end the page reads the relation type from.
+function pairsFromRelation(row: ModelRelation | null): AttributePair[] {
+  if (!row) return [{ source: '', target: '' }];
+  const parentIDs = row.child.parent_attr_ids?.length
+    ? row.child.parent_attr_ids
+    : row.parent.parent_attr_ids ?? [];
+  const childIDs = row.child.child_attr_ids?.length
+    ? row.child.child_attr_ids
+    : row.parent.child_attr_ids ?? [];
+  const pairs = parentIDs
+    .map((id, index) => ({ source: String(id), target: childIDs[index] ? String(childIDs[index]) : '' }))
+    .filter((pair) => pair.source && pair.target);
+  return pairs.length > 0 ? pairs : [{ source: '', target: '' }];
+}
+
 function RelationFormModal({
+  row = null,
   models,
   relationTypes,
   initialAssist = false,
   onClose,
   onSaved,
 }: {
+  row?: ModelRelation | null;
   models: CIType[];
   relationTypes: RelationType[];
   initialAssist?: boolean;
@@ -407,13 +491,14 @@ function RelationFormModal({
 }) {
   const { tr, locale } = useI18n();
   const { isAdmin } = usePermissions();
-  const [sourceID, setSourceID] = useState('');
-  const [targetID, setTargetID] = useState('');
-  const [typeID, setTypeID] = useState('');
-  const [constraint, setConstraint] = useState('0');
+  const editing = row !== null;
+  const [sourceID, setSourceID] = useState(row ? String(row.parent.type.id) : '');
+  const [targetID, setTargetID] = useState(row ? String(row.child.type.id) : '');
+  const [typeID, setTypeID] = useState(row ? String(row.child.relation_type.id) : '');
+  const [constraint, setConstraint] = useState(row?.child.constraint || '0');
   const [sourceAttributes, setSourceAttributes] = useState<TypeAttribute[]>([]);
   const [targetAttributes, setTargetAttributes] = useState<TypeAttribute[]>([]);
-  const [pairs, setPairs] = useState<AttributePair[]>([{ source: '', target: '' }]);
+  const [pairs, setPairs] = useState<AttributePair[]>(() => pairsFromRelation(row));
   const [attributesLoading, setAttributesLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -421,7 +506,7 @@ function RelationFormModal({
 
   useCMDBAssistantFacts({
     form_kind: 'model_relation',
-    form_mode: 'create',
+    form_mode: editing ? 'edit' : 'create',
     source_model: models.find((model) => String(model.id) === sourceID)?.name,
     target_model: models.find((model) => String(model.id) === targetID)?.name,
   });
@@ -469,8 +554,13 @@ function RelationFormModal({
   };
   const chooseConstraint = (next: string) => {
     setConstraint(next);
-    // The list rules depend on the constraint, so every mapping is re-checked.
-    setPairs((current) => current.map((pair) => ({ ...pair, source: '', target: '' })));
+    // A NEW relation re-checks every mapping against the new list rules. An
+    // EXISTING one keeps its mapping: silently dropping associations while
+    // editing is how a relation loses the derivation rule nobody meant to
+    // touch. The operator can still clear a row explicitly.
+    if (!editing) {
+      setPairs((current) => current.map((pair) => ({ ...pair, source: '', target: '' })));
+    }
   };
 
   const submit = async () => {
@@ -501,9 +591,9 @@ function RelationFormModal({
             }
           : {}),
       });
-      await onSaved(tr('已创建模型关系', 'Relation created'));
+      await onSaved(editing ? tr('已保存', 'Saved') : tr('已创建模型关系', 'Relation created'));
     } catch (error) {
-      setErr(describeError(error, tr('创建失败', 'Could not create it')));
+      setErr(describeError(error, editing ? tr('保存失败', 'Could not save') : tr('创建失败', 'Could not create it')));
     } finally {
       setSubmitting(false);
     }
@@ -516,7 +606,7 @@ function RelationFormModal({
       open
       onClose={onClose}
       size="lg"
-      title={tr('新增关系', 'New relation')}
+      title={editing ? tr('编辑关系', 'Edit relation') : tr('新增关系', 'New relation')}
       footer={
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
@@ -533,38 +623,45 @@ function RelationFormModal({
           {err}
         </div>
       )}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <AIActionButton
-          zh="AI 建议关系"
-          en="AI suggest relation"
-          onClick={() => setAssistOpen(true)}
-          disabled={!isAdmin}
-        />
-        <Button
-          variant="ghost"
-          size="sm"
-          type="button"
-          onClick={() =>
-            openAssistant({
-              prompt: tr(
-                '我在 CMDB 里新建一条模型关系（源 CI 类型 → 目标 CI 类型）。请结合当前页面上下文帮我确认关系类型、关系约束和属性关联，并说明对层级树的影响。不要直接写入数据。',
-                'I am creating a CMDB model relation (source CI type → target CI type). Use the current page context to help confirm the relation type, constraint and attribute association, and explain the hierarchy impact. Do not write data.',
-              ),
-            })
-          }
-          className="inline-flex items-center gap-1.5 text-text-muted"
-        >
-          {tr('问 AI 助手', 'Ask the assistant')}
-        </Button>
-        {!isAdmin && (
-          <span className="text-[11px] text-text-faint">{tr('AI 生成需要管理员权限', 'AI suggestions require an administrator')}</span>
-        )}
-      </div>
+      {!editing && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <AIActionButton
+            zh="AI 建议关系"
+            en="AI suggest relation"
+            onClick={() => setAssistOpen(true)}
+            disabled={!isAdmin}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() =>
+              openAssistant({
+                prompt: tr(
+                  '我在 CMDB 里新建一条模型关系（源 CI 类型 → 目标 CI 类型）。请结合当前页面上下文帮我确认关系类型、关系约束和属性关联，并说明对层级树的影响。不要直接写入数据。',
+                  'I am creating a CMDB model relation (source CI type → target CI type). Use the current page context to help confirm the relation type, constraint and attribute association, and explain the hierarchy impact. Do not write data.',
+                ),
+              })
+            }
+            className="inline-flex items-center gap-1.5 text-text-muted"
+          >
+            {tr('问 AI 助手', 'Ask the assistant')}
+          </Button>
+          {!isAdmin && (
+            <span className="text-[11px] text-text-faint">{tr('AI 生成需要管理员权限', 'AI suggestions require an administrator')}</span>
+          )}
+        </div>
+      )}
       <p className="mb-4 text-[11px] leading-5 text-text-faint">
-        {tr(
-          '配置源 CI 类型到目标 CI 类型的关系；完成时点击保存。',
-          'Configure the relation from the source CI type to the target; save when done.',
-        )}
+        {editing
+          ? tr(
+              '编辑关联类型、关系约束和属性关联；源与目标模型固定，要改端点请删除后重建。',
+              'Edit the relation type, constraint and attribute association; the source and target are fixed — delete and recreate to change them.',
+            )
+          : tr(
+              '配置源 CI 类型到目标 CI 类型的关系；完成时点击保存。',
+              'Configure the relation from the source CI type to the target; save when done.',
+            )}
       </p>
       <div className="flex flex-col gap-4">
         <div>
@@ -577,6 +674,7 @@ function RelationFormModal({
             onValueChange={chooseSource}
             options={options}
             searchable
+            disabled={editing || submitting}
             className="mt-1 w-full"
           />
         </div>
@@ -590,6 +688,7 @@ function RelationFormModal({
             onValueChange={chooseTarget}
             options={options}
             searchable
+            disabled={editing || submitting}
             className="mt-1 w-full"
           />
         </div>
@@ -632,7 +731,7 @@ function RelationFormModal({
         mode="model_relation"
         locale={locale}
         models={models.map((model) => ({ id: Number(model.id), name: model.name, alias: model.alias }))}
-        relationTypes={relationTypes.map((type) => ({ id: type.id, name: type.name }))}
+        relationTypes={relationTypes.map((type) => ({ id: type.id, name: relationTypeLabel(type, locale) }))}
         sourceModelRef={sourceID || undefined}
         targetModelRef={targetID || undefined}
         onAccept={(suggested) => {

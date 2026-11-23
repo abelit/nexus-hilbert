@@ -70,12 +70,12 @@ export function ModelRelationsTopology(props: ModelRelationsTopologyProps) {
 }
 
 function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTopologyProps) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const toast = useToast();
   const { fitView, zoomIn, zoomOut } = useReactFlow();
   const navigate = useNavigate();
   const [graph, setGraph] = useState<ModelGraph>(() =>
-    createInitialGraph(center, parents, children, groupColorMap(groups)),
+    createInitialGraph(center, parents, children, groupColorMap(groups), locale),
   );
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set([center.id]));
   const [focusedId, setFocusedId] = useState<number | null>(null);
@@ -118,11 +118,11 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
     inFlight.current = new Map();
     for (const timer of timers.current.values()) clearTimeout(timer);
     timers.current.clear();
-    setGraph(createInitialGraph(center, parents, children, groupColorMap(groups)));
+    setGraph(createInitialGraph(center, parents, children, groupColorMap(groups), locale));
     setExpanded(new Set([center.id]));
     setFocusedId(null);
     bumpProbes();
-  }, [center, parents, children, groups]);
+  }, [center, parents, children, groups, locale]);
 
   useEffect(
     () => () => {
@@ -277,7 +277,7 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
 
       const latestGraph = graphRef.current;
       const latestExpanded = expandedRef.current;
-      const candidate = mergeExpansion(latestGraph, nodeId, items, colors);
+      const candidate = mergeExpansion(latestGraph, nodeId, items, colors, locale);
       const nextExpanded = new Set(latestExpanded).add(nodeId);
       const nextVisible = visibleGraph(candidate, nextExpanded, centerRef.current.id);
       if (nextVisible.nodes.size > MAX_VISIBLE_NODES) {
@@ -289,7 +289,7 @@ function TopologyCanvas({ center, parents, children, groups }: ModelRelationsTop
       setExpanded(nextExpanded);
       fitSoon();
     },
-    [graph, colors, probeNode, toast, tr, fitSoon],
+    [graph, colors, probeNode, toast, tr, fitSoon, locale],
   );
 
   const collapse = useCallback(

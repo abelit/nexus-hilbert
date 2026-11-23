@@ -78,6 +78,11 @@ type RelationTypeRef struct {
 	ID    model.ID
 	Name  string
 	Color string
+
+	// Display names are the presentation data the console localises. They are
+	// the relation row's own labels, not a second identity.
+	DisplayNameZH string
+	DisplayNameEN string
 }
 
 // RelatedType is one model reached through a relation, with everything the
@@ -600,7 +605,10 @@ func (u *Usecase) buildEndpoints(ctx context.Context, rows []citypemodel.CITypeR
 			}
 			ref := RelationTypeRef{ID: r.RelationTypeID}
 			if rt, ok := relationTypes[r.RelationTypeID]; ok {
-				ref = RelationTypeRef{ID: rt.ID, Name: rt.Name, Color: rt.Color}
+				ref = RelationTypeRef{
+					ID: rt.ID, Name: rt.Name, Color: rt.Color,
+					DisplayNameZH: rt.DisplayNameZH, DisplayNameEN: rt.DisplayNameEN,
+				}
 			}
 			out[endpointKey{r.ID, parent}] = RelatedType{
 				CTRID:         r.ID,

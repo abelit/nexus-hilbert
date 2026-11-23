@@ -49,9 +49,11 @@ func (h *Handler) registerRelationRoutes(r chi.Router) {
 
 // relationTypeRefDTO is the relation-type dictionary entry an edge points at.
 type relationTypeRefDTO struct {
-	ID    model.ID `json:"id"`
-	Name  string   `json:"name"`
-	Color string   `json:"color"`
+	ID            model.ID `json:"id"`
+	Name          string   `json:"name"`
+	Color         string   `json:"color"`
+	DisplayNameZH string   `json:"display_name_zh"`
+	DisplayNameEN string   `json:"display_name_en"`
 }
 
 // relatedTypeDTO is one end of a model relation.
@@ -124,6 +126,7 @@ func toRelatedTypeDTO(r citypebiz.RelatedType) relatedTypeDTO {
 		Attributes: toTypeAttrDTOs(r.Attributes),
 		RelationType: relationTypeRefDTO{
 			ID: r.RelationType.ID, Name: r.RelationType.Name, Color: r.RelationType.Color,
+			DisplayNameZH: r.RelationType.DisplayNameZH, DisplayNameEN: r.RelationType.DisplayNameEN,
 		},
 		Constraint:    r.Constraint,
 		ParentAttrIDs: parentAttrs,
