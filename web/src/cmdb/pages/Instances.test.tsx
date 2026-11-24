@@ -1210,4 +1210,66 @@ describe('the form in the drawer', () => {
     // would be a write about a field the form cannot edit.
     expect('asset_no' in (put[0] as Record<string, unknown>)).toBe(false);
   });
+
+  it('fills a UUID field from its generate button and leaves other fields alone', async () => {
+    const user = userEvent.setup();
+    handlers([]);
+    server.use(
+      http.get('/api/v1/cmdb/ci-types/host/attributes', () =>
+        HttpResponse.json({
+          type_id: 1,
+          unique_id: 10,
+          unique: 'uuid',
+          attributes: [attribute(10, 'uuid', { alias: 'UUID' }), attribute(11, 'note')],
+        }),
+      ),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /新建实例/ }));
+    const drawer = await screen.findByRole('dialog');
+
+    await user.click(within(drawer).getByRole('button', { name: '生成 UUID' }));
+    const uuidField = within(drawer).getByLabelText('UUID') as HTMLInputElement;
+    expect(uuidField.value).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    // Only the UUID field gets the affordance.
+    expect(within(drawer).getAllByRole('button', { name: '生成 UUID' })).toHaveLength(1);
+  });
+
+  it('clones an instance with its values and clears the identifier', async () => {
+    const user = userEvent.setup();
+    handlers([{ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'rack A' } }]);
+    server.use(
+      http.get('/api/v1/cmdb/instances/5', () =>
+        HttpResponse.json({ ci_id: 5, type_id: 1, values: { hostname: 'web-01', note: 'rack A' } }),
+      ),
+    );
+    const posted: unknown[] = [];
+    server.use(
+      http.post('/api/v1/cmdb/instances', async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ ci_id: 6, created: true }, { status: 201 });
+      }),
+    );
+    renderPage();
+
+    await user.click(within(await openRowMenu(user)).getByRole('menuitem', { name: '克隆' }));
+    const drawer = await screen.findByRole('dialog');
+    // The values came from the source, but the identifier did not: a clone is
+    // a new row, and sending the old identifier would be rejected as a
+    // duplicate instead of letting the operator change what identifies it.
+    expect(within(drawer).getByLabelText('hostname')).toHaveValue('');
+    expect(within(drawer).getByLabelText('note')).toHaveValue('rack A');
+
+    await user.type(within(drawer).getByLabelText('hostname'), 'web-02');
+    await user.click(within(drawer).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({
+      ci_type: 1,
+      exist_policy: 'reject',
+      hostname: 'web-02',
+      note: 'rack A',
+    });
+  });
 });

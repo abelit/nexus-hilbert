@@ -90,6 +90,14 @@ type Props<T> = {
   actions?: (row: T) => ReactNode;
   actionsHeader?: ReactNode;
   /**
+   * A width token for the action column. The default `w-px` sizes it to its
+   * buttons, which is what most tables want. A page whose data columns are all
+   * proportional passes a percentage here: with no `w-full` column to absorb
+   * the spare width, auto layout would otherwise give the whole remainder to
+   * this column and leave the icons marooned at the left of a huge cell.
+   */
+  actionsWidth?: string;
+  /**
    * Drop the action column below this viewport width. A narrow viewport keeps
    * the identity column readable instead of parking the actions off-screen at
    * the end of a wide table; the row click remains the action on touch.
@@ -156,6 +164,7 @@ export function DataTable<T>({
   onSortChange,
   actions,
   actionsHeader,
+  actionsWidth,
   actionsHideBelow = 0,
   selection,
   onRowClick,
@@ -310,7 +319,12 @@ export function DataTable<T>({
           </td>
         ))}
         {showActions && (
-          <td className="sticky right-0 w-px whitespace-nowrap px-4 py-2 text-left align-middle max-2xl:static">
+          <td
+            className={cn(
+              'sticky right-0 whitespace-nowrap px-4 py-2 text-left align-middle max-2xl:static',
+              actionsWidth ?? 'w-px',
+            )}
+          >
             <div className="flex items-center gap-1">{actions!(row)}</div>
           </td>
         )}
@@ -418,7 +432,13 @@ export function DataTable<T>({
                   // THE HEADER IS PINNED WITH THE CELLS. Without `sticky
                   // right-0` the cells cover the headers of the columns they
                   // scroll over while their own header sits off-screen.
-                  <th scope="col" className="sticky right-0 w-px whitespace-nowrap max-2xl:static">
+                  <th
+                    scope="col"
+                    className={cn(
+                      'sticky right-0 whitespace-nowrap max-2xl:static',
+                      actionsWidth ?? 'w-px',
+                    )}
+                  >
                     {actionsHeader ?? tr('操作', 'Actions')}
                   </th>
                 )}

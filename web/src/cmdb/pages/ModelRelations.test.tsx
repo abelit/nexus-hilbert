@@ -114,6 +114,7 @@ describe('the flat relation list', () => {
     renderPage();
 
     expect(await screen.findByRole('button', { name: '新增关系' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '编辑 host → disk' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '删除 host → disk' })).toBeDisabled();
   });
 
@@ -293,14 +294,68 @@ describe('the flat relation list', () => {
     await user.click(await screen.findByRole('button', { name: '删除 host → disk' }));
     const dialog = await screen.findByRole('dialog');
     // THE CONFIRMATION DISTINGUISHES THE SCHEMA FROM THE DATA: deleting the model
-    // relation does not delete the instance relations that already exist.
-    expect(within(dialog).getByText(/实例关系不会被删除/)).toBeInTheDocument();
+    // relation keeps the instance relations and names them as 关联关系, the term
+    // the resource drawer uses.
+    expect(within(dialog).getByText(/实例关系（关联关系）会保留/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: '取消' }));
     expect(deleted).toBe(0);
 
     await user.click(screen.getByRole('button', { name: '删除 host → disk' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '确认' }));
     await waitFor(() => expect(deleted).toBe(1));
+  });
+
+  it('edits a relation and asks before applying the change', async () => {
+    const user = userEvent.setup();
+    let posted: Record<string, unknown> | null = null;
+    server.use(
+      http.get('/api/v1/cmdb/ci-type-relations', () => HttpResponse.json({ items: [relations[0]], total: 1 })),
+      http.get('/api/v1/cmdb/ci-types', () => HttpResponse.json({ items: [host, disk], total: 2 })),
+      http.get('/api/v1/cmdb/relation-types', () =>
+        HttpResponse.json({
+          items: [
+            { id: 1, name: '包含', color: '#6366f1' },
+            { id: 2, name: '连接', color: '#0ea5e9' },
+          ],
+          total: 2,
+        }),
+      ),
+      http.get('/api/v1/cmdb/ci-types/:ref/attributes', ({ params }) =>
+        HttpResponse.json({ type_id: Number(params.ref), unique_id: 1, unique: 'name', attributes: [] }),
+      ),
+      http.post('/api/v1/cmdb/ci-types/:parent/relation-children/:child', async ({ request, params }) => {
+        posted = {
+          path: `/api/v1/cmdb/ci-types/${params.parent}/relation-children/${params.child}`,
+          body: await request.json(),
+        };
+        return HttpResponse.json(relations[0]);
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '编辑 host → disk' }));
+    const modal = await screen.findByRole('dialog', { name: '编辑关系' });
+    // The pair is the row's identity; only the rule is editable.
+    expect(within(modal).getByRole('combobox', { name: '关联类型' })).toHaveTextContent('包含');
+    expect(within(modal).getByText(/不会被改写或删除/)).toBeInTheDocument();
+    await selectOption(within(modal).getByRole('combobox', { name: '关联类型' }), '连接');
+    await user.click(within(modal).getByRole('button', { name: '保存' }));
+
+    // THE CHANGE IS PROTECTED: changing the rule affects the hierarchy and
+    // every relation it governs, so the operator confirms first.
+    const confirm = await screen.findByRole('dialog', { name: '确认操作' });
+    expect(within(confirm).getByText(/关联关系/)).toBeInTheDocument();
+    await user.click(within(confirm).getByRole('button', { name: '取消' }));
+    expect(posted).toBeNull();
+
+    await user.click(within(modal).getByRole('button', { name: '保存' }));
+    await user.click(within(await screen.findByRole('dialog', { name: '确认操作' })).getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({
+      path: '/api/v1/cmdb/ci-types/1/relation-children/2',
+      body: { relation_type_id: 2, constraint: '0' },
+    });
   });
 
   it('prefills a new relation from an AI suggestion and saves it', async () => {

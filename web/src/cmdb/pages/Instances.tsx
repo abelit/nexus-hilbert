@@ -19,6 +19,7 @@ import {
   Sparkles,
   Table2,
   Trash2,
+  Wand2,
   X,
 } from 'lucide-react';
 
@@ -85,12 +86,14 @@ import { useToast } from '../components/Toast';
 import { WorkspaceBar } from '../components/WorkspaceBar';
 import { attributeSections } from '../lib/attribute-sections';
 import { choiceText } from '../lib/choice-labels';
+import { cloneDraft } from '../lib/clone';
 import type { ExportColumn } from '../lib/export';
 import { instanceSearchQuery, searchRowToInstance } from '../lib/instance-search';
 import { groupModels, orderModelsBySubscription } from '../lib/model-groups';
 import { referenceRawText, referenceText, useReferenceLabels, type ReferenceLabels } from '../lib/reference-labels';
 import { useCMDBAssistantFacts } from '../lib/assistantFacts';
 import { displayValue, isValueTypeCode } from '../lib/valuetype';
+import { generateUuid, isUuidAttribute } from '../lib/uuid';
 
 // 资源数据 — the instances of one model.
 //
@@ -265,7 +268,9 @@ export default function InstancesPage() {
   const [view, setView] = useState<View>(() =>
     window.matchMedia?.('(max-width: 1279px)')?.matches ? 'grid' : 'table',
   );
-  const [editing, setEditing] = useState<{ mode: 'create' } | { mode: 'edit'; id: number } | null>(null);
+  const [editing, setEditing] = useState<
+    { mode: 'create' } | { mode: 'edit'; id: number } | { mode: 'clone'; id: number } | null
+  >(null);
   // `?ci=` opens one instance after a jump from a related-resource row. The
   // link uses a document reload, so the query is available on first render.
   const [viewing, setViewing] = useState<{ id: number; tab: 'overview' | 'topology' } | null>(() => {
@@ -1707,6 +1712,7 @@ export default function InstancesPage() {
                           onView={() => setViewing({ id: row.ci_id, tab: 'overview' })}
                           onTopology={() => setViewing({ id: row.ci_id, tab: 'topology' })}
                           onEdit={() => setEditing({ mode: 'edit', id: row.ci_id })}
+                          onClone={() => setEditing({ mode: 'clone', id: row.ci_id })}
                           onDelete={() => void remove(row)}
                         />
                       )}
@@ -1804,6 +1810,7 @@ export default function InstancesPage() {
                           onView={() => setViewing({ id: row.ci_id, tab: 'overview' })}
                           onTopology={() => setViewing({ id: row.ci_id, tab: 'topology' })}
                           onEdit={() => setEditing({ mode: 'edit', id: row.ci_id })}
+                          onClone={() => setEditing({ mode: 'clone', id: row.ci_id })}
                           onDelete={() => void remove(row)}
                           onSaveFile={(attribute, serialized) => saveFileValue(row, attribute, serialized)}
                         />
@@ -1846,6 +1853,7 @@ export default function InstancesPage() {
           attributes={attributes}
           groups={groups}
           instanceID={editing.mode === 'edit' ? editing.id : null}
+          cloneFrom={editing.mode === 'clone' ? editing.id : null}
           onClose={() => setEditing(null)}
           onSaved={async (message) => {
             setEditing(null);
@@ -2018,6 +2026,7 @@ function InstanceRowActions({
   onView,
   onTopology,
   onEdit,
+  onClone,
   onDelete,
 }: {
   ciID: number;
@@ -2025,6 +2034,7 @@ function InstanceRowActions({
   onView(): void;
   onTopology(): void;
   onEdit(): void;
+  onClone(): void;
   onDelete(): void;
 }) {
   const { tr, locale } = useI18n();
@@ -2077,6 +2087,10 @@ function InstanceRowActions({
             <Pencil size={12} aria-hidden="true" />
             {tr('编辑', 'Edit')}
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={onClone} className="gap-2">
+            <Copy size={12} aria-hidden="true" />
+            {tr('克隆', 'Clone')}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={onDelete} className="gap-2 text-red-600 dark:text-red-300">
             <Trash2 size={12} aria-hidden="true" />
@@ -2099,6 +2113,7 @@ function InstanceCard({
   onView,
   onTopology,
   onEdit,
+  onClone,
   onDelete,
   onSaveFile,
 }: {
@@ -2112,6 +2127,7 @@ function InstanceCard({
   onView(): void;
   onTopology(): void;
   onEdit(): void;
+  onClone(): void;
   onDelete(): void;
   onSaveFile(attribute: TypeAttribute, serialized: string): void | Promise<void>;
 }) {
@@ -2209,6 +2225,7 @@ function InstanceCard({
           onView={onView}
           onTopology={onTopology}
           onEdit={onEdit}
+          onClone={onClone}
           onDelete={onDelete}
         />
       </div>
@@ -2224,6 +2241,7 @@ function InstanceDrawer({
   attributes,
   groups,
   instanceID,
+  cloneFrom = null,
   onClose,
   onSaved,
   onFileSaved,
@@ -2233,6 +2251,8 @@ function InstanceDrawer({
   attributes: TypeAttribute[];
   groups: AttributeGroup[];
   instanceID: number | null;
+  /** A source instance whose values prefill a new row; `instanceID` stays null. */
+  cloneFrom?: number | null;
   onClose(): void;
   onSaved(message: string): void | Promise<void>;
   /** Refresh the list behind the drawer after an immediate file write. */
@@ -2240,9 +2260,11 @@ function InstanceDrawer({
 }) {
   const { tr, locale } = useI18n();
   const creating = instanceID === null;
+  const cloning = cloneFrom !== null;
+  const sourceID = instanceID ?? cloneFrom;
 
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [loading, setLoading] = useState(!creating);
+  const [loading, setLoading] = useState(sourceID !== null);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [assistOpen, setAssistOpen] = useState(false);
@@ -2257,22 +2279,32 @@ function InstanceDrawer({
   });
 
   useEffect(() => {
-    if (instanceID === null) return;
+    if (sourceID === null) return;
     let live = true;
     setLoading(true);
-    void Promise.all([
-      getInstance(instanceID),
-      // The ordinary read omits file values; merge them back before the form
-      // renders, otherwise opening and saving an instance would clear its files.
-      getInstanceFileValues(instanceID).catch(() => ({}) as Record<string, string>),
-    ])
-      .then(([got, files]) => live && setValues({ ...(got.values ?? {}), ...files }))
+    setErr(null);
+    // A clone takes the source's ordinary values only. Attachments belong to
+    // the source instance (their cleanup deletes by reference), so only an
+    // edit merges them back — without this, opening and saving an instance
+    // would clear its files.
+    const files =
+      instanceID === null
+        ? Promise.resolve({} as Record<string, string>)
+        : getInstanceFileValues(instanceID).catch(() => ({}) as Record<string, string>);
+    void Promise.all([getInstance(sourceID), files])
+      .then(([got, fileValues]) => {
+        if (!live) return;
+        const loaded = got.values ?? {};
+        setValues(
+          instanceID === null ? cloneDraft(loaded, model.unique_key, attributes) : { ...loaded, ...fileValues },
+        );
+      })
       .catch((error) => live && setErr(describeError(error, tr('无法读取实例', 'Could not load the instance'))))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [instanceID, tr]);
+  }, [sourceID, instanceID, model.unique_key, attributes, tr]);
 
   // THE FORM IS THE MODEL, SECTION BY SECTION. An attribute in no section lands
   // in a trailing group, which is the same rule the backend's group endpoint
@@ -2306,7 +2338,11 @@ function InstanceDrawer({
       const payload = buildValues(attributes, values);
       if (creating) {
         const got = await createInstance({ ci_type: model.id, values: payload, exist_policy: 'reject' });
-        await onSaved(tr(`已创建（#${got.ci_id}）`, `Created (#${got.ci_id})`));
+        await onSaved(
+          cloning
+            ? tr(`已克隆（#${got.ci_id}）`, `Cloned (#${got.ci_id})`)
+            : tr(`已创建（#${got.ci_id}）`, `Created (#${got.ci_id})`),
+        );
       } else {
         await updateInstance(instanceID, { ci_type: model.id, values: payload });
         await onSaved(tr('已保存', 'Saved'));
@@ -2321,7 +2357,13 @@ function InstanceDrawer({
   };
 
   const modelName = model.alias || model.name;
-  const label = displayValue(values[model.unique_key ?? '']) || (creating ? tr('新实例', 'New instance') : `#${instanceID}`);
+  const label =
+    displayValue(values[model.unique_key ?? '']) ||
+    (cloning
+      ? tr('克隆实例', 'Clone instance')
+      : creating
+        ? tr('新实例', 'New instance')
+        : `#${instanceID}`);
 
   return (
     <Drawer
@@ -2336,9 +2378,11 @@ function InstanceDrawer({
         </span>
       }
       description={
-        creating
-          ? tr(`在「${modelName}」下新建一条实例`, `A new instance of “${modelName}”`)
-          : tr(`#${instanceID}`, `#${instanceID}`)
+        cloning
+          ? tr(`克隆自 #${cloneFrom}；唯一标识已清空`, `Cloned from #${cloneFrom}; identifiers cleared`)
+          : creating
+            ? tr(`在「${modelName}」下新建一条实例`, `A new instance of “${modelName}”`)
+            : tr(`#${instanceID}`, `#${instanceID}`)
       }
       footer={
         <div className="flex items-center gap-3">
@@ -2392,6 +2436,15 @@ function InstanceDrawer({
         </Button>
       </div>
 
+      {cloning && (
+        <div className="mb-3 rounded-md border border-border bg-bg/60 px-3 py-2 text-[11px] text-text-muted">
+          {tr(
+            `已复制 #${cloneFrom} 的字段值；唯一标识已清空，文件和关系不会复制。修改后点击保存，创建一条新数据。`,
+            `Copied the values of #${cloneFrom}; identifiers are cleared, and files and relations are not copied. Edit, then save to create a new row.`,
+          )}
+        </div>
+      )}
+
       {loading ? (
         <p className="py-6 text-center text-xs text-text-muted">{tr('加载中…', 'Loading…')}</p>
       ) : (
@@ -2432,8 +2485,17 @@ function InstanceDrawer({
                     // A LONG-VALUE CONTROL TAKES THE WHOLE ROW: a JSON box made
                     // half-width is unusable at the drawer's 44rem.
                     const wide = attribute.is_file || type === '6';
+                    // A UUID field is a text field named like one; the generate
+                    // button only makes sense on a single, editable text value.
+                    const uuidField =
+                      type === '2' &&
+                      !attribute.is_list &&
+                      !attribute.is_file &&
+                      !attribute.is_reference &&
+                      !attribute.is_computed &&
+                      isUuidAttribute(attribute);
                     return (
-                      <div key={attribute.id} className={cn(wide && 'sm:col-span-2')}>
+                      <div key={attribute.id} className={cn('group/field', wide && 'sm:col-span-2')}>
                         <Label htmlFor={id}>
                           {attribute.alias || attribute.name}
                           {attribute.is_required && <span className="ml-1 text-red-400">*</span>}
@@ -2443,7 +2505,7 @@ function InstanceDrawer({
                             </Chip>
                           )}
                         </Label>
-                        <div className="mt-1">
+                        <div className={cn('mt-1', uuidField && 'relative')}>
                           {attribute.is_file ? (
                             <FileField
                               attribute={attribute}
@@ -2493,7 +2555,23 @@ function InstanceDrawer({
                               value={values[attribute.name]}
                               onChange={(next) => setValues((current) => ({ ...current, [attribute.name]: next }))}
                               placeholder={attribute.alias || attribute.name}
+                              className={uuidField ? 'pe-9' : undefined}
                             />
+                          )}
+                          {uuidField && (
+                            <Button
+                              variant="plain"
+                              size="sm"
+                              type="button"
+                              onClick={() =>
+                                setValues((current) => ({ ...current, [attribute.name]: generateUuid() }))
+                              }
+                              aria-label={tr('生成 UUID', 'Generate UUID')}
+                              title={tr('生成 UUID', 'Generate UUID')}
+                              className="pointer-events-none absolute end-1 top-1/2 -translate-y-1/2 p-1 text-text-faint opacity-0 transition-opacity hover:text-text group-hover/field:pointer-events-auto group-hover/field:opacity-100 group-focus-within/field:pointer-events-auto group-focus-within/field:opacity-100 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100"
+                            >
+                              <Wand2 size={12} aria-hidden="true" />
+                            </Button>
                           )}
                         </div>
                         {attribute.is_file && (
