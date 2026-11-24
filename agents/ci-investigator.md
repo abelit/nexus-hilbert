@@ -20,6 +20,8 @@ capabilities:
     max_tool_calls: 16
 can_delegate: true
 tools:
+  - read_archived_chat
+  - read_tool_result
   - cmdb_search_ci
   - cmdb_get_ci
   - cmdb_get_ci_relations
