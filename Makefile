@@ -229,6 +229,10 @@ proto: ## [api] 重新生成 proto（优先 buf，回退 protoc + protoc-gen-go/
 
 ONGRID_DOCKERFILE ?= deploy/Dockerfile.ongrid
 ONGRID_BUILD_CONTEXT ?= .
+# Optional ONNX Runtime tarball URL for the ongrid image build. Empty keeps
+# the Dockerfile's source order (GitHub release, then nuget.org); set it to
+# a mirror or a local artifact when github.com is unreachable.
+ONNXRUNTIME_TARBALL_URL ?=
 # Override on build hosts without gcr.io access:
 #   make docker-ongrid-cmdb ONGRID_CMDB_RUNTIME_IMAGE=gcr.m.daocloud.io/distroless/base-debian12:nonroot
 ONGRID_CMDB_RUNTIME_IMAGE ?= gcr.io/distroless/base-debian12:nonroot
@@ -237,7 +241,9 @@ ONGRID_CMDB_RUNTIME_IMAGE ?= gcr.io/distroless/base-debian12:nonroot
 docker: docker-ongrid docker-ongrid-cmdb docker-ongrid-edge ## 构建全部镜像
 
 docker-ongrid: ## 构建 ongrid 镜像
-	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f "$(ONGRID_DOCKERFILE)" "$(ONGRID_BUILD_CONTEXT)"
+	docker build --build-arg VERSION=$(VERSION) \
+		--build-arg ONNXRUNTIME_TARBALL_URL="$(ONNXRUNTIME_TARBALL_URL)" \
+		-t ongrid:$(VERSION) -f "$(ONGRID_DOCKERFILE)" "$(ONGRID_BUILD_CONTEXT)"
 
 docker-ongrid-cmdb: ## 构建 CMDB 独立服务镜像
 	docker build \
@@ -378,6 +384,7 @@ docker-build: ## [release] 构建 ongrid:$(VERSION) 镜像（默认 linux/amd64�
 	docker buildx build \
 		--platform $(PLATFORM) \
 		--build-arg VERSION=$(VERSION) \
+		--build-arg ONNXRUNTIME_TARBALL_URL="$(ONNXRUNTIME_TARBALL_URL)" \
 		-t ongrid:$(VERSION) \
 		-f deploy/Dockerfile.ongrid \
 		$(DOCKER_BUILD_CACHE_ARGS) \

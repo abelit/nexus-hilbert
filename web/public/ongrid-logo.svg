@@ -1,22 +1,58 @@
-<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="leftPillar" x1="154" y1="88" x2="225" y2="432" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#F15BC7"/>
-      <stop offset="0.52" stop-color="#8C6DF0"/>
-      <stop offset="1" stop-color="#5269F4"/>
-    </linearGradient>
-    <linearGradient id="rightPillar" x1="291" y1="69" x2="362" y2="413" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1456B5"/>
-      <stop offset="0.56" stop-color="#30A6D0"/>
-      <stop offset="1" stop-color="#57D6D8"/>
-    </linearGradient>
-  </defs>
-
-  <!-- back rails -->
-  <rect x="54" y="178" width="354" height="74" rx="37" transform="rotate(-14 54 178)" fill="#7182AD"/>
-  <rect x="102" y="307" width="354" height="74" rx="37" transform="rotate(-14 102 307)" fill="#7182AD"/>
-
-  <!-- front pillars -->
-  <rect x="115" y="93" width="76" height="346" rx="38" transform="rotate(-14 115 93)" fill="url(#leftPillar)"/>
-  <rect x="252" y="74" width="76" height="346" rx="38" transform="rotate(-14 252 74)" fill="url(#rightPillar)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="t">
+  <title id="t">Nexus-Hilbert Duo Glow symbol light</title>
+<defs>
+  <linearGradient id="dgBracket_light_tl" x1="36" y1="36" x2="102" y2="102" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#E75DC9"/>
+    <stop offset="1" stop-color="#956BEB"/>
+  </linearGradient>
+  <linearGradient id="dgBracket_light_tr" x1="220" y1="36" x2="154" y2="102" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#226FBC"/>
+    <stop offset="1" stop-color="#4EC9D5"/>
+  </linearGradient>
+  <linearGradient id="dgBracket_light_br" x1="220" y1="220" x2="154" y2="154" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#226FBC"/>
+    <stop offset="1" stop-color="#4EC9D5"/>
+  </linearGradient>
+  <linearGradient id="dgBracket_light_bl" x1="36" y1="220" x2="102" y2="154" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#E75DC9"/>
+    <stop offset="1" stop-color="#956BEB"/>
+  </linearGradient>
+  <radialGradient id="dgCore_light_mag" cx="96" cy="96" r="58" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#D94FC2" stop-opacity="0.95"/>
+    <stop offset="0.5" stop-color="#D94FC2" stop-opacity="0.42"/>
+    <stop offset="1" stop-color="#D94FC2" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="dgCore_light_vio" cx="96" cy="160" r="58" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#956BEB" stop-opacity="0.95"/>
+    <stop offset="0.5" stop-color="#956BEB" stop-opacity="0.42"/>
+    <stop offset="1" stop-color="#956BEB" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="dgCore_light_azr" cx="160" cy="96" r="58" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#2C7FCC" stop-opacity="0.95"/>
+    <stop offset="0.5" stop-color="#2C7FCC" stop-opacity="0.42"/>
+    <stop offset="1" stop-color="#2C7FCC" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="dgCore_light_cyn" cx="160" cy="160" r="58" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#4EC9D5" stop-opacity="0.95"/>
+    <stop offset="0.5" stop-color="#4EC9D5" stop-opacity="0.42"/>
+    <stop offset="1" stop-color="#4EC9D5" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="dgCore_light_glow" cx="121" cy="117" r="52" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.62"/>
+    <stop offset="0.5" stop-color="#F4F7FF" stop-opacity="0.24"/>
+    <stop offset="1" stop-color="#F4F7FF" stop-opacity="0"/>
+  </radialGradient>
+</defs>
+<g transform="">
+  <path fill="url(#dgBracket_light_tl)" d="M36 102V48A12 12 0 0 1 48 36H102V66H66V102Z"/>
+  <path fill="url(#dgBracket_light_tr)" d="M154 36H208A12 12 0 0 1 220 48V102H190V66H154Z"/>
+  <path fill="url(#dgBracket_light_br)" d="M220 154V208A12 12 0 0 1 208 220H154V190H190V154Z"/>
+  <path fill="url(#dgBracket_light_bl)" d="M102 220H48A12 12 0 0 1 36 208V154H66V190H102Z"/>
+  <path fill="#F4F7FF" d="M128 86L170 128L128 170L86 128Z"/>
+  <path fill="url(#dgCore_light_mag)" d="M128 86L170 128L128 170L86 128Z"/>
+  <path fill="url(#dgCore_light_vio)" d="M128 86L170 128L128 170L86 128Z"/>
+  <path fill="url(#dgCore_light_azr)" d="M128 86L170 128L128 170L86 128Z"/>
+  <path fill="url(#dgCore_light_cyn)" d="M128 86L170 128L128 170L86 128Z"/>
+  <path fill="url(#dgCore_light_glow)" d="M128 86L170 128L128 170L86 128Z"/>
+</g>
 </svg>

@@ -102,28 +102,62 @@ RUN set -eux; \
 # ONNX Runtime shared library. Pin the version so a future apt-mirror
 # bump doesn't silently change ABI. v1.20.1 is the latest stable that
 # fastembed-go's yalue/onnxruntime_go@v1.7.0 was tested against.
+#
+# Sources, tried in order:
+#   1. $ONNXRUNTIME_TARBALL_URL — explicit override for build hosts that
+#      mirror the tarball or run air-gapped.
+#   2. The GitHub release asset (canonical source). Its connect timeout is
+#      short so a firewalled github.com fails fast instead of looking hung.
+#   3. The PyPI `onnxruntime` wheel — the same Microsoft-published binary
+#      and 13 MB instead of 108 MB. PyPI stays reachable where github.com
+#      and nuget.org are slow or blocked from the build network.
+#   4. The nuget.org Microsoft.ML.OnnxRuntime package — a 108 MB all-RID
+#      nupkg that CN networks throttle to a crawl; last resort only.
+# The resolved .so is kept in a BuildKit cache mount: image-layer caching
+# does not survive a builder prune, and without this every prune pays for
+# the download again. Arch is part of the cache path because multi-arch
+# builders share one cache directory.
 ARG ONNXRUNTIME_VERSION=1.20.1
+ARG ONNXRUNTIME_TARBALL_URL=
 ARG TARGETARCH
-RUN set -eux; \
+RUN --mount=type=cache,target=/root/.cache/onnxruntime \
+    set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${arch}" in \
-        amd64|x86_64) ORT_ARCH=x64; NUGET_RID=linux-x64 ;; \
-        arm64|aarch64) ORT_ARCH=aarch64; NUGET_RID=linux-arm64 ;; \
+        amd64|x86_64) ORT_ARCH=x64; NUGET_RID=linux-x64; PYPI_ARCH=x86_64 ;; \
+        arm64|aarch64) ORT_ARCH=aarch64; NUGET_RID=linux-arm64; PYPI_ARCH=aarch64 ;; \
         *) echo "unsupported arch ${arch}" >&2; exit 1 ;; \
     esac; \
-    if curl -fsSL -o /tmp/ort.tgz \
-        "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}.tgz"; then \
-        tar -xzf /tmp/ort.tgz -C /tmp; \
-        install -m 0755 /tmp/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION} /usr/lib/; \
-    else \
-        curl -fsSL -o /tmp/ort.nupkg \
-            "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime/${ONNXRUNTIME_VERSION}"; \
-        python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' \
-            /tmp/ort.nupkg "runtimes/${NUGET_RID}/native/libonnxruntime.so" /tmp/ort-nuget; \
-        install -m 0755 /tmp/ort-nuget/runtimes/${NUGET_RID}/native/libonnxruntime.so /usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}; \
+    cache="/root/.cache/onnxruntime/${ORT_ARCH}"; \
+    so="${cache}/libonnxruntime.so.${ONNXRUNTIME_VERSION}"; \
+    mkdir -p "${cache}"; \
+    if [ ! -s "${so}" ]; then \
+        url="${ONNXRUNTIME_TARBALL_URL:-https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}.tgz}"; \
+        if curl -fL --connect-timeout 5 --retry 2 -o "${cache}/ort.tgz.part" "${url}"; then \
+            tar -xzf "${cache}/ort.tgz.part" -C "${cache}"; \
+            install -m 0755 "${cache}/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}" "${so}.part"; \
+        elif wheel="$(python3 -c 'import json, sys, urllib.request; \
+data = json.load(urllib.request.urlopen("https://pypi.org/pypi/onnxruntime/%s/json" % sys.argv[1], timeout=30)); \
+print(next(f["url"] for f in data["urls"] if f["filename"].endswith(".whl") and "manylinux" in f["filename"] and sys.argv[2] in f["filename"]))' \
+                "${ONNXRUNTIME_VERSION}" "${PYPI_ARCH}")" \
+            && curl -fL --connect-timeout 10 --retry 2 -o "${cache}/ort.whl.part" "${wheel}"; then \
+            python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' \
+                "${cache}/ort.whl.part" "onnxruntime/capi/libonnxruntime.so.${ONNXRUNTIME_VERSION}" "${cache}/wheel"; \
+            install -m 0755 "${cache}/wheel/onnxruntime/capi/libonnxruntime.so.${ONNXRUNTIME_VERSION}" "${so}.part"; \
+        else \
+            echo "tarball and PyPI wheel failed, falling back to nuget.org" >&2; \
+            curl -fL --connect-timeout 10 --retry 3 -o "${cache}/ort.nupkg.part" \
+                "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime/${ONNXRUNTIME_VERSION}"; \
+            python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' \
+                "${cache}/ort.nupkg.part" "runtimes/${NUGET_RID}/native/libonnxruntime.so" "${cache}/nupkg"; \
+            install -m 0755 "${cache}/nupkg/runtimes/${NUGET_RID}/native/libonnxruntime.so" "${so}.part"; \
+        fi; \
+        mv "${so}.part" "${so}"; \
+        rm -rf "${cache}/ort.tgz.part" "${cache}/ort.whl.part" "${cache}/ort.nupkg.part" \
+            "${cache}/wheel" "${cache}/nupkg" "${cache}/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}"; \
     fi; \
+    install -m 0755 "${so}" /usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}; \
     ln -sf /usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION} /usr/lib/libonnxruntime.so; \
-    rm -rf /tmp/ort.tgz /tmp/ort.nupkg /tmp/ort-nuget /tmp/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}; \
     ldconfig
 ENV ONNX_PATH=/usr/lib/libonnxruntime.so
 

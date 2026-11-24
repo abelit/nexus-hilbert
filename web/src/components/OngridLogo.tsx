@@ -1,27 +1,132 @@
 // OngridLogo — inline SVG so we get sharpness at any size + can theme on
-// dark/light without an extra HTTP fetch. Source of truth is the same
-// gradient pillars shipped at public/ongrid-logo.svg (used for favicon).
+// light/dark without an extra HTTP fetch.
 //
-// Color stops match the design:
-//   left pillar: #F15BC7 → #8C6DF0 → #5269F4
-//   right pillar: #1456B5 → #30A6D0 → #57D6D8
-//   back rails:  #7182AD (cool slate; toned down to 0.6 alpha on dark UI
-//                so the foreground pillars carry the brand energy)
+// Artwork is the Nexus-Hilbert "Duo Glow" symbol (deliverables/duo-glow-kit):
+// four corner brackets converging on a frosted diamond. Static copies ship at
+// public/ongrid-logo.svg and public/favicon.svg (light variant).
+//
+// The kit has two approved variants — pastel for light surfaces, brighter
+// brackets for dark UI — and brand rules forbid the light one on a dark
+// background, where the right bracket loses contrast. Both are rendered and
+// Tailwind's `.dark` class picks one, so every surface (including the sidebar
+// and sign-in, which follow the app theme) gets the right variant.
+//
+// Color stops match the approved kit:
+//   light: left #E75DC9 → #956BEB, right #226FBC → #4EC9D5
+//   dark:  left #F27BDA → #AE90FF, right #4E96E8 → #6FE0F0
+//   core glow layers: magenta / violet / azure / cyan + frosted white
+
+import { useId } from 'react';
 
 type Props = {
   /** Pixel size (square). Default 28 — sidebar / header scale. */
   size?: number;
   className?: string;
-  /** title for screen readers (default "ongrid"). */
+  /** title for screen readers (default "Ongrid"). */
   title?: string;
 };
 
+type Theme = 'light' | 'dark';
+
+const BRACKET_PATHS = {
+  tl: 'M36 102V48A12 12 0 0 1 48 36H102V66H66V102Z',
+  tr: 'M154 36H208A12 12 0 0 1 220 48V102H190V66H154Z',
+  br: 'M220 154V208A12 12 0 0 1 208 220H154V190H190V154Z',
+  bl: 'M102 220H48A12 12 0 0 1 36 208V154H66V190H102Z',
+} as const;
+
+const CORE_PATH = 'M128 86L170 128L128 170L86 128Z';
+
+const BRACKET_KEYS = ['tl', 'tr', 'br', 'bl'] as const;
+
+// Gradient anchors in the 256-unit source grid.
+const BRACKET_ANCHORS: Record<(typeof BRACKET_KEYS)[number], readonly [number, number, number, number]> = {
+  tl: [36, 36, 102, 102],
+  tr: [220, 36, 154, 102],
+  br: [220, 220, 154, 154],
+  bl: [36, 220, 102, 154],
+};
+
+const CORE_LAYERS = [
+  { name: 'mag', cx: 96, cy: 96 },
+  { name: 'vio', cx: 96, cy: 160 },
+  { name: 'azr', cx: 160, cy: 96 },
+  { name: 'cyn', cx: 160, cy: 160 },
+] as const;
+
+const PALETTES = {
+  light: {
+    warm: ['#E75DC9', '#956BEB'],
+    cool: ['#226FBC', '#4EC9D5'],
+    mag: '#D94FC2',
+    vio: '#956BEB',
+    azr: '#2C7FCC',
+    cyn: '#4EC9D5',
+    glowPeak: '0.62',
+  },
+  dark: {
+    warm: ['#F27BDA', '#AE90FF'],
+    cool: ['#4E96E8', '#6FE0F0'],
+    mag: '#E86BCF',
+    vio: '#A98CFF',
+    azr: '#4E96E8',
+    cyn: '#6FE0F0',
+    glowPeak: '0.56',
+  },
+} as const;
+
+function Symbol({ theme, idPrefix, className }: { theme: Theme; idPrefix: string; className?: string }) {
+  const palette = PALETTES[theme];
+  const id = (name: string) => `${idPrefix}-${name}`;
+
+  return (
+    <g className={className}>
+      <defs>
+        {BRACKET_KEYS.map(key => {
+          const [x1, y1, x2, y2] = BRACKET_ANCHORS[key];
+          const [from, to] = key === 'tl' || key === 'bl' ? palette.warm : palette.cool;
+          return (
+            <linearGradient key={key} id={id(`bracket-${key}`)} x1={x1} y1={y1} x2={x2} y2={y2} gradientUnits="userSpaceOnUse">
+              <stop offset="0" stopColor={from} />
+              <stop offset="1" stopColor={to} />
+            </linearGradient>
+          );
+        })}
+        {CORE_LAYERS.map(layer => (
+          <radialGradient key={layer.name} id={id(`core-${layer.name}`)} cx={layer.cx} cy={layer.cy} r="58" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor={palette[layer.name]} stopOpacity="0.95" />
+            <stop offset="0.5" stopColor={palette[layer.name]} stopOpacity="0.42" />
+            <stop offset="1" stopColor={palette[layer.name]} stopOpacity="0" />
+          </radialGradient>
+        ))}
+        <radialGradient id={id('core-glow')} cx="121" cy="117" r="52" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#FFFFFF" stopOpacity={palette.glowPeak} />
+          <stop offset="0.5" stopColor="#F4F7FF" stopOpacity="0.24" />
+          <stop offset="1" stopColor="#F4F7FF" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      {BRACKET_KEYS.map(key => (
+        <path key={key} fill={`url(#${id(`bracket-${key}`)})`} d={BRACKET_PATHS[key]} />
+      ))}
+      <path fill="#F4F7FF" d={CORE_PATH} />
+      {CORE_LAYERS.map(layer => (
+        <path key={layer.name} fill={`url(#${id(`core-${layer.name}`)})`} d={CORE_PATH} />
+      ))}
+      <path fill={`url(#${id('core-glow')})`} d={CORE_PATH} />
+    </g>
+  );
+}
+
 export function OngridLogo({ size = 28, className, title = 'Ongrid' }: Props) {
+  // useId keeps gradient ids unique when the logo appears more than once on a
+  // page; strip the colons React adds so the ids stay valid in url(#...).
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 512 512"
+      viewBox="0 0 256 256"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
@@ -29,22 +134,8 @@ export function OngridLogo({ size = 28, className, title = 'Ongrid' }: Props) {
       aria-label={title}
     >
       <title>{title}</title>
-      <defs>
-        <linearGradient id="ongridLeftPillar" x1="154" y1="88" x2="225" y2="432" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#F15BC7" />
-          <stop offset="0.52" stopColor="#8C6DF0" />
-          <stop offset="1" stopColor="#5269F4" />
-        </linearGradient>
-        <linearGradient id="ongridRightPillar" x1="291" y1="69" x2="362" y2="413" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#1456B5" />
-          <stop offset="0.56" stopColor="#30A6D0" />
-          <stop offset="1" stopColor="#57D6D8" />
-        </linearGradient>
-      </defs>
-      <rect x="54" y="178" width="354" height="74" rx="37" transform="rotate(-14 54 178)" fill="#7182AD" fillOpacity="0.65" />
-      <rect x="102" y="307" width="354" height="74" rx="37" transform="rotate(-14 102 307)" fill="#7182AD" fillOpacity="0.65" />
-      <rect x="115" y="93" width="76" height="346" rx="38" transform="rotate(-14 115 93)" fill="url(#ongridLeftPillar)" />
-      <rect x="252" y="74" width="76" height="346" rx="38" transform="rotate(-14 252 74)" fill="url(#ongridRightPillar)" />
+      <Symbol theme="light" idPrefix={`${uid}l`} className="dark:hidden" />
+      <Symbol theme="dark" idPrefix={`${uid}d`} className="hidden dark:block" />
     </svg>
   );
 }

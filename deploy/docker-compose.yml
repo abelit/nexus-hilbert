@@ -49,6 +49,10 @@ services:
         # build host that can't reach proxy.golang.org still works; export
         # GOPROXY to point at a different mirror / corporate Athens.
         GOPROXY: ${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}
+        # Optional ONNX Runtime tarball URL. Empty means the Dockerfile's
+        # own source order (GitHub release, then nuget.org); export this to
+        # point at a mirror or a local artifact on an air-gapped host.
+        ONNXRUNTIME_TARBALL_URL: ${ONNXRUNTIME_TARBALL_URL:-}
     image: ongrid:${VERSION:-dev}
     container_name: ongrid
     restart: unless-stopped
