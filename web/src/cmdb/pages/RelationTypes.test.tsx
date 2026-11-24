@@ -121,13 +121,17 @@ describe('the list', () => {
 
 describe('writes', () => {
   it('disables them for a non-administrator with a reason', async () => {
+    const user = userEvent.setup();
     useAuth.setState({ role: 'user' });
     server.use(http.get('/api/v1/cmdb/relation-types', () => HttpResponse.json({ items: rows, total: rows.length })));
     renderPage();
 
     expect(await screen.findByRole('button', { name: /新建/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '编辑 depends_on' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '删除 depends_on' })).toBeDisabled();
+    // The row actions live in the overflow menu, like the resource list.
+    await user.click(screen.getByRole('button', { name: '关系类型 depends_on 的更多操作' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: '编辑' })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(menu).getByRole('menuitem', { name: '删除' })).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('creates one and refreshes the list', async () => {
@@ -190,11 +194,24 @@ describe('writes', () => {
     );
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: '删除 depends_on' }));
+    await user.click(await screen.findByRole('button', { name: '关系类型 depends_on 的更多操作' }));
+    await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: '删除' }));
     // THE FIRST CLICK OPENS THE CONFIRMATION; nothing is deleted yet.
     expect(deleted).toBe(0);
     await user.click(screen.getByRole('button', { name: '取消' }));
     expect(deleted).toBe(0);
+  });
+
+  it('opens a prefilled edit form from the row menu', async () => {
+    const user = userEvent.setup();
+    server.use(http.get('/api/v1/cmdb/relation-types', () => HttpResponse.json({ items: rows, total: rows.length })));
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '关系类型 depends_on 的更多操作' }));
+    await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: '编辑' }));
+
+    expect(await screen.findByLabelText('名称')).toHaveValue('depends_on');
+    expect(screen.getByLabelText('颜色')).toHaveValue('#6366f1');
   });
 
   it('opens a prefilled create form from an AI suggestion', async () => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
@@ -63,6 +63,7 @@ export default function ModelRelationsPage() {
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
   const [createAssist, setCreateAssist] = useState(false);
+  const [editing, setEditing] = useState<ModelRelation | null>(null);
   const [models, setModels] = useState<CIType[]>([]);
   const [relationTypes, setRelationTypes] = useState<RelationType[]>([]);
   const [formLoading, setFormLoading] = useState(false);
@@ -108,8 +109,8 @@ export default function ModelRelationsPage() {
     const child = row.child.type.alias || row.child.type.name;
     const ok = await confirmAction(
       tr(
-        `删除「${parent} → ${child}」这条模型关系？已经存在的实例关系不会被删除。`,
-        `Delete the model relation “${parent} → ${child}”? Instance relations that already exist are not removed.`,
+        `删除「${parent} → ${child}」这条模型关系？已经存在的实例关系（关联关系）会保留，但不再受这条模型规则约束，层级树也不会再从它展开。`,
+        `Delete the model relation “${parent} → ${child}”? Existing instance relations are kept, but no longer follow this model rule, and the hierarchy no longer expands through it.`,
       ),
     );
     if (!ok) return;
@@ -140,6 +141,18 @@ export default function ModelRelationsPage() {
       setCreating(true);
     } catch (error) {
       toast.error(describeError(error, tr('无法打开新建关系', 'Could not open the relation form')));
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const openEdit = async (row: ModelRelation) => {
+    setFormLoading(true);
+    try {
+      await loadFormLookups();
+      setEditing(row);
+    } catch (error) {
+      toast.error(describeError(error, tr('无法打开编辑关系', 'Could not open the relation editor')));
     } finally {
       setFormLoading(false);
     }
@@ -348,6 +361,20 @@ export default function ModelRelationsPage() {
                   }
                 />
                 <Hint content={adminTip}>
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    type="button"
+                    onClick={() => void openEdit(row)}
+                    disabled={!isAdmin || formLoading}
+                    aria-label={tr(`编辑 ${row.parent.type.name} → ${row.child.type.name}`, `Edit ${row.parent.type.name} → ${row.child.type.name}`)}
+                    title={tr(`编辑 ${row.parent.type.name} → ${row.child.type.name}`, `Edit ${row.parent.type.name} → ${row.child.type.name}`)}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0 text-text-faint hover:bg-card hover:text-text"
+                  >
+                    <Pencil size={13} aria-hidden="true" />
+                  </Button>
+                </Hint>
+                <Hint content={adminTip}>
                 <Button
                   variant="plain"
                   size="sm"
@@ -386,18 +413,35 @@ export default function ModelRelationsPage() {
         />
       )}
 
+      {editing && (
+        <RelationFormModal
+          relation={editing}
+          models={models}
+          relationTypes={relationTypes}
+          onClose={() => setEditing(null)}
+          onSaved={async (message) => {
+            setEditing(null);
+            toast.success(message);
+            await load(true);
+          }}
+        />
+      )}
+
       {dialog}
     </div>
   );
 }
 
 function RelationFormModal({
+  relation = null,
   models,
   relationTypes,
   initialAssist = false,
   onClose,
   onSaved,
 }: {
+  /** An existing pair whose rule is being edited; the pair itself is fixed. */
+  relation?: ModelRelation | null;
   models: CIType[];
   relationTypes: RelationType[];
   initialAssist?: boolean;
@@ -406,21 +450,23 @@ function RelationFormModal({
 }) {
   const { tr, locale } = useI18n();
   const { isAdmin } = usePermissions();
-  const [sourceID, setSourceID] = useState('');
-  const [targetID, setTargetID] = useState('');
-  const [typeID, setTypeID] = useState('');
-  const [constraint, setConstraint] = useState('0');
+  const { confirmAction, dialog } = useDialogs();
+  const editing = relation !== null;
+  const [sourceID, setSourceID] = useState(String(relation?.parent.type.id ?? ''));
+  const [targetID, setTargetID] = useState(String(relation?.child.type.id ?? ''));
+  const [typeID, setTypeID] = useState(String(relation?.child.relation_type.id ?? ''));
+  const [constraint, setConstraint] = useState(relation?.child.constraint ?? '0');
   const [sourceAttributes, setSourceAttributes] = useState<TypeAttribute[]>([]);
   const [targetAttributes, setTargetAttributes] = useState<TypeAttribute[]>([]);
-  const [pairs, setPairs] = useState<AttributePair[]>([{ source: '', target: '' }]);
+  const [pairs, setPairs] = useState<AttributePair[]>(() => initialPairs(relation));
   const [attributesLoading, setAttributesLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [assistOpen, setAssistOpen] = useState(initialAssist);
+  const [assistOpen, setAssistOpen] = useState(initialAssist && relation === null);
 
   useCMDBAssistantFacts({
     form_kind: 'model_relation',
-    form_mode: 'create',
+    form_mode: editing ? 'edit' : 'create',
     source_model: models.find((model) => String(model.id) === sourceID)?.name,
     target_model: models.find((model) => String(model.id) === targetID)?.name,
   });
@@ -472,6 +518,20 @@ function RelationFormModal({
     setPairs((current) => current.map((pair) => ({ ...pair, source: '', target: '' })));
   };
 
+  // A deprecated type already on the relation must stay selectable; otherwise
+  // opening the editor would silently drop it from the value.
+  const typeOptions = useMemo(() => {
+    const options = relationTypes.map((type) => ({ value: String(type.id), label: type.name }));
+    if (relation) {
+      const current = relation.child.relation_type;
+      const value = String(current.id ?? '');
+      if (value && !options.some((option) => option.value === value)) {
+        options.unshift({ value, label: current.name || value });
+      }
+    }
+    return options;
+  }, [relation, relationTypes]);
+
   const submit = async () => {
     if (!sourceID || !targetID || !typeID) {
       setErr(tr('请选择源 CI 类型、目标 CI 类型和关联类型', 'Choose the source type, the target type and the relation type'));
@@ -486,23 +546,34 @@ function RelationFormModal({
       setErr(tr('属性关联需要同时选择源属性和目标属性', 'An attribute association needs both a source and a target attribute'));
       return;
     }
+    const filled = pairs.filter((pair) => pair.source && pair.target);
+    const parentAttrIDs = filled.map((pair) => Number(pair.source));
+    const childAttrIDs = filled.map((pair) => Number(pair.target));
+
+    // PROTECTION: an edit replaces what the hierarchy and topology expand
+    // through, and every relation the rule governs changes with it. A create
+    // has nothing to protect yet, so only an edit asks.
+    if (relation && relationChanged(relation, { typeID, constraint, parentAttrIDs, childAttrIDs })) {
+      const ok = await confirmAction(
+        tr(
+          `保存对「${relation.parent.type.alias || relation.parent.type.name} → ${relation.child.type.alias || relation.child.type.name}」的修改？层级、服务树和拓扑会按新规则展开；已经存在的实例关系（关联关系）不会被改写或删除。`,
+          `Save the change to “${relation.parent.type.alias || relation.parent.type.name} → ${relation.child.type.alias || relation.child.type.name}”? The hierarchy, service trees and topology will follow the new rule; existing instance relations are not rewritten or removed.`,
+        ),
+      );
+      if (!ok) return;
+    }
+
     setSubmitting(true);
     setErr(null);
     try {
-      const filled = pairs.filter((pair) => pair.source && pair.target);
       await saveRelation(sourceID, targetID, {
         relation_type_id: Number(typeID),
         constraint,
-        ...(filled.length > 0
-          ? {
-              parent_attr_ids: filled.map((pair) => Number(pair.source)),
-              child_attr_ids: filled.map((pair) => Number(pair.target)),
-            }
-          : {}),
+        ...(filled.length > 0 ? { parent_attr_ids: parentAttrIDs, child_attr_ids: childAttrIDs } : {}),
       });
-      await onSaved(tr('已创建模型关系', 'Relation created'));
+      await onSaved(editing ? tr('已更新模型关系', 'Relation updated') : tr('已创建模型关系', 'Relation created'));
     } catch (error) {
-      setErr(describeError(error, tr('创建失败', 'Could not create it')));
+      setErr(describeError(error, editing ? tr('更新失败', 'Could not update it') : tr('创建失败', 'Could not create it')));
     } finally {
       setSubmitting(false);
     }
@@ -515,7 +586,7 @@ function RelationFormModal({
       open
       onClose={onClose}
       size="lg"
-      title={tr('新增关系', 'New relation')}
+      title={editing ? tr('编辑关系', 'Edit relation') : tr('新增关系', 'New relation')}
       footer={
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
@@ -533,22 +604,29 @@ function RelationFormModal({
         </div>
       )}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <AIActionButton
-          zh="AI 建议关系"
-          en="AI suggest relation"
-          onClick={() => setAssistOpen(true)}
-          disabled={!isAdmin}
-        />
+        {!editing && (
+          <AIActionButton
+            zh="AI 建议关系"
+            en="AI suggest relation"
+            onClick={() => setAssistOpen(true)}
+            disabled={!isAdmin}
+          />
+        )}
         <Button
           variant="ghost"
           size="sm"
           type="button"
           onClick={() =>
             openAssistant({
-              prompt: tr(
-                '我在 CMDB 里新建一条模型关系（源 CI 类型 → 目标 CI 类型）。请结合当前页面上下文帮我确认关系类型、关系约束和属性关联，并说明对层级树的影响。不要直接写入数据。',
-                'I am creating a CMDB model relation (source CI type → target CI type). Use the current page context to help confirm the relation type, constraint and attribute association, and explain the hierarchy impact. Do not write data.',
-              ),
+              prompt: editing
+                ? tr(
+                    '我在 CMDB 里编辑一条已有的模型关系。请结合当前页面上下文帮我确认关系类型、关系约束和属性关联是否合理，并说明对层级和服务树的影响。不要直接写入数据。',
+                    'I am editing an existing CMDB model relation. Use the current page context to check whether its relation type, constraint and attribute association are sound, and explain the impact on the hierarchy and service trees. Do not write data.',
+                  )
+                : tr(
+                    '我在 CMDB 里新建一条模型关系（源 CI 类型 → 目标 CI 类型）。请结合当前页面上下文帮我确认关系类型、关系约束和属性关联，并说明对层级树的影响。不要直接写入数据。',
+                    'I am creating a CMDB model relation (source CI type → target CI type). Use the current page context to help confirm the relation type, constraint and attribute association, and explain the hierarchy impact. Do not write data.',
+                  ),
             })
           }
           className="inline-flex items-center gap-1.5 text-text-muted"
@@ -559,39 +637,75 @@ function RelationFormModal({
           <span className="text-[11px] text-text-faint">{tr('AI 生成需要管理员权限', 'AI suggestions require an administrator')}</span>
         )}
       </div>
+      {editing && relation && (
+        <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] leading-5 text-amber-700 dark:text-amber-300">
+          {tr(
+            '这条模型关系已经存在。修改关系类型、约束或属性关联会立即影响层级、服务树和拓扑；已经存在的实例关系（关联关系）不会被改写或删除。',
+            'This model relation already exists. Changing its relation type, constraint or attribute association affects the hierarchy, service trees and topology immediately; existing instance relations are not rewritten or removed.',
+          )}
+        </p>
+      )}
       <p className="mb-4 text-[11px] leading-5 text-text-faint">
         {tr(
-          '配置源 CI 类型到目标 CI 类型的关系；完成时点击保存。',
-          'Configure the relation from the source CI type to the target; save when done.',
+          editing
+            ? '源 CI 类型和目标 CI 类型是这条关系的身份，不能在编辑时改变；修改完成后点击保存。'
+            : '配置源 CI 类型到目标 CI 类型的关系；完成时点击保存。',
+          editing
+            ? 'The source and target CI types identify this relation and cannot change while editing; save when done.'
+            : 'Configure the relation from the source CI type to the target; save when done.',
         )}
       </p>
       <div className="flex flex-col gap-4">
-        <div>
-          <Label htmlFor="cmdb-relation-source">{tr('源 CI 类型', 'Source CI type')}</Label>
-          <Select
-            id="cmdb-relation-source"
-            label={tr('源 CI 类型', 'Source CI type')}
-            placeholder={tr('选择源 CI 类型', 'Select source CI type')}
-            value={sourceID}
-            onValueChange={chooseSource}
-            options={options}
-            searchable
-            className="mt-1 w-full"
-          />
-        </div>
-        <div>
-          <Label htmlFor="cmdb-relation-target">{tr('目标 CI 类型', 'Target CI type')}</Label>
-          <Select
-            id="cmdb-relation-target"
-            label={tr('目标 CI 类型', 'Target CI type')}
-            placeholder={tr('选择目标 CI 类型', 'Select target CI type')}
-            value={targetID}
-            onValueChange={chooseTarget}
-            options={options}
-            searchable
-            className="mt-1 w-full"
-          />
-        </div>
+        {editing && relation ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {([
+              { label: tr('源 CI 类型', 'Source CI type'), model: relation.parent.type },
+              { label: tr('目标 CI 类型', 'Target CI type'), model: relation.child.type },
+            ] as const).map((side) => (
+              <div key={side.label}>
+                <Label>{side.label}</Label>
+                <div className="mt-1 flex min-w-0 items-center gap-2 rounded-md border border-border bg-bg/40 px-2.5 py-2">
+                  <CMDBIcon value={side.model.icon} size={16} label={side.model.alias || side.model.name} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-medium text-text">
+                      {side.model.alias || side.model.name}
+                    </span>
+                    <span className="block truncate font-mono text-[10px] text-text-faint">{side.model.name}</span>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div>
+              <Label htmlFor="cmdb-relation-source">{tr('源 CI 类型', 'Source CI type')}</Label>
+              <Select
+                id="cmdb-relation-source"
+                label={tr('源 CI 类型', 'Source CI type')}
+                placeholder={tr('选择源 CI 类型', 'Select source CI type')}
+                value={sourceID}
+                onValueChange={chooseSource}
+                options={options}
+                searchable
+                className="mt-1 w-full"
+              />
+            </div>
+            <div>
+              <Label htmlFor="cmdb-relation-target">{tr('目标 CI 类型', 'Target CI type')}</Label>
+              <Select
+                id="cmdb-relation-target"
+                label={tr('目标 CI 类型', 'Target CI type')}
+                placeholder={tr('选择目标 CI 类型', 'Select target CI type')}
+                value={targetID}
+                onValueChange={chooseTarget}
+                options={options}
+                searchable
+                className="mt-1 w-full"
+              />
+            </div>
+          </>
+        )}
         <div>
           <Label htmlFor="cmdb-relation-type">{tr('关联类型', 'Relation type')}</Label>
           <Select
@@ -600,7 +714,7 @@ function RelationFormModal({
             placeholder={tr('选择关联类型', 'Select relation type')}
             value={typeID}
             onValueChange={setTypeID}
-            options={relationTypes.map((type) => ({ value: String(type.id), label: type.name }))}
+            options={typeOptions}
             className="mt-1 w-full"
           />
         </div>
@@ -625,33 +739,75 @@ function RelationFormModal({
           loading={attributesLoading}
         />
       </div>
-      <FormAssistDialog
-        open={assistOpen}
-        onClose={() => setAssistOpen(false)}
-        mode="model_relation"
-        locale={locale}
-        models={models.map((model) => ({ id: Number(model.id), name: model.name, alias: model.alias }))}
-        relationTypes={relationTypes.map((type) => ({ id: type.id, name: type.name }))}
-        sourceModelRef={sourceID || undefined}
-        targetModelRef={targetID || undefined}
-        onAccept={(suggested) => {
-          setSourceID(String(suggested.source_model_id));
-          setTargetID(String(suggested.target_model_id));
-          setTypeID(String(suggested.relation_type_id));
-          // Use the setter, not chooseConstraint: that handler clears mappings,
-          // and these mappings are exactly what the suggestion just resolved.
-          setConstraint(suggested.constraint);
-          const count = Math.min(suggested.parent_attr_ids.length, suggested.child_attr_ids.length);
-          setPairs(
-            count > 0
-              ? Array.from({ length: count }, (_, index) => ({
-                  source: String(suggested.parent_attr_ids[index]),
-                  target: String(suggested.child_attr_ids[index]),
-                }))
-              : [{ source: '', target: '' }],
-          );
-        }}
-      />
+      {!editing && (
+        <FormAssistDialog
+          open={assistOpen}
+          onClose={() => setAssistOpen(false)}
+          mode="model_relation"
+          locale={locale}
+          models={models.map((model) => ({ id: Number(model.id), name: model.name, alias: model.alias }))}
+          relationTypes={relationTypes.map((type) => ({ id: type.id, name: type.name }))}
+          sourceModelRef={sourceID || undefined}
+          targetModelRef={targetID || undefined}
+          onAccept={(suggested) => {
+            setSourceID(String(suggested.source_model_id));
+            setTargetID(String(suggested.target_model_id));
+            setTypeID(String(suggested.relation_type_id));
+            // Use the setter, not chooseConstraint: that handler clears mappings,
+            // and these mappings are exactly what the suggestion just resolved.
+            setConstraint(suggested.constraint);
+            const count = Math.min(suggested.parent_attr_ids.length, suggested.child_attr_ids.length);
+            setPairs(
+              count > 0
+                ? Array.from({ length: count }, (_, index) => ({
+                    source: String(suggested.parent_attr_ids[index]),
+                    target: String(suggested.child_attr_ids[index]),
+                  }))
+                : [{ source: '', target: '' }],
+            );
+          }}
+        />
+      )}
+      {/* The protection confirmation is local to this modal, so it renders its
+          own dialog rather than reaching for the page's. */}
+      {dialog}
     </Modal>
+  );
+}
+
+/** The attribute pairs a stored relation carries, in both ends' order. */
+function relationPairIDs(relation: ModelRelation): { parent: number[]; child: number[] } {
+  const parent = relation.child.parent_attr_ids?.length
+    ? relation.child.parent_attr_ids
+    : relation.parent.parent_attr_ids ?? [];
+  const child = relation.child.child_attr_ids?.length
+    ? relation.child.child_attr_ids
+    : relation.parent.child_attr_ids ?? [];
+  return { parent, child };
+}
+
+/** The form's opening pairs: the relation's mapping, or one empty row. */
+function initialPairs(relation: ModelRelation | null): AttributePair[] {
+  if (!relation) return [{ source: '', target: '' }];
+  const { parent, child } = relationPairIDs(relation);
+  const count = Math.min(parent.length, child.length);
+  if (count === 0) return [{ source: '', target: '' }];
+  return Array.from({ length: count }, (_, index) => ({
+    source: String(parent[index]),
+    target: String(child[index]),
+  }));
+}
+
+/** Whether an edit would actually change the rule (and so needs confirming). */
+function relationChanged(
+  relation: ModelRelation,
+  next: { typeID: string; constraint: string; parentAttrIDs: number[]; childAttrIDs: number[] },
+): boolean {
+  const current = relationPairIDs(relation);
+  return (
+    Number(next.typeID) !== Number(relation.child.relation_type.id) ||
+    next.constraint !== (relation.child.constraint ?? '0') ||
+    JSON.stringify(next.parentAttrIDs) !== JSON.stringify(current.parent) ||
+    JSON.stringify(next.childAttrIDs) !== JSON.stringify(current.child)
   );
 }

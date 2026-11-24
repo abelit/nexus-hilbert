@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useCMDBAssistantFacts } from '../lib/assistantFacts';
-import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/DropdownMenu';
 import { Hint } from '@/components/ui/Tooltip';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
@@ -139,11 +140,12 @@ export default function RelationTypesPage() {
     {
       key: 'name',
       header: tr('名称', 'Name'),
-      // THE INFORMATION COLUMN ABSORBS THE SPARE WIDTH. Auto layout would
-      // otherwise spread it across every column, which widens the operation cell
-      // past its buttons — and the design language fixes that column at its
-      // content's width.
-      width: 'w-full min-w-[140px]',
+      // THE NAME COLUMN TAKES A SHARE OF THE WIDTH, NOT ALL OF IT. `w-full`
+      // made a wide window give the name hundreds of pixels of empty space and
+      // squeezed the semantic columns into two-line islands at the far right.
+      // These percentages keep the dictionary balanced from 1280 to 1920, and
+      // the min widths keep every column readable when the table scrolls.
+      width: 'w-[30%] min-w-[10rem]',
       sortable: true,
       sortValue: (row) => row.name,
       cell: (row) => (
@@ -176,6 +178,7 @@ export default function RelationTypesPage() {
       key: 'semantics',
       header: tr('语义', 'Semantics'),
       hideable: true,
+      width: 'w-[13%] min-w-[7.5rem]',
       cell: (row) => {
         const category = CATEGORY_LABELS[row.category];
         const direction = DIRECTION_LABELS[row.direction];
@@ -207,6 +210,7 @@ export default function RelationTypesPage() {
       key: 'inverse',
       header: tr('反向关系', 'Inverse'),
       hideable: true,
+      width: 'w-[13%] min-w-[8rem]',
       // The connector reads inverse_of to reverse the endpoints. Keep it next
       // to direction rather than in a tooltip: it is the operator-visible half
       // of a direction mapping that the data cannot show.
@@ -230,6 +234,7 @@ export default function RelationTypesPage() {
       key: 'propagation',
       header: tr('传播', 'Propagation'),
       hideable: true,
+      width: 'w-[11%] min-w-[7rem]',
       cell: (row) =>
         row.propagates_default ? (
           <span className="whitespace-nowrap text-[11px] text-text-muted">
@@ -243,6 +248,7 @@ export default function RelationTypesPage() {
       key: 'color',
       header: tr('颜色', 'Colour'),
       hideable: true,
+      width: 'w-[9%] min-w-[6rem]',
       // The name cell already carries the colour dot; the hex is secondary and
       // yields its width to identity/semantics on narrow screens.
       hideBelow: 900,
@@ -258,6 +264,7 @@ export default function RelationTypesPage() {
       header: tr('最近修改', 'Last changed'),
       hideable: true,
       defaultHidden: true,
+      width: 'w-[12%]',
       sortable: true,
       sortValue: (row) => row.updated_at ?? '',
       cell: (row) => (
@@ -320,9 +327,14 @@ export default function RelationTypesPage() {
             error={err}
             onRetry={() => void load()}
             storageKey="relation-types"
+            // Every data column is proportional, so the action column gets a
+            // share of the remainder instead of absorbing all of it; without
+            // this the two icons sat at the left of a 380px cell on a wide
+            // window. Its min-content width still keeps them from being cut.
+            actionsWidth="w-[5%]"
             empty={tr('还没有关系类型', 'No relation types yet')}
             actions={(row) => (
-              <>
+              <div className="flex items-center gap-1 whitespace-nowrap">
                 <AIActionButton
                   iconOnly
                   zh="AI 解读关系类型"
@@ -331,35 +343,50 @@ export default function RelationTypesPage() {
                     openAssistant({ prompt: explainRelationTypePrompt(row.name, row.color, locale) })
                   }
                 />
-                <Hint content={adminTip}>
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    type="button"
-                    onClick={() => setForm({ mode: 'edit', row })}
-                    disabled={!isAdmin}
-                    aria-label={tr(`编辑 ${row.name}`, `Edit ${row.name}`)}
-                    className="inline-flex items-center gap-1"
+                {/* THE OPERATION COLUMN STAYS NARROW. Two frequently used
+                    actions stay icons; edit and delete live behind a menu, the
+                    same split the resource list uses. */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="plain"
+                        size="sm"
+                        type="button"
+                        aria-label={tr(`关系类型 ${row.name} 的更多操作`, `More actions for relation type ${row.name}`)}
+                        title={
+                          adminTip ??
+                          tr(`关系类型 ${row.name} 的更多操作`, `More actions for relation type ${row.name}`)
+                        }
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0 text-text-faint hover:text-text"
+                      />
+                    }
                   >
-                    <Pencil size={12} aria-hidden="true" />
-                    {tr('编辑', 'Edit')}
-                  </Button>
-                </Hint>
-                <Hint content={adminTip}>
-                  <Button
-                    variant="dangerGhost"
-                    size="sm"
-                    type="button"
-                    onClick={() => void handleDelete(row)}
-                    disabled={!isAdmin}
-                    aria-label={tr(`删除 ${row.name}`, `Delete ${row.name}`)}
-                    className="inline-flex items-center gap-1"
-                  >
-                    <Trash2 size={12} aria-hidden="true" />
-                    {tr('删除', 'Delete')}
-                  </Button>
-                </Hint>
-              </>
+                    <MoreHorizontal size={14} aria-hidden="true" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40 p-1">
+                    <DropdownMenuItem
+                      onClick={() => setForm({ mode: 'edit', row })}
+                      disabled={!isAdmin}
+                      title={adminTip}
+                      className="gap-2"
+                    >
+                      <Pencil size={12} aria-hidden="true" />
+                      {tr('编辑', 'Edit')}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => void handleDelete(row)}
+                      disabled={!isAdmin}
+                      title={adminTip}
+                      className="gap-2 text-red-600 dark:text-red-300"
+                    >
+                      <Trash2 size={12} aria-hidden="true" />
+                      {tr('删除', 'Delete')}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             )}
           />
         </Card>
