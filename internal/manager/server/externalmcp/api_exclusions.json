@@ -24,6 +24,7 @@
   {"method":"POST","path":"/v1/aiops/cmdb/form-assist","reason":"Browser-only one-shot LLM form suggestion; it fills a console form and is not a stable external API operation."},
   {"method":"POST","path":"/v1/chat/sessions/{id}/attachments","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
   {"method":"GET","path":"/v1/chat/sessions/{id}/attachments/{attachmentID}","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
+  {"method":"GET","path":"/v1/chat/sessions/{id}/context","reason":"The context usage snapshot belongs to the authenticated chat session and is used by the console composer."},
   {"method":"POST","path":"/v1/chat/sessions/{id}/messages/stream","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
   {"method":"GET","path":"/v1/devices/{device_id}/shell","reason":"Browser, upload, or temporary access ticket endpoint."},
   {"method":"POST","path":"/v1/devices/{device_id}/shell/tickets","reason":"Browser, upload, or temporary access ticket endpoint."},
